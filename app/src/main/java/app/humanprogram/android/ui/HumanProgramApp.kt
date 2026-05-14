@@ -109,7 +109,7 @@ fun HumanProgramApp(
                 MainTab.Today -> TodayScreen(viewModel)
                 MainTab.Backlog -> BacklogScreen(viewModel)
                 MainTab.Calendar -> CalendarScreen()
-                MainTab.Routines -> RoutinesScreen()
+                MainTab.Routines -> RoutinesScreen(viewModel)
                 MainTab.Settings -> SettingsScreen(viewModel)
             }
         }
@@ -125,9 +125,43 @@ private fun TodayScreen(viewModel: HumanProgramViewModel) {
     ) {
         item {
             Header(
-                title = "Today",
-                subtitle = viewModel.todayLabel
+                title = viewModel.selectedDateTitle,
+                subtitle = viewModel.selectedDateLabel
             )
+        }
+
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    modifier = Modifier.weight(1f),
+                    onClick = viewModel::goToPreviousDay
+                ) {
+                    Text("Previous")
+                }
+                OutlinedButton(
+                    modifier = Modifier.weight(1f),
+                    onClick = viewModel::goToToday
+                ) {
+                    Text("Today")
+                }
+                OutlinedButton(
+                    modifier = Modifier.weight(1f),
+                    onClick = viewModel::goToNextDay
+                ) {
+                    Text("Next")
+                }
+            }
+        }
+
+        if (viewModel.isPastDate) {
+            item {
+                SectionCard(title = "Historical Page") {
+                    Text("Past days are protected from accidental edits.")
+                }
+            }
         }
 
         item {
@@ -159,24 +193,27 @@ private fun TodayScreen(viewModel: HumanProgramViewModel) {
                     viewModel.todayTasks.forEach { task ->
                         TaskRow(
                             task = task,
+                            enabled = viewModel.canEditSelectedDate,
                             onToggle = { viewModel.toggleTask(task.id) }
                         )
                     }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        OutlinedTextField(
-                            modifier = Modifier.weight(1f),
-                            value = viewModel.newTaskTitle,
-                            onValueChange = viewModel::updateNewTaskTitle,
-                            label = { Text("New task") },
-                            singleLine = true
-                        )
-                        Button(onClick = viewModel::addManualTask) {
-                            Text("Add")
+                    if (viewModel.canEditSelectedDate) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            OutlinedTextField(
+                                modifier = Modifier.weight(1f),
+                                value = viewModel.newTaskTitle,
+                                onValueChange = viewModel::updateNewTaskTitle,
+                                label = { Text("New task") },
+                                singleLine = true
+                            )
+                            Button(onClick = viewModel::addManualTask) {
+                                Text("Add")
+                            }
                         }
                     }
 
@@ -223,29 +260,74 @@ private fun BacklogScreen(viewModel: HumanProgramViewModel) {
         }
 
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                SegmentedButton(
+                    selected = !viewModel.backlogProjectView,
+                    onClick = { viewModel.updateBacklogProjectView(false) },
+                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
+                ) {
+                    Text("Items")
+                }
+                SegmentedButton(
+                    selected = viewModel.backlogProjectView,
+                    onClick = { viewModel.updateBacklogProjectView(true) },
+                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
+                ) {
+                    Text("Projects")
+                }
+            }
+        }
+
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.fillMaxWidth(),
                     value = viewModel.newBacklogTitle,
                     onValueChange = viewModel::updateNewBacklogTitle,
                     label = { Text("New backlog item") },
                     singleLine = true
                 )
-                Button(onClick = viewModel::addBacklogItem) {
-                    Text("Add")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedTextField(
+                        modifier = Modifier.weight(1f),
+                        value = viewModel.newBacklogProject,
+                        onValueChange = viewModel::updateNewBacklogProject,
+                        label = { Text("Project") },
+                        singleLine = true
+                    )
+                    Button(onClick = viewModel::addBacklogItem) {
+                        Text("Add")
+                    }
                 }
             }
         }
 
-        items(viewModel.activeBacklogItems, key = { it.id }) { item ->
-            BacklogItemCard(
-                item = item,
-                onAssignToday = { viewModel.assignBacklogItemToToday(item.id) }
-            )
+        if (viewModel.backlogProjectView) {
+            viewModel.activeBacklogByProject.toSortedMap().forEach { (project, items) ->
+                item {
+                    SectionCard(title = project, subtitle = "${items.size} item${if (items.size == 1) "" else "s"}") {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            items.forEach { backlogItem ->
+                                BacklogItemCard(
+                                    item = backlogItem,
+                                    onAssignToday = { viewModel.assignBacklogItemToToday(backlogItem.id) }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            items(viewModel.activeBacklogItems, key = { it.id }) { item ->
+                BacklogItemCard(
+                    item = item,
+                    onAssignToday = { viewModel.assignBacklogItemToToday(item.id) }
+                )
+            }
         }
     }
 }
@@ -298,14 +380,56 @@ private fun CalendarScreen() {
 }
 
 @Composable
-private fun RoutinesScreen() {
-    SimpleScreen(
-        title = "Routines",
-        lines = listOf(
-            "Routines has a real tab now.",
-            "Detailed routine workflows come after Today and Backlog are stable."
-        )
-    )
+private fun RoutinesScreen(viewModel: HumanProgramViewModel) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        item {
+            Header(
+                title = "Routines",
+                subtitle = "Repeatable workflows live here without automatically becoming required tasks."
+            )
+        }
+
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedTextField(
+                    modifier = Modifier.weight(1f),
+                    value = viewModel.newRoutineTitle,
+                    onValueChange = viewModel::updateNewRoutineTitle,
+                    label = { Text("New routine") },
+                    singleLine = true
+                )
+                Button(onClick = viewModel::addRoutine) {
+                    Text("Add")
+                }
+            }
+        }
+
+        if (viewModel.routines.isEmpty()) {
+            item {
+                Text(
+                    text = "No routines yet.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        } else {
+            items(viewModel.routines) { routine ->
+                SectionCard(title = routine) {
+                    Text(
+                        text = "Routine steps will be added in a later workflow pass.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -499,11 +623,60 @@ private fun SettingsScreen(viewModel: HumanProgramViewModel) {
         }
 
         item {
+            SectionCard(title = "Calendar Permission") {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Calendar access is optional.")
+                    Text("If denied, Today and Calendar still work without device events.")
+                    Text(
+                        text = "Permission request flow is prepared by the manifest; provider reads are the next integration step.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        item {
             SectionCard(title = "Privacy") {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Core app behavior is offline.")
                     Text("No account, analytics, ads, Firebase, or cloud backend are included.")
                     Text("Current prototype saves planner data in app-private storage.")
+                    Text("Room/DataStore foundations are in place for the durable local storage path.")
+                    Text("PIN/app-lock foundations are in place; unlock UI comes next.")
+                }
+            }
+        }
+
+        item {
+            SectionCard(title = "App Lock") {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Status: ${if (viewModel.appLockEnabled) "PIN set" else "Not set"}")
+                    OutlinedTextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = viewModel.appLockPinInput,
+                        onValueChange = viewModel::updateAppLockPinInput,
+                        label = { Text("PIN") },
+                        singleLine = true
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Button(onClick = viewModel::setupAppLockPin) {
+                            Text("Set PIN")
+                        }
+                        OutlinedButton(onClick = viewModel::testAppLockPin) {
+                            Text("Test PIN")
+                        }
+                    }
+                    if (viewModel.appLockPinMessage.isNotBlank()) {
+                        Text(
+                            text = viewModel.appLockPinMessage,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Text(
+                        text = "This hashes the PIN and does not store raw PIN text. Durable encrypted lock storage comes next.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }
@@ -660,6 +833,7 @@ private fun SectionCard(
 @Composable
 private fun TaskRow(
     task: DailyTask,
+    enabled: Boolean = true,
     onToggle: () -> Unit
 ) {
     Row(
@@ -669,6 +843,7 @@ private fun TaskRow(
     ) {
         Checkbox(
             checked = task.completed,
+            enabled = enabled,
             onCheckedChange = { onToggle() }
         )
         Column(modifier = Modifier.weight(1f)) {

@@ -62,6 +62,42 @@ Use this file to track what has been built, what is next, and what decisions hav
 - Added first `.hprgm` export package builder with manifest and planning JSON foundations.
 - Re-ran unit tests successfully with `./gradlew test` after this development pass.
 - Rebuilt debug APK successfully with `./gradlew assembleDebug` after this development pass.
+- Added Room dependency and KSP compiler setup.
+- Added Room database shell with DAOs and entities for backlog, daily pages, daily tasks, recurring tasks, schedules, exercise templates/items, and reminders.
+- Configured Room schema export directory.
+- Added app lock settings Room entity/DAO.
+- Added app lock service foundation and tests for timeout-based locking.
+- Added optional calendar and notification permissions to the manifest.
+- Added calendar local-state Room entity/DAO.
+- Added calendar merge service for provider events plus local completion/hide/override state.
+- Added notification scheduling planner foundation and tests.
+- Added DataStore Preferences dependency and repository foundation for appearance, font, Today metadata, task source, project bucket, and calendar view settings.
+- Added hidden-game Room entities/DAO for game access events and game save metadata.
+- Added easter egg gate service requiring both puzzle completion and day completion before hidden game entry can be revealed.
+- Re-ran `./gradlew test assembleDebug` successfully after Room, DataStore, calendar, notification, app lock, and hidden game foundations.
+- Added `.hprgm` ZIP writer and tests that verify exported files are written into a valid zip package.
+- Added PIN hashing/verification service for app lock foundations without storing raw PINs.
+- Added project bucket service for unique names, virtual Unorganized display, and project deletion modes.
+- Added app startup planner for overdue backlog cleanup, seven exercise templates, and Today page generation.
+- Added Room entity/model mappers for backlog items, daily tasks, recurring tasks, and reminders.
+- Re-ran `./gradlew test assembleDebug` successfully after export, security, project, startup, and Room mapper work.
+- Added singleton Room database provider.
+- Added repositories for Backlog, Daily Pages, Recurring Tasks, and Reminders.
+- Added migration coordinator for copying the current app-private JSON snapshot into Room-backed repositories.
+- Added Room-backed planning ViewModel skeleton for migrating UI screens from JSON snapshot storage to Room repositories.
+- Added Settings copy for optional Calendar permission, offline behavior, Room/DataStore foundation, and app lock foundation.
+- Added Today date navigation controls and read-only protection for past dates.
+- Added Backlog Item/Project view switch.
+- Added project bucket entry when creating backlog items.
+- Added project-grouped Backlog display with virtual Unorganized group.
+- Added App Lock Settings UI for setting/testing a hashed PIN without storing raw PIN text.
+- Replaced the Routines placeholder with a persisted simple routines list and add-routine UI.
+- Added hidden easter egg code detector foundation without exposing game UI.
+- Re-ran `./gradlew test assembleDebug` successfully after repository, migration, Backlog project view, App Lock UI, Routines, and easter egg code work.
+- Added Android reminder receiver, notification channel creation, AlarmManager scheduler, and safe handling when notification permission is denied.
+- Added Android Calendar Provider reader that returns empty results unless calendar permission is granted.
+- Added `.hprgm` ZIP import preview reader that validates manifest/planning files.
+- Re-ran `./gradlew test assembleDebug` successfully after Android notifications, calendar provider reader, `.hprgm` import preview, and latest UI expansions.
 
 ## In Progress
 
@@ -71,6 +107,7 @@ Use this file to track what has been built, what is next, and what decisions hav
 - Emulator/manual UI testing.
 - Schedule, exercise, backlog maintenance, and stats rule foundations.
 - Temporary app-private persistence before Room/DataStore migration.
+- Room database migration foundation.
 
 ## Next Steps
 

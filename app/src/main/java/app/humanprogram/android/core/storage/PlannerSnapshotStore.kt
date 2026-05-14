@@ -20,7 +20,8 @@ data class PlannerSnapshot(
     val recurringTemplates: List<RecurringTaskTemplate>,
     val scheduleBlocks: List<ScheduleBlock>,
     val exerciseRoutine: ExerciseRoutine,
-    val reminders: List<NotificationReminder>
+    val reminders: List<NotificationReminder>,
+    val routines: List<String>
 )
 
 class PlannerSnapshotStore(context: Context) {
@@ -37,7 +38,8 @@ class PlannerSnapshotStore(context: Context) {
             scheduleBlocks = json.optJSONArray("scheduleBlocks")?.toScheduleBlocks().orEmpty(),
             exerciseRoutine = json.optJSONObject("exerciseRoutine")?.toExerciseRoutine()
                 ?: ExerciseRoutine(title = "Today routine", items = emptyList()),
-            reminders = json.optJSONArray("reminders")?.toReminders().orEmpty()
+            reminders = json.optJSONArray("reminders")?.toReminders().orEmpty(),
+            routines = json.optJSONArray("routines")?.toStringList().orEmpty()
         )
     }
 
@@ -49,6 +51,7 @@ class PlannerSnapshotStore(context: Context) {
             .put("scheduleBlocks", snapshot.scheduleBlocks.toScheduleBlocksJson())
             .put("exerciseRoutine", snapshot.exerciseRoutine.toJson())
             .put("reminders", snapshot.reminders.toRemindersJson())
+            .put("routines", JSONArray(snapshot.routines))
 
         file.writeText(json.toString())
     }

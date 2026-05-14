@@ -18,7 +18,8 @@ class HprgmExportBuilder {
             "\"recurringTasks\":${snapshot.recurringTemplates.map { it.title }.toJsonArray()}",
             "\"scheduleBlocks\":${snapshot.scheduleBlocks.map { "${it.timeRange} ${it.title}" }.toJsonArray()}",
             "\"exerciseItems\":${snapshot.exerciseRoutine.items.toJsonArray()}",
-            "\"reminders\":${snapshot.reminders.map { it.title }.toJsonArray()}"
+            "\"reminders\":${snapshot.reminders.map { it.title }.toJsonArray()}",
+            "\"routines\":${snapshot.routines.toJsonArray()}"
         ).joinToString(prefix = "{", separator = ",", postfix = "}")
 
         return HprgmExportPackage(

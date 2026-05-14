@@ -34,7 +34,8 @@ class HprgmExportBuilderTest {
                 ),
                 scheduleBlocks = listOf(ScheduleBlock("Sleep", "21:30-05:30")),
                 exerciseRoutine = ExerciseRoutine("Upper", listOf("OHP")),
-                reminders = listOf(NotificationReminder(title = "Plan day", reminderAt = "07:00"))
+                reminders = listOf(NotificationReminder(title = "Plan day", reminderAt = "07:00")),
+                routines = listOf("Morning review")
             )
         )
 

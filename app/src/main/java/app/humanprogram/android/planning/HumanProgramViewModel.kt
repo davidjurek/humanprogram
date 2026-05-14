@@ -6,6 +6,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import app.humanprogram.android.core.security.PinHash
+import app.humanprogram.android.core.security.PinHashService
 import app.humanprogram.android.core.storage.PlannerSnapshot
 import app.humanprogram.android.core.storage.PlannerSnapshotStore
 import app.humanprogram.android.planning.backlog.BacklogCsvExporter
@@ -35,8 +37,22 @@ class HumanProgramViewModel(
     private val streakCalculator = StreakCalculator()
     private val backlogCsvExporter = BacklogCsvExporter()
     private val backlogCsvImporter = BacklogCsvImporter()
+    private val pinHashService = PinHashService()
 
-    val todayLabel: String = today.format(dateFormatter)
+    var selectedDate by mutableStateOf(today)
+        private set
+
+    val selectedDateLabel: String
+        get() = selectedDate.format(dateFormatter)
+
+    val selectedDateTitle: String
+        get() = if (selectedDate == today) "Today" else "Daily Page"
+
+    val canEditSelectedDate: Boolean
+        get() = !selectedDate.isBefore(today)
+
+    val isPastDate: Boolean
+        get() = selectedDate.isBefore(today)
 
     val recurringTemplates = mutableStateListOf<RecurringTaskTemplate>()
 
@@ -55,6 +71,8 @@ class HumanProgramViewModel(
     val todayTasks = mutableStateListOf<DailyTask>()
 
     val reminders = mutableStateListOf<NotificationReminder>()
+
+    val routines = mutableStateListOf<String>()
 
     var newRecurringTitle by mutableStateOf("")
         private set
@@ -83,6 +101,20 @@ class HumanProgramViewModel(
     var newReminderTime by mutableStateOf("")
         private set
 
+    var newRoutineTitle by mutableStateOf("")
+        private set
+
+    var appLockEnabled by mutableStateOf(false)
+        private set
+
+    var appLockPinInput by mutableStateOf("")
+        private set
+
+    var appLockPinMessage by mutableStateOf("")
+        private set
+
+    private var appLockPinHash: PinHash? = null
+
     init {
         val snapshot = snapshotStore?.load()
         if (snapshot != null) {
@@ -92,6 +124,7 @@ class HumanProgramViewModel(
             scheduleBlocks.addAll(snapshot.scheduleBlocks.ifEmpty { defaultScheduleBlocks() })
             exerciseRoutine = snapshot.exerciseRoutine
             reminders.addAll(snapshot.reminders)
+            routines.addAll(snapshot.routines)
         } else {
             recurringTemplates.addAll(defaultRecurringTemplates())
             scheduleBlocks.addAll(defaultScheduleBlocks())
@@ -118,6 +151,12 @@ class HumanProgramViewModel(
     var newBacklogTitle by mutableStateOf("")
         private set
 
+    var newBacklogProject by mutableStateOf("")
+        private set
+
+    var backlogProjectView by mutableStateOf(false)
+        private set
+
     val isDayComplete: Boolean
         get() = completionService.isComplete(todayTasks)
 
@@ -142,12 +181,35 @@ class HumanProgramViewModel(
     val doneBacklogCount: Int
         get() = backlogItems.count { it.status == BacklogStatus.DONE }
 
+    val activeBacklogByProject: Map<String, List<BacklogItem>>
+        get() = activeBacklogItems.groupBy { it.projectBucket.ifBlank { "Unorganized" } }
+
     fun updateNewTaskTitle(value: String) {
         newTaskTitle = value
     }
 
+    fun goToPreviousDay() {
+        selectedDate = selectedDate.minusDays(1)
+    }
+
+    fun goToNextDay() {
+        selectedDate = selectedDate.plusDays(1)
+    }
+
+    fun goToToday() {
+        selectedDate = today
+    }
+
     fun updateNewBacklogTitle(value: String) {
         newBacklogTitle = value
+    }
+
+    fun updateNewBacklogProject(value: String) {
+        newBacklogProject = value
+    }
+
+    fun updateBacklogProjectView(enabled: Boolean) {
+        backlogProjectView = enabled
     }
 
     fun updateNewRecurringTitle(value: String) {
@@ -178,7 +240,16 @@ class HumanProgramViewModel(
         newReminderTime = value
     }
 
+    fun updateNewRoutineTitle(value: String) {
+        newRoutineTitle = value
+    }
+
+    fun updateAppLockPinInput(value: String) {
+        appLockPinInput = value.filter { it.isDigit() }.take(12)
+    }
+
     fun addManualTask() {
+        if (!canEditSelectedDate) return
         val cleanTitle = newTaskTitle.trim()
         if (cleanTitle.isEmpty()) return
 
@@ -193,6 +264,7 @@ class HumanProgramViewModel(
     }
 
     fun toggleTask(taskId: String) {
+        if (!canEditSelectedDate) return
         val index = todayTasks.indexOfFirst { it.id == taskId }
         if (index == -1) return
 
@@ -209,8 +281,14 @@ class HumanProgramViewModel(
         val cleanTitle = newBacklogTitle.trim()
         if (cleanTitle.isEmpty()) return
 
-        backlogItems.add(BacklogItem(title = cleanTitle))
+        backlogItems.add(
+            BacklogItem(
+                title = cleanTitle,
+                projectBucket = newBacklogProject.trim()
+            )
+        )
         newBacklogTitle = ""
+        newBacklogProject = ""
         saveSnapshot()
     }
 
@@ -331,6 +409,43 @@ class HumanProgramViewModel(
         saveSnapshot()
     }
 
+    fun setupAppLockPin() {
+        val pin = appLockPinInput
+        if (pin.length < 4) {
+            appLockPinMessage = "Use at least 4 digits."
+            return
+        }
+
+        appLockPinHash = pinHashService.hash(pin)
+        appLockEnabled = true
+        appLockPinInput = ""
+        appLockPinMessage = "App lock PIN is set for this session."
+    }
+
+    fun testAppLockPin() {
+        val hash = appLockPinHash
+        if (hash == null) {
+            appLockPinMessage = "Set a PIN first."
+            return
+        }
+
+        appLockPinMessage = if (pinHashService.verify(appLockPinInput, hash)) {
+            "PIN accepted."
+        } else {
+            "PIN rejected."
+        }
+        appLockPinInput = ""
+    }
+
+    fun addRoutine() {
+        val cleanTitle = newRoutineTitle.trim()
+        if (cleanTitle.isEmpty()) return
+
+        routines.add(cleanTitle)
+        newRoutineTitle = ""
+        saveSnapshot()
+    }
+
     private fun updateBacklogCompletion(itemId: String, completed: Boolean) {
         val index = backlogItems.indexOfFirst { it.id == itemId }
         if (index == -1) return
@@ -348,7 +463,8 @@ class HumanProgramViewModel(
                 recurringTemplates = recurringTemplates,
                 scheduleBlocks = scheduleBlocks,
                 exerciseRoutine = exerciseRoutine,
-                reminders = reminders
+                reminders = reminders,
+                routines = routines
             )
         )
     }
