@@ -7,16 +7,25 @@ data class HprgmExportPackage(
 )
 
 class HprgmExportBuilder {
-    fun build(snapshot: PlannerSnapshot): HprgmExportPackage {
+    fun build(
+        snapshot: PlannerSnapshot,
+        includeGameData: Boolean = false
+    ): HprgmExportPackage {
         val manifest = """
-            {"format":"hprgm","schemaVersion":1,"containsGameState":false}
+            {"format":"hprgm","schemaVersion":1,"containsGameState":$includeGameData}
         """.trimIndent()
+        val files = mutableMapOf(
+            "manifest.json" to manifest,
+            "planning.json" to snapshot.toPlanningJson()
+        )
 
+        if (includeGameData) {
+            files["game_save.json"] = """
+                {"schemaVersion":1,"included":true,"engine":"pending","savePresent":false}
+            """.trimIndent()
+        }
         return HprgmExportPackage(
-            files = mapOf(
-                "manifest.json" to manifest,
-                "planning.json" to snapshot.toPlanningJson()
-            )
+            files = files
         )
     }
 }
@@ -65,6 +74,8 @@ private fun PlannerSnapshot.toPlanningJson(): String {
                 "\"id\":${reminder.id.toJsonString()}",
                 "\"title\":${reminder.title.toJsonString()}",
                 "\"reminderAt\":${reminder.reminderAt.toJsonString()}",
+                "\"recurrence\":${reminder.recurrence.name.toJsonString()}",
+                "\"customWeekdays\":${reminder.customWeekdays.sorted().joinToString(prefix = "[", separator = ",", postfix = "]")}",
                 "\"isEnabled\":${reminder.isEnabled}"
             ).joinToString(prefix = "{", separator = ",", postfix = "}")
         }}",
@@ -79,8 +90,23 @@ private fun PlannerSnapshot.toPlanningJson(): String {
                 "\"notesOverride\":${state.notesOverride.toJsonNullableString()}",
                 "\"sortOrder\":${state.sortOrder ?: "null"}"
             ).joinToString(prefix = "{", separator = ",", postfix = "}")
-        }}"
+        }}",
+        "\"dailyTaskPages\":${dailyTaskPages.toDailyTaskPagesJson()}"
     ).joinToString(prefix = "{", separator = ",", postfix = "}")
+}
+
+private fun Map<java.time.LocalDate, List<app.humanprogram.android.planning.model.DailyTask>>.toDailyTaskPagesJson(): String {
+    return entries.sortedBy { it.key }.joinToString(prefix = "{", separator = ",", postfix = "}") { (date, tasks) ->
+        "${date.toString().toJsonString()}:${tasks.joinToJsonArray { task ->
+            listOf(
+                "\"id\":${task.id.toJsonString()}",
+                "\"title\":${task.title.toJsonString()}",
+                "\"sourceType\":${task.sourceType.name.toJsonString()}",
+                "\"sourceId\":${task.sourceId.toJsonNullableString()}",
+                "\"completed\":${task.completed}"
+            ).joinToString(prefix = "{", separator = ",", postfix = "}")
+        }}"
+    }
 }
 
 private fun <T> List<T>.joinToJsonArray(transform: (T) -> String): String {

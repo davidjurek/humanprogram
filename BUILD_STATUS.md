@@ -125,6 +125,18 @@ Use this file to track what has been built, what is next, and what decisions hav
 - Added user-selectable app-lock timeout controls backed by DataStore.
 - Changed `.hprgm` import to preview first, then apply through an explicit button.
 - Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew test assembleDebug` successfully after undo/redo, calendar source/local state, hidden Sudoku gate, app-lock timeout, and preview-then-apply import work.
+- Added saved daily pages by date so Today, future previews, and past historical pages keep separate task snapshots.
+- Added deliberate past-day edit unlock from the Historical Page section.
+- Added reminder recurrence for once, daily, weekdays, and custom weekday schedules.
+- Added undo/redo for Today task title edits and Backlog item title edits.
+- Added stronger Settings stats across saved daily pages, including completion rate and a seven-day visual strip.
+- Added typed local planner reset in Settings.
+- Added encrypted `.hprgm` import preview support using the export password.
+- Added optional `game_save.json` metadata in `.hprgm` exports when the game-save checkbox is enabled.
+- Added App Lock "Lock Now" action.
+- Updated Room reminder mapping so recurrence and custom weekdays survive repository persistence.
+- Disabled automatic Android OS backup for app-private planner data by default.
+- Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew test assembleDebug` successfully after daily pages, reminders, stats, reset, encrypted import, game-save export metadata, app-lock, and mapper work.
 
 ## In Progress
 
@@ -135,6 +147,8 @@ Use this file to track what has been built, what is next, and what decisions hav
 - Schedule, exercise, backlog maintenance, and stats rule foundations.
 - Temporary app-private persistence before Room/DataStore migration.
 - Room database migration foundation.
+- Daily page history and future preview foundations.
+- App-lock and encrypted export/import foundations.
 
 ## Next Steps
 
@@ -143,11 +157,11 @@ Use this file to track what has been built, what is next, and what decisions hav
 3. Check that tasks can be added and completed.
 4. Replace temporary JSON-backed UI behavior with direct Room/DataStore reads and writes.
 5. Split the large app UI file into screen-specific files after manual testing.
-6. Add full daily page generation rules from `ADD.md`.
+6. Expand full daily page generation rules from `ADD.md`.
 7. Add biometric unlock support.
-8. Expand undo/redo beyond delete into edit, assignment, and completion actions.
-9. Add encrypted full `.hprgm` export with optional game save checkbox.
-10. Replace temporary JSON-backed UI behavior with direct Room/DataStore reads and writes.
+8. Expand undo/redo into schedule, exercise, reminder, and project edit actions.
+9. Add real game save file discovery/export once the game container exists.
+10. Add database-at-rest encryption and recovery phrase design.
 
 ## Decisions
 

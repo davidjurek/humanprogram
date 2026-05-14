@@ -29,6 +29,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -63,6 +64,7 @@ import app.humanprogram.android.planning.model.DailyTask
 import app.humanprogram.android.planning.model.DailyTaskSourceType
 import app.humanprogram.android.planning.model.NotificationReminder
 import app.humanprogram.android.planning.model.RecurringTaskTemplate
+import app.humanprogram.android.planning.model.ReminderRecurrence
 import app.humanprogram.android.planning.model.ScheduleBlock
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -258,7 +260,20 @@ private fun TodayScreen(
         if (viewModel.isPastDate) {
             item {
                 SectionCard(title = "Historical Page") {
-                    Text("Past days are protected from accidental edits.")
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            if (viewModel.canEditSelectedDate) {
+                                "Editing is unlocked for this past daily page."
+                            } else {
+                                "Past days are protected from accidental edits."
+                            }
+                        )
+                        if (!viewModel.canEditSelectedDate) {
+                            OutlinedButton(onClick = viewModel::unlockSelectedPastDateForEditing) {
+                                Text("Unlock Editing")
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -314,6 +329,7 @@ private fun TodayScreen(
                             task = task,
                             enabled = viewModel.canEditSelectedDate,
                             onToggle = { viewModel.toggleTask(task.id) },
+                            onTitleChange = { viewModel.renameTask(task.id, it) },
                             onDelete = { viewModel.deleteTask(task.id) }
                         )
                     }
@@ -438,6 +454,7 @@ private fun BacklogScreen(viewModel: HumanProgramViewModel) {
                             items.forEach { backlogItem ->
                                 BacklogItemCard(
                                     item = backlogItem,
+                                    onTitleChange = { viewModel.renameBacklogItem(backlogItem.id, it) },
                                     onAssignToday = { viewModel.assignBacklogItemToToday(backlogItem.id) },
                                     onDelete = { viewModel.deleteBacklogItem(backlogItem.id) }
                                 )
@@ -450,6 +467,7 @@ private fun BacklogScreen(viewModel: HumanProgramViewModel) {
             items(viewModel.activeBacklogItems, key = { it.id }) { item ->
                 BacklogItemCard(
                     item = item,
+                    onTitleChange = { viewModel.renameBacklogItem(item.id, it) },
                     onAssignToday = { viewModel.assignBacklogItemToToday(item.id) },
                     onDelete = { viewModel.deleteBacklogItem(item.id) }
                 )
@@ -649,11 +667,47 @@ private fun SettingsScreen(
 
         item {
             SectionCard(title = "Stats") {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Today: ${viewModel.completedTaskCount} of ${viewModel.todayTasks.size} tasks complete")
                     Text("Backlog: ${viewModel.activeBacklogItems.size} active, ${viewModel.doneBacklogCount} done")
+                    Text("Tracked days: ${viewModel.trackedDayCount}")
+                    Text("Completed days: ${viewModel.completedDayCount}")
+                    Text("Completion rate: ${viewModel.completionRatePercent}%")
+                    LinearProgressIndicator(
+                        progress = { viewModel.completionRatePercent / 100f },
+                        modifier = Modifier.fillMaxWidth()
+                    )
                     Text("Current streak: ${viewModel.currentStreak}")
                     Text("Longest streak: ${viewModel.longestStreak}")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        viewModel.lastSevenCompletionSnapshots.forEach { snapshot ->
+                            Surface(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(28.dp),
+                                color = if (snapshot.dayComplete) {
+                                    MaterialTheme.colorScheme.primaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant
+                                },
+                                shape = MaterialTheme.shapes.small
+                            ) {
+                                Text(
+                                    modifier = Modifier.padding(4.dp),
+                                    text = snapshot.date.dayOfWeek.name.take(1),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (snapshot.dayComplete) {
+                                        MaterialTheme.colorScheme.onPrimaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -862,6 +916,35 @@ private fun SettingsScreen(
                             Text("Add")
                         }
                     }
+                    SingleChoiceSegmentedButtonRow {
+                        ReminderRecurrence.entries.forEachIndexed { index, recurrence ->
+                            SegmentedButton(
+                                selected = viewModel.newReminderRecurrence == recurrence,
+                                onClick = { viewModel.updateNewReminderRecurrence(recurrence) },
+                                shape = SegmentedButtonDefaults.itemShape(
+                                    index = index,
+                                    count = ReminderRecurrence.entries.size
+                                )
+                            ) {
+                                Text(recurrence.label)
+                            }
+                        }
+                    }
+                    if (viewModel.newReminderRecurrence == ReminderRecurrence.CUSTOM) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            weekdayLabels.forEach { (weekday, label) ->
+                                OutlinedButton(
+                                    modifier = Modifier.weight(1f),
+                                    onClick = { viewModel.toggleNewReminderCustomWeekday(weekday) }
+                                ) {
+                                    Text(if (weekday in viewModel.newReminderCustomWeekdays) "*$label" else label)
+                                }
+                            }
+                        }
+                    }
                     Text(
                         text = viewModel.notificationPermissionMessage,
                         style = MaterialTheme.typography.bodySmall,
@@ -905,6 +988,30 @@ private fun SettingsScreen(
         }
 
         item {
+            SectionCard(title = "Local Reset") {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("This resets planner data stored inside the app.")
+                    OutlinedTextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = viewModel.resetConfirmationInput,
+                        onValueChange = viewModel::updateResetConfirmationInput,
+                        label = { Text("Type reset") },
+                        singleLine = true
+                    )
+                    OutlinedButton(onClick = viewModel::factoryResetLocalPlannerData) {
+                        Text("Reset Local Data")
+                    }
+                    if (viewModel.resetMessage.isNotBlank()) {
+                        Text(
+                            text = viewModel.resetMessage,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+
+        item {
             SectionCard(title = "App Lock") {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Status: ${if (viewModel.appLockEnabled) "PIN set" else "Not set"}")
@@ -925,6 +1032,9 @@ private fun SettingsScreen(
                         }
                         OutlinedButton(onClick = viewModel::testAppLockPin) {
                             Text("Test PIN")
+                        }
+                        OutlinedButton(onClick = viewModel::lockAppNow) {
+                            Text("Lock Now")
                         }
                     }
                     if (viewModel.appLockPinMessage.isNotBlank()) {
@@ -1035,12 +1145,30 @@ private fun ReminderRow(
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                text = reminder.reminderAt,
+                text = "${reminder.reminderAt} · ${reminder.recurrence.label}",
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
 }
+
+private val ReminderRecurrence.label: String
+    get() = when (this) {
+        ReminderRecurrence.ONCE -> "Once"
+        ReminderRecurrence.DAILY -> "Daily"
+        ReminderRecurrence.WEEKDAYS -> "Weekdays"
+        ReminderRecurrence.CUSTOM -> "Custom"
+    }
+
+private val weekdayLabels = listOf(
+    1 to "M",
+    2 to "T",
+    3 to "W",
+    4 to "T",
+    5 to "F",
+    6 to "S",
+    7 to "S"
+)
 
 @Composable
 private fun RecurringTemplateRow(
@@ -1208,6 +1336,7 @@ private fun TaskRow(
     task: DailyTask,
     enabled: Boolean = true,
     onToggle: () -> Unit,
+    onTitleChange: (String) -> Unit,
     onDelete: () -> Unit
 ) {
     Row(
@@ -1220,10 +1349,17 @@ private fun TaskRow(
             enabled = enabled,
             onCheckedChange = { onToggle() }
         )
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = task.title,
-                style = MaterialTheme.typography.bodyLarge
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            OutlinedTextField(
+                modifier = Modifier.fillMaxWidth(),
+                value = task.title,
+                enabled = enabled,
+                onValueChange = onTitleChange,
+                label = { Text("Task") },
+                singleLine = true
             )
             Text(
                 text = task.sourceType.label,
@@ -1246,6 +1382,7 @@ private fun TaskRow(
 @Composable
 private fun BacklogItemCard(
     item: BacklogItem,
+    onTitleChange: (String) -> Unit,
     onAssignToday: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -1256,10 +1393,12 @@ private fun BacklogItemCard(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(
-                text = item.title,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.SemiBold
+            OutlinedTextField(
+                modifier = Modifier.fillMaxWidth(),
+                value = item.title,
+                onValueChange = onTitleChange,
+                label = { Text("Backlog item") },
+                singleLine = true
             )
             Text(
                 text = when {

@@ -26,4 +26,26 @@ class HprgmEncryptionServiceTest {
         assertTrue(encrypted.files.getValue("manifest.json").contains("\"includesGameData\":true"))
         assertFalse(encrypted.files.values.joinToString().contains("Private task"))
     }
+
+    @Test
+    fun encryptedPackageCanBeDecryptedWithPassword() {
+        val encrypted = service.encryptPackage(
+            exportPackage = HprgmExportPackage(
+                files = mapOf(
+                    "manifest.json" to "{\"format\":\"hprgm\"}",
+                    "planning.json" to "{\"todayTasks\":[],\"backlogItems\":[],\"exerciseRoutine\":{}}"
+                )
+            ),
+            password = "strong-password",
+            includeGameData = false
+        )
+
+        val files = service.decryptPackageFiles(
+            encryptedPayloadJson = encrypted.files.getValue("encrypted_payload.json"),
+            password = "strong-password"
+        )
+
+        assertTrue(files.getValue("planning.json").contains("\"todayTasks\""))
+        assertEquals("{\"format\":\"hprgm\"}", files.getValue("manifest.json"))
+    }
 }

@@ -42,6 +42,25 @@ class HprgmEncryptionService(
         )
     }
 
+    fun decryptPackageFiles(
+        encryptedPayloadJson: String,
+        password: String
+    ): Map<String, String> {
+        require(password.length >= MIN_PASSWORD_LENGTH) {
+            "Import password must be at least $MIN_PASSWORD_LENGTH characters."
+        }
+
+        val payload = encryptedPayloadJson.parseJsonStringMap()
+        val salt = Base64.getDecoder().decode(payload.getValue("saltBase64"))
+        val iv = Base64.getDecoder().decode(payload.getValue("ivBase64"))
+        val cipherText = Base64.getDecoder().decode(payload.getValue("cipherTextBase64"))
+        val key = deriveKey(password, salt)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_BITS, iv))
+        val plainText = cipher.doFinal(cipherText).toString(Charsets.UTF_8)
+        return plainText.parseJsonStringMap()
+    }
+
     private fun encrypt(
         plainText: String,
         password: String
@@ -112,6 +131,85 @@ class HprgmEncryptionService(
             }
             append('"')
         }
+    }
+
+    private fun String.parseJsonStringMap(): Map<String, String> {
+        val result = mutableMapOf<String, String>()
+        var index = skipWhitespace(0)
+        require(this[index] == '{') { "Expected JSON object." }
+        index += 1
+        while (true) {
+            index = skipWhitespace(index)
+            if (this[index] == '}') return result
+            val keyResult = readJsonString(index)
+            index = skipWhitespace(keyResult.nextIndex)
+            require(this[index] == ':') { "Expected JSON separator." }
+            index = skipWhitespace(index + 1)
+            if (this[index] == '"') {
+                val valueResult = readJsonString(index)
+                result[keyResult.value] = valueResult.value
+                index = skipWhitespace(valueResult.nextIndex)
+            } else {
+                index = skipScalarValue(index)
+            }
+            when (this[index]) {
+                ',' -> index += 1
+                '}' -> return result
+                else -> error("Expected JSON comma or end.")
+            }
+        }
+    }
+
+    private fun String.skipScalarValue(startIndex: Int): Int {
+        var index = startIndex
+        while (index < length && this[index] != ',' && this[index] != '}') {
+            index += 1
+        }
+        return skipWhitespace(index)
+    }
+
+    private data class JsonStringResult(
+        val value: String,
+        val nextIndex: Int
+    )
+
+    private fun String.readJsonString(startIndex: Int): JsonStringResult {
+        require(this[startIndex] == '"') { "Expected JSON string." }
+        val output = StringBuilder()
+        var index = startIndex + 1
+        while (index < length) {
+            val char = this[index]
+            when (char) {
+                '"' -> return JsonStringResult(output.toString(), index + 1)
+                '\\' -> {
+                    val escaped = this[index + 1]
+                    output.append(
+                        when (escaped) {
+                            '"' -> '"'
+                            '\\' -> '\\'
+                            'n' -> '\n'
+                            'r' -> '\r'
+                            't' -> '\t'
+                            else -> escaped
+                        }
+                    )
+                    index += 2
+                }
+                else -> {
+                    output.append(char)
+                    index += 1
+                }
+            }
+        }
+        error("Unclosed JSON string.")
+    }
+
+    private fun String.skipWhitespace(startIndex: Int): Int {
+        var index = startIndex
+        while (index < length && this[index].isWhitespace()) {
+            index += 1
+        }
+        return index
     }
 
     companion object {

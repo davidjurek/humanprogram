@@ -10,6 +10,7 @@ import app.humanprogram.android.planning.model.DailyTask
 import app.humanprogram.android.planning.model.DailyTaskSourceType
 import app.humanprogram.android.planning.model.NotificationReminder
 import app.humanprogram.android.planning.model.RecurringTaskTemplate
+import app.humanprogram.android.planning.model.ReminderRecurrence
 import java.time.Instant
 import java.time.LocalDate
 
@@ -97,9 +98,9 @@ fun NotificationReminder.toEntity(now: Instant = Instant.now()): NotificationRem
         soundMode = "DEFAULT",
         imageFilename = null,
         intervalAmount = null,
-        intervalUnit = null,
+        intervalUnit = customWeekdays.sorted().joinToString(",").takeIf { it.isNotBlank() },
         isEnabled = isEnabled,
-        recurrenceMode = "ONE_TIME",
+        recurrenceMode = recurrence.name,
         createdAt = timestamp,
         updatedAt = timestamp
     )
@@ -110,6 +111,21 @@ fun NotificationReminderEntity.toModel(): NotificationReminder {
         id = id,
         title = title,
         reminderAt = reminderAt,
+        recurrence = recurrenceMode.toReminderRecurrence(),
+        customWeekdays = intervalUnit
+            ?.split(",")
+            ?.filter { it.isNotBlank() }
+            ?.map { it.toInt() }
+            ?.toSet()
+            .orEmpty(),
         isEnabled = isEnabled
     )
+}
+
+private fun String.toReminderRecurrence(): ReminderRecurrence {
+    return when (this) {
+        "ONE_TIME" -> ReminderRecurrence.ONCE
+        else -> runCatching { ReminderRecurrence.valueOf(this) }
+            .getOrDefault(ReminderRecurrence.ONCE)
+    }
 }

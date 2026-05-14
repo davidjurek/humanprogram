@@ -15,6 +15,13 @@ enum class BacklogStatus {
     DONE
 }
 
+enum class ReminderRecurrence {
+    ONCE,
+    DAILY,
+    WEEKDAYS,
+    CUSTOM
+}
+
 data class DailyTask(
     val id: String = UUID.randomUUID().toString(),
     val title: String,
@@ -59,5 +66,7 @@ data class NotificationReminder(
     val id: String = UUID.randomUUID().toString(),
     val title: String,
     val reminderAt: String,
+    val recurrence: ReminderRecurrence = ReminderRecurrence.ONCE,
+    val customWeekdays: Set<Int> = emptySet(),
     val isEnabled: Boolean = true
 )

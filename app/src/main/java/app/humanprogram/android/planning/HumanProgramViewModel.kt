@@ -1,6 +1,7 @@
 package app.humanprogram.android.planning
 
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -33,6 +34,7 @@ import app.humanprogram.android.planning.model.DailyTaskSourceType
 import app.humanprogram.android.planning.model.ExerciseRoutine
 import app.humanprogram.android.planning.model.NotificationReminder
 import app.humanprogram.android.planning.model.RecurringTaskTemplate
+import app.humanprogram.android.planning.model.ReminderRecurrence
 import app.humanprogram.android.planning.model.ScheduleBlock
 import app.humanprogram.android.planning.stats.DailyCompletionSnapshot
 import app.humanprogram.android.planning.stats.StreakCalculator
@@ -74,7 +76,7 @@ class HumanProgramViewModel(
         get() = if (selectedDate == today) "Today" else "Daily Page"
 
     val canEditSelectedDate: Boolean
-        get() = !selectedDate.isBefore(today)
+        get() = !selectedDate.isBefore(today) || unlockedPastEditDate == selectedDate
 
     val isPastDate: Boolean
         get() = selectedDate.isBefore(today)
@@ -94,6 +96,8 @@ class HumanProgramViewModel(
     val backlogItems = mutableStateListOf<BacklogItem>()
 
     val todayTasks = mutableStateListOf<DailyTask>()
+
+    private val dailyTaskPages = mutableStateMapOf<LocalDate, List<DailyTask>>()
 
     val reminders = mutableStateListOf<NotificationReminder>()
 
@@ -137,6 +141,11 @@ class HumanProgramViewModel(
     var newReminderTime by mutableStateOf("")
         private set
 
+    var newReminderRecurrence by mutableStateOf(ReminderRecurrence.ONCE)
+        private set
+
+    val newReminderCustomWeekdays = mutableStateListOf<Int>()
+
     var newRoutineTitle by mutableStateOf("")
         private set
 
@@ -159,6 +168,12 @@ class HumanProgramViewModel(
         private set
 
     var appUnlockMessage by mutableStateOf("")
+        private set
+
+    var resetConfirmationInput by mutableStateOf("")
+        private set
+
+    var resetMessage by mutableStateOf("")
         private set
 
     var hprgmMessage by mutableStateOf("")
@@ -193,6 +208,7 @@ class HumanProgramViewModel(
     private var appLockPinHash: PinHash? = null
     private var lastUnlockedAt: Instant? = null
     private var pendingHprgmImportSnapshot: PlannerSnapshot? = null
+    private var unlockedPastEditDate: LocalDate? = null
 
     init {
         val snapshot = snapshotStore?.load()
@@ -214,6 +230,7 @@ class HumanProgramViewModel(
                     backlogItems = backlogItems
                 ).tasks
             )
+            persistSelectedPage()
             saveSnapshot()
         }
     }
@@ -238,15 +255,37 @@ class HumanProgramViewModel(
 
     val currentStreak: Int
         get() = streakCalculator.calculate(
-            snapshots = listOf(DailyCompletionSnapshot(today, isDayComplete)),
+            snapshots = completionSnapshots(),
             today = today
         ).currentStreak
 
     val longestStreak: Int
         get() = streakCalculator.calculate(
-            snapshots = listOf(DailyCompletionSnapshot(today, isDayComplete)),
+            snapshots = completionSnapshots(),
             today = today
         ).longestStreak
+
+    val trackedDayCount: Int
+        get() = completionSnapshots().size
+
+    val completedDayCount: Int
+        get() = completionSnapshots().count { it.dayComplete }
+
+    val completionRatePercent: Int
+        get() {
+            val total = trackedDayCount
+            if (total == 0) return 0
+            return ((completedDayCount.toDouble() / total.toDouble()) * 100).toInt()
+        }
+
+    val lastSevenCompletionSnapshots: List<DailyCompletionSnapshot>
+        get() {
+            val snapshotsByDate = completionSnapshots().associateBy { it.date }
+            return (6 downTo 0).map { daysAgo ->
+                val date = today.minusDays(daysAgo.toLong())
+                snapshotsByDate[date] ?: DailyCompletionSnapshot(date, false)
+            }
+        }
 
     val activeBacklogItems: List<BacklogItem>
         get() = backlogItems.filter { it.status == BacklogStatus.BACKLOG }
@@ -268,15 +307,21 @@ class HumanProgramViewModel(
     }
 
     fun goToPreviousDay() {
-        selectedDate = selectedDate.minusDays(1)
+        openDate(selectedDate.minusDays(1))
     }
 
     fun goToNextDay() {
-        selectedDate = selectedDate.plusDays(1)
+        openDate(selectedDate.plusDays(1))
     }
 
     fun goToToday() {
-        selectedDate = today
+        openDate(today)
+    }
+
+    fun unlockSelectedPastDateForEditing() {
+        if (!selectedDate.isBefore(today)) return
+
+        unlockedPastEditDate = selectedDate
     }
 
     fun updateNewBacklogTitle(value: String) {
@@ -327,6 +372,21 @@ class HumanProgramViewModel(
         newReminderTime = value
     }
 
+    fun updateNewReminderRecurrence(value: ReminderRecurrence) {
+        newReminderRecurrence = value
+    }
+
+    fun toggleNewReminderCustomWeekday(weekday: Int) {
+        if (weekday !in 1..7) return
+
+        if (weekday in newReminderCustomWeekdays) {
+            newReminderCustomWeekdays.remove(weekday)
+        } else {
+            newReminderCustomWeekdays.add(weekday)
+            newReminderCustomWeekdays.sort()
+        }
+    }
+
     fun updateNewRoutineTitle(value: String) {
         newRoutineTitle = value
     }
@@ -337,6 +397,10 @@ class HumanProgramViewModel(
 
     fun updateAppUnlockPinInput(value: String) {
         appUnlockPinInput = value.filter { it.isDigit() }.take(12)
+    }
+
+    fun updateResetConfirmationInput(value: String) {
+        resetConfirmationInput = value.take(20)
     }
 
     fun loadStoredAppLockPin(
@@ -399,6 +463,31 @@ class HumanProgramViewModel(
         saveSnapshot()
     }
 
+    fun renameTask(
+        taskId: String,
+        title: String
+    ) {
+        if (!canEditSelectedDate) return
+        val cleanTitle = title.trimStart()
+        if (cleanTitle.isBlank()) return
+        val index = todayTasks.indexOfFirst { it.id == taskId }
+        if (index == -1) return
+
+        val previous = todayTasks[index]
+        if (previous.title == cleanTitle) return
+
+        val updated = previous.copy(title = cleanTitle)
+        todayTasks[index] = updated
+        recordEdit(
+            PlannerEdit.RenameTodayTask(
+                index = index,
+                previous = previous,
+                updated = updated
+            )
+        )
+        saveSnapshot()
+    }
+
     fun deleteTask(taskId: String) {
         if (!canEditSelectedDate) return
         val index = todayTasks.indexOfFirst { it.id == taskId }
@@ -441,6 +530,37 @@ class HumanProgramViewModel(
             PlannerEdit.DeleteBacklogItem(
                 item = item,
                 index = index.coerceAtMost(backlogItems.size)
+            )
+        )
+        saveSnapshot()
+    }
+
+    fun renameBacklogItem(
+        itemId: String,
+        title: String
+    ) {
+        val cleanTitle = title.trimStart()
+        if (cleanTitle.isBlank()) return
+        val index = backlogItems.indexOfFirst { it.id == itemId }
+        if (index == -1) return
+
+        val previous = backlogItems[index]
+        if (previous.title == cleanTitle) return
+
+        val updated = previous.copy(title = cleanTitle)
+        backlogItems[index] = updated
+        todayTasks.replaceAll { task ->
+            if (task.sourceType == DailyTaskSourceType.BACKLOG && task.sourceId == itemId) {
+                task.copy(title = cleanTitle)
+            } else {
+                task
+            }
+        }
+        recordEdit(
+            PlannerEdit.RenameBacklogItem(
+                index = index,
+                previous = previous,
+                updated = updated
             )
         )
         saveSnapshot()
@@ -555,11 +675,19 @@ class HumanProgramViewModel(
         reminders.add(
             NotificationReminder(
                 title = cleanTitle,
-                reminderAt = cleanTime
+                reminderAt = cleanTime,
+                recurrence = newReminderRecurrence,
+                customWeekdays = if (newReminderRecurrence == ReminderRecurrence.CUSTOM) {
+                    newReminderCustomWeekdays.toSet()
+                } else {
+                    emptySet()
+                }
             )
         )
         newReminderTitle = ""
         newReminderTime = ""
+        newReminderRecurrence = ReminderRecurrence.ONCE
+        newReminderCustomWeekdays.clear()
         saveSnapshot()
     }
 
@@ -613,6 +741,17 @@ class HumanProgramViewModel(
             appUnlockPinInput = ""
             appUnlockMessage = ""
         }
+    }
+
+    fun lockAppNow() {
+        if (!appLockEnabled) {
+            appLockPinMessage = "Set a PIN first."
+            return
+        }
+
+        appLocked = true
+        appUnlockPinInput = ""
+        appUnlockMessage = ""
     }
 
     fun unlockApp() {
@@ -744,7 +883,10 @@ class HumanProgramViewModel(
     }
 
     fun writeHprgmExport(outputStream: OutputStream) {
-        val basePackage = hprgmExportBuilder.build(snapshotForPersistence())
+        val basePackage = hprgmExportBuilder.build(
+            snapshot = snapshotForPersistence(),
+            includeGameData = hprgmIncludeGameSave
+        )
         val exportPackage = if (hprgmExportPassword.isNotBlank()) {
             runCatching {
                 hprgmEncryptionService.encryptPackage(
@@ -772,7 +914,27 @@ class HumanProgramViewModel(
 
     fun previewHprgmImport(inputStream: InputStream) {
         val preview = hprgmZipReader.preview(inputStream)
-        val planningJson = preview.planningJson
+        val planningJson = if (preview.encryptedPayloadJson != null) {
+            if (hprgmExportPassword.isBlank()) {
+                pendingHprgmImportSnapshot = null
+                hasPendingHprgmImport = false
+                hprgmMessage = "Import preview needs the export password."
+                return
+            }
+            runCatching {
+                hprgmEncryptionService.decryptPackageFiles(
+                    encryptedPayloadJson = preview.encryptedPayloadJson,
+                    password = hprgmExportPassword
+                )["planning.json"]
+            }.getOrElse {
+                pendingHprgmImportSnapshot = null
+                hasPendingHprgmImport = false
+                hprgmMessage = "Import preview failed: password was not accepted."
+                return
+            }
+        } else {
+            preview.planningJson
+        }
         hprgmMessage = if (preview.valid && planningJson != null) {
             runCatching {
                 PlannerSnapshotJson.decode(JSONObject(planningJson))
@@ -813,16 +975,69 @@ class HumanProgramViewModel(
         hprgmMessage = message
     }
 
+    fun factoryResetLocalPlannerData() {
+        if (resetConfirmationInput.trim().lowercase() != "reset") {
+            resetMessage = "Type reset to confirm."
+            return
+        }
+
+        todayTasks.clear()
+        backlogItems.clear()
+        recurringTemplates.clear()
+        scheduleBlocks.clear()
+        reminders.clear()
+        routines.clear()
+        calendarEvents.clear()
+        calendarSources.clear()
+        selectedCalendarSourceIds.clear()
+        calendarLocalStates.clear()
+        dailyTaskPages.clear()
+        undoStack.clear()
+        redoStack.clear()
+        pendingHprgmImportSnapshot = null
+        hasPendingHprgmImport = false
+        hiddenSudokuGateVisible = false
+        hiddenGameUnlocked = false
+        hiddenGateMessage = ""
+        selectedDate = today
+        unlockedPastEditDate = null
+
+        recurringTemplates.addAll(defaultRecurringTemplates())
+        scheduleBlocks.addAll(defaultScheduleBlocks())
+        exerciseRoutine = ExerciseRoutine(
+            title = "Today routine",
+            items = listOf("No exercise items have been added for today.")
+        )
+        todayTasks.addAll(
+            dailyPageGenerator.generate(
+                date = today,
+                recurringTemplates = recurringTemplates,
+                backlogItems = backlogItems
+            ).tasks
+        )
+        persistSelectedPage()
+        resetConfirmationInput = ""
+        resetMessage = "Local planner data reset."
+        saveSnapshot()
+    }
+
     fun reminderScheduleRequests(
         now: Instant = Instant.now(),
         zoneId: ZoneId = ZoneId.systemDefault()
     ): List<NotificationScheduleRequest> {
-        val today = LocalDate.now(zoneId)
-        val currentTime = now.atZone(zoneId).toLocalTime()
+        val currentDateTime = now.atZone(zoneId)
+        val today = currentDateTime.toLocalDate()
+        val currentTime = currentDateTime.toLocalTime()
 
         return reminders.mapNotNull { reminder ->
             val localTime = reminder.reminderAt.toLocalTimeOrNull() ?: return@mapNotNull null
-            val date = if (localTime.isAfter(currentTime)) today else today.plusDays(1)
+            val date = nextReminderDate(
+                recurrence = reminder.recurrence,
+                customWeekdays = reminder.customWeekdays,
+                today = today,
+                currentTime = currentTime,
+                reminderTime = localTime
+            )
             NotificationScheduleRequest(
                 id = reminder.id,
                 title = reminder.title,
@@ -832,7 +1047,32 @@ class HumanProgramViewModel(
         }
     }
 
+    private fun nextReminderDate(
+        recurrence: ReminderRecurrence,
+        customWeekdays: Set<Int>,
+        today: LocalDate,
+        currentTime: LocalTime,
+        reminderTime: LocalTime
+    ): LocalDate {
+        val firstCandidate = if (reminderTime.isAfter(currentTime)) today else today.plusDays(1)
+        return when (recurrence) {
+            ReminderRecurrence.ONCE,
+            ReminderRecurrence.DAILY -> firstCandidate
+            ReminderRecurrence.WEEKDAYS -> generateSequence(firstCandidate) { it.plusDays(1) }
+                .first { date ->
+                    val weekday = date.dayOfWeek.value
+                    weekday in 1..5
+                }
+            ReminderRecurrence.CUSTOM -> {
+                val selectedDays = customWeekdays.ifEmpty { setOf(1, 2, 3, 4, 5, 6, 7) }
+                generateSequence(firstCandidate) { it.plusDays(1) }
+                    .first { date -> date.dayOfWeek.value in selectedDays }
+            }
+        }
+    }
+
     fun snapshotForPersistence(): PlannerSnapshot {
+        persistSelectedPage()
         return currentSnapshot()
     }
 
@@ -882,6 +1122,23 @@ class HumanProgramViewModel(
                     applyTaskState(index, edit.previous)
                 }
             }
+            is PlannerEdit.RenameTodayTask -> {
+                val index = todayTasks.indexOfFirst { it.id == edit.previous.id }
+                    .takeUnless { it == -1 }
+                    ?: edit.index.coerceIn(0, todayTasks.lastIndex.coerceAtLeast(0))
+                if (todayTasks.isNotEmpty()) {
+                    todayTasks[index] = edit.previous
+                }
+            }
+            is PlannerEdit.RenameBacklogItem -> {
+                val index = backlogItems.indexOfFirst { it.id == edit.previous.id }
+                    .takeUnless { it == -1 }
+                    ?: edit.index.coerceIn(0, backlogItems.lastIndex.coerceAtLeast(0))
+                if (backlogItems.isNotEmpty()) {
+                    backlogItems[index] = edit.previous
+                    syncBacklogTaskTitle(edit.previous.id, edit.previous.title)
+                }
+            }
         }
         redoStack.add(edit)
         saveSnapshot()
@@ -918,6 +1175,23 @@ class HumanProgramViewModel(
                     applyTaskState(index, edit.updated)
                 }
             }
+            is PlannerEdit.RenameTodayTask -> {
+                val index = todayTasks.indexOfFirst { it.id == edit.updated.id }
+                    .takeUnless { it == -1 }
+                    ?: edit.index.coerceIn(0, todayTasks.lastIndex.coerceAtLeast(0))
+                if (todayTasks.isNotEmpty()) {
+                    todayTasks[index] = edit.updated
+                }
+            }
+            is PlannerEdit.RenameBacklogItem -> {
+                val index = backlogItems.indexOfFirst { it.id == edit.updated.id }
+                    .takeUnless { it == -1 }
+                    ?: edit.index.coerceIn(0, backlogItems.lastIndex.coerceAtLeast(0))
+                if (backlogItems.isNotEmpty()) {
+                    backlogItems[index] = edit.updated
+                    syncBacklogTaskTitle(edit.updated.id, edit.updated.title)
+                }
+            }
         }
         undoStack.add(edit)
         saveSnapshot()
@@ -947,12 +1221,26 @@ class HumanProgramViewModel(
         }
     }
 
+    private fun syncBacklogTaskTitle(
+        itemId: String,
+        title: String
+    ) {
+        todayTasks.replaceAll { task ->
+            if (task.sourceType == DailyTaskSourceType.BACKLOG && task.sourceId == itemId) {
+                task.copy(title = title)
+            } else {
+                task
+            }
+        }
+    }
+
     private fun recordEdit(edit: PlannerEdit) {
         undoStack.add(edit)
         redoStack.clear()
     }
 
     private fun saveSnapshot() {
+        persistSelectedPage()
         snapshotStore?.save(currentSnapshot())
     }
 
@@ -964,8 +1252,8 @@ class HumanProgramViewModel(
         reminders.clear()
         routines.clear()
         calendarLocalStates.clear()
+        dailyTaskPages.clear()
 
-        todayTasks.addAll(snapshot.todayTasks)
         backlogItems.addAll(snapshot.backlogItems)
         recurringTemplates.addAll(snapshot.recurringTemplates.ifEmpty { defaultRecurringTemplates() })
         scheduleBlocks.addAll(snapshot.scheduleBlocks.ifEmpty { defaultScheduleBlocks() })
@@ -973,19 +1261,66 @@ class HumanProgramViewModel(
         reminders.addAll(snapshot.reminders)
         routines.addAll(snapshot.routines)
         calendarLocalStates.addAll(snapshot.calendarLocalStates)
+        dailyTaskPages.putAll(snapshot.dailyTaskPages)
+        if (dailyTaskPages.isEmpty() && snapshot.todayTasks.isNotEmpty()) {
+            dailyTaskPages[today] = snapshot.todayTasks
+        }
+        loadSelectedPage()
     }
 
     private fun currentSnapshot(): PlannerSnapshot {
+        val pages = dailyTaskPages.toMutableMap()
+        pages[selectedDate] = todayTasks.toList()
         return PlannerSnapshot(
-            todayTasks = todayTasks,
+            todayTasks = pages[today].orEmpty(),
             backlogItems = backlogItems,
             recurringTemplates = recurringTemplates,
             scheduleBlocks = scheduleBlocks,
             exerciseRoutine = exerciseRoutine,
             reminders = reminders,
             routines = routines,
-            calendarLocalStates = calendarLocalStates
+            calendarLocalStates = calendarLocalStates,
+            dailyTaskPages = pages
         )
+    }
+
+    private fun completionSnapshots(): List<DailyCompletionSnapshot> {
+        val pages = dailyTaskPages.toMutableMap()
+        pages[selectedDate] = todayTasks.toList()
+        return pages
+            .filterKeys { !it.isAfter(today) }
+            .map { (date, tasks) ->
+                DailyCompletionSnapshot(
+                    date = date,
+                    dayComplete = completionService.isComplete(tasks)
+                )
+            }
+            .sortedBy { it.date }
+    }
+
+    private fun openDate(date: LocalDate) {
+        persistSelectedPage()
+        selectedDate = date
+        unlockedPastEditDate = null
+        loadSelectedPage()
+    }
+
+    private fun persistSelectedPage() {
+        dailyTaskPages[selectedDate] = todayTasks.toList()
+    }
+
+    private fun loadSelectedPage() {
+        val pageTasks = dailyTaskPages[selectedDate]
+            ?: dailyPageGenerator.generate(
+                date = selectedDate,
+                recurringTemplates = recurringTemplates,
+                backlogItems = backlogItems
+            ).tasks.also { generatedTasks ->
+                dailyTaskPages[selectedDate] = generatedTasks
+            }
+
+        todayTasks.clear()
+        todayTasks.addAll(pageTasks)
     }
 
     private fun updateCalendarLocalState(
@@ -1075,6 +1410,18 @@ private sealed interface PlannerEdit {
         val index: Int,
         val previous: DailyTask,
         val updated: DailyTask
+    ) : PlannerEdit
+
+    data class RenameTodayTask(
+        val index: Int,
+        val previous: DailyTask,
+        val updated: DailyTask
+    ) : PlannerEdit
+
+    data class RenameBacklogItem(
+        val index: Int,
+        val previous: BacklogItem,
+        val updated: BacklogItem
     ) : PlannerEdit
 }
 

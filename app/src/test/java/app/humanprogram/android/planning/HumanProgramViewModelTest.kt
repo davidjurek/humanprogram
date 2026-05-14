@@ -2,6 +2,7 @@ package app.humanprogram.android.planning
 
 import app.humanprogram.android.planning.calendar.DeviceCalendarEvent
 import app.humanprogram.android.planning.model.DailyTaskSourceType
+import app.humanprogram.android.planning.model.ReminderRecurrence
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -89,6 +90,17 @@ class HumanProgramViewModelTest {
     }
 
     @Test
+    fun appLockCanLockImmediatelyFromSettings() {
+        val viewModel = HumanProgramViewModel()
+        viewModel.updateAppLockPinInput("1234")
+        viewModel.setupAppLockPin()
+
+        viewModel.lockAppNow()
+
+        assertTrue(viewModel.appLocked)
+    }
+
+    @Test
     fun backlogDeleteCanUndoAndRedo() {
         val viewModel = HumanProgramViewModel()
         viewModel.updateNewBacklogTitle("Undo me")
@@ -149,6 +161,25 @@ class HumanProgramViewModelTest {
     }
 
     @Test
+    fun todayTaskRenameCanUndoAndRedo() {
+        val viewModel = HumanProgramViewModel()
+        val taskId = viewModel.todayTasks.first().id
+        val originalTitle = viewModel.todayTasks.first().title
+
+        viewModel.renameTask(taskId, "Renamed task")
+
+        assertEquals("Renamed task", viewModel.todayTasks.first { it.id == taskId }.title)
+
+        viewModel.undoLastEdit()
+
+        assertEquals(originalTitle, viewModel.todayTasks.first { it.id == taskId }.title)
+
+        viewModel.redoLastEdit()
+
+        assertEquals("Renamed task", viewModel.todayTasks.first { it.id == taskId }.title)
+    }
+
+    @Test
     fun backlogAssignmentCanUndoAndRedo() {
         val viewModel = HumanProgramViewModel()
         val itemId = viewModel.backlogItems.first().id
@@ -167,6 +198,128 @@ class HumanProgramViewModelTest {
 
         assertTrue(viewModel.backlogItems.first { it.id == itemId }.assignedDate != null)
         assertTrue(viewModel.todayTasks.any { it.sourceId == itemId })
+    }
+
+    @Test
+    fun backlogRenameCanUndoAndRedo() {
+        val viewModel = HumanProgramViewModel()
+        val itemId = viewModel.backlogItems.first().id
+        val originalTitle = viewModel.backlogItems.first().title
+
+        viewModel.renameBacklogItem(itemId, "Renamed backlog")
+
+        assertEquals("Renamed backlog", viewModel.backlogItems.first { it.id == itemId }.title)
+
+        viewModel.undoLastEdit()
+
+        assertEquals(originalTitle, viewModel.backlogItems.first { it.id == itemId }.title)
+
+        viewModel.redoLastEdit()
+
+        assertEquals("Renamed backlog", viewModel.backlogItems.first { it.id == itemId }.title)
+    }
+
+    @Test
+    fun dailyPagesKeepSeparateTaskSnapshotsByDate() {
+        val viewModel = HumanProgramViewModel()
+
+        viewModel.updateNewTaskTitle("Today only")
+        viewModel.addManualTask()
+        viewModel.goToNextDay()
+
+        assertFalse(viewModel.todayTasks.any { it.title == "Today only" })
+
+        viewModel.updateNewTaskTitle("Future only")
+        viewModel.addManualTask()
+        viewModel.goToToday()
+
+        assertTrue(viewModel.todayTasks.any { it.title == "Today only" })
+        assertFalse(viewModel.todayTasks.any { it.title == "Future only" })
+    }
+
+    @Test
+    fun statsUseSavedDailyPages() {
+        val viewModel = HumanProgramViewModel()
+
+        viewModel.goToPreviousDay()
+        viewModel.unlockSelectedPastDateForEditing()
+        viewModel.todayTasks.map { it.id }.forEach(viewModel::toggleTask)
+        viewModel.goToToday()
+        viewModel.todayTasks.map { it.id }.forEach(viewModel::toggleTask)
+
+        assertEquals(2, viewModel.trackedDayCount)
+        assertEquals(2, viewModel.completedDayCount)
+        assertEquals(100, viewModel.completionRatePercent)
+        assertEquals(2, viewModel.currentStreak)
+    }
+
+    @Test
+    fun pastDailyPagesNeedDeliberateUnlockBeforeEditing() {
+        val viewModel = HumanProgramViewModel()
+
+        viewModel.goToPreviousDay()
+        viewModel.updateNewTaskTitle("Past edit")
+        viewModel.addManualTask()
+
+        assertFalse(viewModel.todayTasks.any { it.title == "Past edit" })
+
+        viewModel.unlockSelectedPastDateForEditing()
+        viewModel.addManualTask()
+
+        assertTrue(viewModel.todayTasks.any { it.title == "Past edit" })
+    }
+
+    @Test
+    fun weekdayReminderSkipsWeekendWhenScheduling() {
+        val viewModel = HumanProgramViewModel()
+
+        viewModel.updateNewReminderTitle("Weekday check")
+        viewModel.updateNewReminderTime("09:00")
+        viewModel.updateNewReminderRecurrence(ReminderRecurrence.WEEKDAYS)
+        viewModel.addReminder()
+
+        val request = viewModel.reminderScheduleRequests(
+            now = Instant.parse("2026-05-16T18:00:00Z"),
+            zoneId = java.time.ZoneOffset.UTC
+        ).single { it.title == "Weekday check" }
+
+        assertEquals(Instant.parse("2026-05-18T09:00:00Z"), request.reminderAt)
+    }
+
+    @Test
+    fun customReminderUsesSelectedWeekdaysWhenScheduling() {
+        val viewModel = HumanProgramViewModel()
+
+        viewModel.updateNewReminderTitle("Custom check")
+        viewModel.updateNewReminderTime("09:00")
+        viewModel.updateNewReminderRecurrence(ReminderRecurrence.CUSTOM)
+        viewModel.toggleNewReminderCustomWeekday(3)
+        viewModel.addReminder()
+
+        val request = viewModel.reminderScheduleRequests(
+            now = Instant.parse("2026-05-18T18:00:00Z"),
+            zoneId = java.time.ZoneOffset.UTC
+        ).single { it.title == "Custom check" }
+
+        assertEquals(Instant.parse("2026-05-20T09:00:00Z"), request.reminderAt)
+    }
+
+    @Test
+    fun factoryResetRequiresTypedConfirmation() {
+        val viewModel = HumanProgramViewModel()
+        viewModel.updateNewTaskTitle("Reset target")
+        viewModel.addManualTask()
+
+        viewModel.factoryResetLocalPlannerData()
+
+        assertTrue(viewModel.todayTasks.any { it.title == "Reset target" })
+        assertEquals("Type reset to confirm.", viewModel.resetMessage)
+
+        viewModel.updateResetConfirmationInput("reset")
+        viewModel.factoryResetLocalPlannerData()
+
+        assertFalse(viewModel.todayTasks.any { it.title == "Reset target" })
+        assertEquals("Local planner data reset.", viewModel.resetMessage)
     }
 
     @Test

@@ -10,6 +10,7 @@ import app.humanprogram.android.planning.model.ScheduleBlock
 import app.humanprogram.android.planning.calendar.CalendarLocalState
 import org.json.JSONObject
 import java.io.File
+import java.time.LocalDate
 
 data class PlannerSnapshot(
     val todayTasks: List<DailyTask>,
@@ -19,7 +20,8 @@ data class PlannerSnapshot(
     val exerciseRoutine: ExerciseRoutine,
     val reminders: List<NotificationReminder>,
     val routines: List<String>,
-    val calendarLocalStates: List<CalendarLocalState> = emptyList()
+    val calendarLocalStates: List<CalendarLocalState> = emptyList(),
+    val dailyTaskPages: Map<LocalDate, List<DailyTask>> = emptyMap()
 )
 
 class PlannerSnapshotStore(context: Context) {

@@ -43,4 +43,24 @@ class HprgmExportBuilderTest {
         assertTrue(export.files.getValue("manifest.json").contains("\"format\":\"hprgm\""))
         assertTrue(export.files.getValue("planning.json").contains("Study calendar"))
     }
+
+    @Test
+    fun exportCanIncludeGameSaveMetadata() {
+        val export = builder.build(
+            snapshot = PlannerSnapshot(
+                todayTasks = emptyList(),
+                backlogItems = emptyList(),
+                recurringTemplates = emptyList(),
+                scheduleBlocks = emptyList(),
+                exerciseRoutine = ExerciseRoutine("Upper", emptyList()),
+                reminders = emptyList(),
+                routines = emptyList()
+            ),
+            includeGameData = true
+        )
+
+        assertEquals(setOf("game_save.json", "manifest.json", "planning.json"), export.files.keys)
+        assertTrue(export.files.getValue("manifest.json").contains("\"containsGameState\":true"))
+        assertTrue(export.files.getValue("game_save.json").contains("\"savePresent\":false"))
+    }
 }

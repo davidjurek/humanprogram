@@ -8,6 +8,7 @@ import app.humanprogram.android.planning.model.DailyTaskSourceType
 import app.humanprogram.android.planning.model.ExerciseRoutine
 import app.humanprogram.android.planning.model.NotificationReminder
 import app.humanprogram.android.planning.model.RecurringTaskTemplate
+import app.humanprogram.android.planning.model.ReminderRecurrence
 import app.humanprogram.android.planning.model.ScheduleBlock
 import org.json.JSONArray
 import org.json.JSONObject
@@ -17,6 +18,7 @@ object PlannerSnapshotJson {
     fun encode(snapshot: PlannerSnapshot): JSONObject {
         return JSONObject()
             .put("todayTasks", snapshot.todayTasks.toDailyTasksJson())
+            .put("dailyTaskPages", snapshot.dailyTaskPages.toDailyTaskPagesJson())
             .put("backlogItems", snapshot.backlogItems.toBacklogItemsJson())
             .put("recurringTemplates", snapshot.recurringTemplates.toRecurringTemplatesJson())
             .put("scheduleBlocks", snapshot.scheduleBlocks.toScheduleBlocksJson())
@@ -36,9 +38,18 @@ object PlannerSnapshotJson {
                 ?: ExerciseRoutine(title = "Today routine", items = emptyList()),
             reminders = json.optJSONArray("reminders")?.toReminders().orEmpty(),
             routines = json.optJSONArray("routines")?.toStringList().orEmpty(),
-            calendarLocalStates = json.optJSONArray("calendarLocalStates")?.toCalendarLocalStates().orEmpty()
+            calendarLocalStates = json.optJSONArray("calendarLocalStates")?.toCalendarLocalStates().orEmpty(),
+            dailyTaskPages = json.optJSONObject("dailyTaskPages")?.toDailyTaskPages().orEmpty()
         )
     }
+}
+
+private fun Map<LocalDate, List<DailyTask>>.toDailyTaskPagesJson(): JSONObject {
+    val json = JSONObject()
+    entries.sortedBy { it.key }.forEach { (date, tasks) ->
+        json.put(date.toString(), tasks.toDailyTasksJson())
+    }
+    return json
 }
 
 private fun List<NotificationReminder>.toRemindersJson(): JSONArray {
@@ -49,6 +60,8 @@ private fun List<NotificationReminder>.toRemindersJson(): JSONArray {
                 .put("id", reminder.id)
                 .put("title", reminder.title)
                 .put("reminderAt", reminder.reminderAt)
+                .put("recurrence", reminder.recurrence.name)
+                .put("customWeekdays", JSONArray(reminder.customWeekdays.sorted()))
                 .put("isEnabled", reminder.isEnabled)
         )
     }
@@ -171,6 +184,11 @@ private fun JSONArray.toReminders(): List<NotificationReminder> {
             id = item.getString("id"),
             title = item.getString("title"),
             reminderAt = item.getString("reminderAt"),
+            recurrence = item.optString("recurrence")
+                .takeIf { it.isNotBlank() }
+                ?.let(ReminderRecurrence::valueOf)
+                ?: ReminderRecurrence.ONCE,
+            customWeekdays = item.optJSONArray("customWeekdays")?.toIntSet().orEmpty(),
             isEnabled = item.getBoolean("isEnabled")
         )
     }
@@ -186,6 +204,12 @@ private fun JSONArray.toDailyTasks(): List<DailyTask> {
             sourceId = item.optString("sourceId").takeUnless { it.isBlank() || it == "null" },
             completed = item.getBoolean("completed")
         )
+    }
+}
+
+private fun JSONObject.toDailyTaskPages(): Map<LocalDate, List<DailyTask>> {
+    return keys().asSequence().associate { key ->
+        LocalDate.parse(key) to getJSONArray(key).toDailyTasks()
     }
 }
 

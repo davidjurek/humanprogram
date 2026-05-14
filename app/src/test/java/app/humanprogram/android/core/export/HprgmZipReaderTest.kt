@@ -36,4 +36,34 @@ class HprgmZipReaderTest {
         assertEquals(setOf("manifest.json", "planning.json"), preview.files)
         assertTrue(preview.planningJson?.contains("\"todayTasks\"") == true)
     }
+
+    @Test
+    fun encryptedPackagePreviewExposesEncryptedPayload() {
+        val bytes = ByteArrayOutputStream()
+        val encrypted = HprgmEncryptionService().encryptPackage(
+            exportPackage = HprgmExportBuilder().build(
+                PlannerSnapshot(
+                    todayTasks = emptyList(),
+                    backlogItems = emptyList(),
+                    recurringTemplates = emptyList(),
+                    scheduleBlocks = emptyList(),
+                    exerciseRoutine = ExerciseRoutine("Today routine", emptyList()),
+                    reminders = emptyList(),
+                    routines = emptyList()
+                )
+            ),
+            password = "strong-password",
+            includeGameData = false
+        )
+        writer.write(
+            exportPackage = encrypted,
+            outputStream = bytes
+        )
+
+        val preview = reader.preview(ByteArrayInputStream(bytes.toByteArray()))
+
+        assertTrue(preview.valid)
+        assertEquals(setOf("encrypted_payload.json", "manifest.json"), preview.files)
+        assertTrue(preview.encryptedPayloadJson?.contains("\"cipherTextBase64\"") == true)
+    }
 }
