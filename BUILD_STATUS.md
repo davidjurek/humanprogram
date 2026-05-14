@@ -5,9 +5,9 @@ Use this file to track what has been built, what is next, and what decisions hav
 ## Current Status
 
 - Repository exists at `https://github.com/davidjurek/humanprogram.git`.
-- Full app blueprint exists in `HUMAN_PROGRAM_ANDROID_AGENT_SPEC.md`.
+- Full app blueprint exists in `ADD.md`.
 - Persistent agent instructions exist in `AGENTS.md`.
-- Android app code has not been created yet.
+- Android app foundation builds successfully.
 
 ## Completed
 
@@ -15,26 +15,64 @@ Use this file to track what has been built, what is next, and what decisions hav
 - Added Human Program Android master spec.
 - Added persistent agent instruction file.
 - Added this development progress tracker.
+- Created first Android project foundation.
+- Added a Compose app shell with Today, Backlog, Calendar, Routines, and Settings tabs.
+- Added first in-memory planner state.
+- Added interactive Today tasks with completion checkboxes.
+- Added manual task creation on Today.
+- Added interactive Backlog item creation.
+- Added ability to assign Backlog items to Today.
+- Added basic backlog completion sync when assigned Today tasks are checked.
+- Added first game locked/unlocked status card.
+- Added simple schedule and exercise sections on Today.
+- Added pure daily completion service.
+- Added pure daily page generator for recurring tasks and assigned backlog items.
+- Added game access service bridge.
+- Added first unit tests for completion, generation, and game access rules.
+- Updated Gradle config for the installed Android 16 QPR2 SDK/API 36.1.
+- Connected the ViewModel to the daily completion and game access services.
+- Seeded Today from recurring task templates through the daily page generator.
+- Hid completed backlog items from the normal active Backlog view.
+- Added basic Settings stats for Today, Backlog, and game access.
+- Added current backlog CSV export service.
+- Added unit tests for backlog CSV export headers, active-only behavior, and escaping.
+- Added backlog CSV import preview service.
+- Added unit tests for CSV import accepted rows, missing titles, invalid dates, and quoted cells.
+- Added Gradle project properties, including AndroidX support.
+- Set Java and Kotlin compilation to Java 17 for consistent Android builds.
+- Configured local Android SDK path in ignored `local.properties`.
+- Ran unit tests successfully with `./gradlew test`.
+- Built debug APK successfully with `./gradlew assembleDebug`.
 
 ## In Progress
 
-- Project planning and setup.
+- First usable planner prototype.
+- Core planning rules before database persistence.
+- CSV import/export foundations.
+- Emulator/manual UI testing.
 
 ## Next Steps
 
-1. Create the native Android project foundation.
-2. Use package name `app.humanprogram.android`.
-3. Use Kotlin, Jetpack Compose, and Material 3.
-4. Add the five main tabs: Today, Backlog, Calendar, Routines, Settings.
-5. Make a simple first version that opens and runs before adding deeper features.
+1. Run the app on an emulator from Android Studio.
+2. Check that Today, Backlog, Calendar, Routines, and Settings open.
+3. Check that tasks can be added and completed.
+4. Replace in-memory state with Room/DataStore persistence.
+5. Split the large app UI file into screen-specific files after manual testing.
+6. Add full daily page generation rules from `ADD.md`.
+7. Connect CSV import/export services to Settings UI after persistence exists.
 
 ## Decisions
 
 - Build as an offline-first Android app.
+- Privacy and data security are core build values, even though the main product purpose is daily execution.
 - Do not require Google login, Firebase, analytics, ads, or cloud services.
 - Keep the future game separate from planner logic.
-- Treat `HUMAN_PROGRAM_ANDROID_AGENT_SPEC.md` as the source of truth.
+- Treat the game as an easter egg; do not show obvious game UI in normal app screens.
+- Keep game lock/unlock logic hidden unless an intentional easter egg path reveals it.
+- Treat `ADD.md` as the source of truth.
 - Keep beginner-friendly communication as a standing rule.
+- Compile against installed Android 16 QPR2 SDK/API 36.1 while keeping minimum Android 12/API 31.
+- Codex/agents may update `ADD.md`, `BUILD_STATUS.md`, and `AGENTS.md` as needed.
 
 ## Notes For Future Agents
 

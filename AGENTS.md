@@ -15,6 +15,7 @@ The full product brief lives in `HUMAN_PROGRAM_ANDROID_AGENT_SPEC.md`; treat tha
 ## Product
 
 Human Program is a private, offline-first Android daily execution app.
+Privacy and data security are not the main product purpose, but they are core build values.
 
 Core idea:
 
@@ -22,6 +23,8 @@ Core idea:
 - The daily page combines recurring tasks, backlog items assigned to that date, calendar items, exercise information, and schedule blocks.
 - Completing all required tasks unlocks a future game for that day.
 - The planner and game must stay separate.
+- The game is an easter egg and should not be visibly advertised in normal app UI.
+- Game lock/unlock state may exist internally, but obvious game entry points should stay hidden until intentionally revealed.
 
 ## Android Defaults
 
@@ -127,6 +130,7 @@ Past daily pages are reached from Today by changing the date.
 ## Safety Rules
 
 - Preserve user data.
+- Treat privacy and data security as important implementation concerns.
 - Ask before destructive changes.
 - Do not wipe databases, generated files, or project history unless explicitly requested.
 - Keep the app usable after each significant chunk of work.
@@ -175,3 +179,11 @@ When possible, run Gradle tests or explain clearly why they were not run.
 - Keep commits focused.
 - Use clear beginner-readable commit messages.
 - Ask before pushing if the owner has not already requested it.
+
+## Maintained Project Docs
+
+Agents may update these files as needed while working:
+
+- `ADD.md`
+- `BUILD_STATUS.md`
+- `AGENTS.md`

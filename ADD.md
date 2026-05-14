@@ -24,11 +24,14 @@ MUST:
 - Build with optional future sync in mind, but do not ship sync in the first build.
 - Use local persistence as the primary backend.
 - Preserve privacy and user ownership of data.
+- Treat privacy and data security as core build values, even though the app's main purpose is daily execution.
 - Use `Human Program` in user-facing language.
 - Use `.hprgm` as the Human Program export file extension.
 - Keep the architecture modular enough for a full game to live in the same app.
 - Build the game as a separate container/module that is bridged to the planning container by app state, not mixed into task-list code.
 - Gate game access behind completion of all tasks for the current day.
+- Treat the game as an easter egg. Do not advertise it in normal app UI.
+- Keep game lock/unlock state hidden unless it is reached through an intentional easter egg path.
 - Make the game save persist independently from the daily task gate.
 - Prefer Godot or another open-source, embeddable game path for the future game container.
 - Explain technical work in beginner-friendly language when communicating with the human owner.
