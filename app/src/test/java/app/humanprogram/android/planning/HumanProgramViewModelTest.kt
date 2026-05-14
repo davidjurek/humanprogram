@@ -63,6 +63,7 @@ class HumanProgramViewModelTest {
 
         viewModel.loadStoredAppLockPin(
             enabled = true,
+            biometricEnabled = false,
             saltBase64 = hash!!.saltBase64,
             hashBase64 = hash.hashBase64,
             timeoutMinutes = 0
@@ -98,6 +99,49 @@ class HumanProgramViewModelTest {
         viewModel.lockAppNow()
 
         assertTrue(viewModel.appLocked)
+    }
+
+    @Test
+    fun biometricUnlockRequiresAvailabilityAndPinLock() {
+        val viewModel = HumanProgramViewModel()
+
+        viewModel.updateBiometricAvailability(true)
+        viewModel.updateBiometricUnlockEnabled(true)
+
+        assertFalse(viewModel.biometricUnlockEnabled)
+
+        viewModel.updateAppLockPinInput("1234")
+        viewModel.setupAppLockPin()
+        viewModel.updateBiometricUnlockEnabled(true)
+        viewModel.lockAppNow()
+        viewModel.unlockAppWithBiometric()
+
+        assertTrue(viewModel.biometricUnlockEnabled)
+        assertFalse(viewModel.appLocked)
+    }
+
+    @Test
+    fun recoveryPhraseCanUnlockWhenPinIsForgotten() {
+        val viewModel = HumanProgramViewModel()
+        viewModel.updateAppLockPinInput("1234")
+        viewModel.setupAppLockPin()
+        val hash = viewModel.generateRecoveryPhrase()
+        val phrase = viewModel.generatedRecoveryPhrase
+
+        viewModel.loadStoredAppLockPin(
+            enabled = true,
+            biometricEnabled = false,
+            saltBase64 = "pin-salt",
+            hashBase64 = "pin-hash",
+            timeoutMinutes = 0,
+            recoverySaltBase64 = hash!!.saltBase64,
+            recoveryHashBase64 = hash.hashBase64
+        )
+        viewModel.lockAppNow()
+        viewModel.updateRecoveryPhraseInput(phrase)
+        viewModel.unlockAppWithRecoveryPhrase()
+
+        assertFalse(viewModel.appLocked)
     }
 
     @Test
@@ -217,6 +261,70 @@ class HumanProgramViewModelTest {
         viewModel.redoLastEdit()
 
         assertEquals("Renamed backlog", viewModel.backlogItems.first { it.id == itemId }.title)
+    }
+
+    @Test
+    fun scheduleEditsCanUndoAndRedo() {
+        val viewModel = HumanProgramViewModel()
+        val originalTitle = viewModel.scheduleBlocks.first().title
+
+        viewModel.renameScheduleBlock(0, "Changed block")
+
+        assertEquals("Changed block", viewModel.scheduleBlocks.first().title)
+
+        viewModel.undoLastEdit()
+
+        assertEquals(originalTitle, viewModel.scheduleBlocks.first().title)
+
+        viewModel.redoLastEdit()
+
+        assertEquals("Changed block", viewModel.scheduleBlocks.first().title)
+    }
+
+    @Test
+    fun exerciseDeleteAndReorderCanUndo() {
+        val viewModel = HumanProgramViewModel()
+        viewModel.updateNewExerciseItem("First")
+        viewModel.addExerciseItem()
+        viewModel.updateNewExerciseItem("Second")
+        viewModel.addExerciseItem()
+
+        val firstIndex = viewModel.exerciseRoutine.items.indexOf("First")
+        val secondIndex = viewModel.exerciseRoutine.items.indexOf("Second")
+        viewModel.moveExerciseItem(firstIndex, secondIndex)
+
+        assertTrue(viewModel.exerciseRoutine.items.indexOf("First") > viewModel.exerciseRoutine.items.indexOf("Second"))
+
+        viewModel.undoLastEdit()
+
+        assertTrue(viewModel.exerciseRoutine.items.indexOf("First") < viewModel.exerciseRoutine.items.indexOf("Second"))
+
+        viewModel.deleteExerciseItem(viewModel.exerciseRoutine.items.indexOf("First"))
+        assertFalse(viewModel.exerciseRoutine.items.contains("First"))
+
+        viewModel.undoLastEdit()
+        assertTrue(viewModel.exerciseRoutine.items.contains("First"))
+    }
+
+    @Test
+    fun reminderEditsCanUndoAndRedo() {
+        val viewModel = HumanProgramViewModel()
+        viewModel.updateNewReminderTitle("Plan")
+        viewModel.updateNewReminderTime("07:00")
+        viewModel.addReminder()
+        val reminderId = viewModel.reminders.first { it.title == "Plan" }.id
+
+        viewModel.renameReminder(reminderId, "Plan harder")
+
+        assertEquals("Plan harder", viewModel.reminders.first { it.id == reminderId }.title)
+
+        viewModel.undoLastEdit()
+
+        assertEquals("Plan", viewModel.reminders.first { it.id == reminderId }.title)
+
+        viewModel.redoLastEdit()
+
+        assertEquals("Plan harder", viewModel.reminders.first { it.id == reminderId }.title)
     }
 
     @Test

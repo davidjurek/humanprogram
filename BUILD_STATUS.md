@@ -137,6 +137,12 @@ Use this file to track what has been built, what is next, and what decisions hav
 - Updated Room reminder mapping so recurrence and custom weekdays survive repository persistence.
 - Disabled automatic Android OS backup for app-private planner data by default.
 - Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew test assembleDebug` successfully after daily pages, reminders, stats, reset, encrypted import, game-save export metadata, app-lock, and mapper work.
+- Added native Android biometric unlock support with PIN fallback.
+- Added app-lock recovery phrase generation, salted-hash storage, and lock-screen recovery unlock.
+- Added reversible schedule block editing/deletion.
+- Added reversible exercise item editing, deletion, and reordering.
+- Added reversible reminder editing and deletion.
+- Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew test assembleDebug` successfully after biometric unlock, recovery phrase, and editor undo/redo work.
 
 ## In Progress
 
@@ -149,6 +155,7 @@ Use this file to track what has been built, what is next, and what decisions hav
 - Room database migration foundation.
 - Daily page history and future preview foundations.
 - App-lock and encrypted export/import foundations.
+- Expanded reversible editing foundations.
 
 ## Next Steps
 
@@ -158,8 +165,8 @@ Use this file to track what has been built, what is next, and what decisions hav
 4. Replace temporary JSON-backed UI behavior with direct Room/DataStore reads and writes.
 5. Split the large app UI file into screen-specific files after manual testing.
 6. Expand full daily page generation rules from `ADD.md`.
-7. Add biometric unlock support.
-8. Expand undo/redo into schedule, exercise, reminder, and project edit actions.
+7. Add database-at-rest encryption and recovery phrase security hardening.
+8. Expand undo/redo into project edit actions.
 9. Add real game save file discovery/export once the game container exists.
 10. Add database-at-rest encryption and recovery phrase design.
 

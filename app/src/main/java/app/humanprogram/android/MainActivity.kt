@@ -1,9 +1,12 @@
 package app.humanprogram.android
 
 import android.Manifest
+import android.hardware.biometrics.BiometricManager
+import android.hardware.biometrics.BiometricPrompt
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.CancellationSignal
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
@@ -26,6 +29,7 @@ import app.humanprogram.android.planning.repository.ReminderRepository
 import app.humanprogram.android.ui.HumanProgramApp
 import app.humanprogram.android.ui.theme.HumanProgramTheme
 import kotlinx.coroutines.launch
+import java.util.concurrent.Executor
 
 class MainActivity : ComponentActivity() {
     private lateinit var plannerViewModel: HumanProgramViewModel
@@ -33,6 +37,8 @@ class MainActivity : ComponentActivity() {
     private val reminderScheduler by lazy { AndroidReminderScheduler(applicationContext) }
     private val calendarEventReader by lazy { AndroidCalendarEventReader(applicationContext) }
     private val appPreferencesRepository by lazy { AppPreferencesRepository(applicationContext) }
+    private val biometricExecutor: Executor by lazy { mainExecutor }
+    private var biometricCancellationSignal: CancellationSignal? = null
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -137,6 +143,18 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                     },
+                    onRecoveryPhraseSet = { phraseHash ->
+                        lifecycleScope.launch {
+                            appPreferencesRepository.setString(
+                                AppPreferencesRepository.Keys.RecoveryPhraseSaltBase64,
+                                phraseHash.saltBase64
+                            )
+                            appPreferencesRepository.setString(
+                                AppPreferencesRepository.Keys.RecoveryPhraseHashBase64,
+                                phraseHash.hashBase64
+                            )
+                        }
+                    },
                     onAppLockTimeoutChanged = { minutes ->
                         plannerViewModel.updateAppLockTimeoutMinutes(minutes)
                         lifecycleScope.launch {
@@ -145,7 +163,17 @@ class MainActivity : ComponentActivity() {
                                 minutes.toString()
                             )
                         }
-                    }
+                    },
+                    onBiometricUnlockChanged = { enabled ->
+                        plannerViewModel.updateBiometricUnlockEnabled(enabled)
+                        lifecycleScope.launch {
+                            appPreferencesRepository.setBoolean(
+                                AppPreferencesRepository.Keys.BiometricUnlockEnabled,
+                                plannerViewModel.biometricUnlockEnabled
+                            )
+                        }
+                    },
+                    onRequestBiometricUnlock = ::requestBiometricUnlock
                 )
             }
         }
@@ -154,6 +182,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         if (::plannerViewModel.isInitialized) {
+            plannerViewModel.updateBiometricAvailability(isBiometricAvailable())
             plannerViewModel.lockAppIfEnabled()
         }
     }
@@ -244,9 +273,12 @@ class MainActivity : ComponentActivity() {
             appPreferencesRepository.preferences.collect { preferences ->
                 plannerViewModel.loadStoredAppLockPin(
                     enabled = preferences.appLockEnabled,
+                    biometricEnabled = preferences.biometricUnlockEnabled,
                     saltBase64 = preferences.appLockPinSaltBase64,
                     hashBase64 = preferences.appLockPinHashBase64,
-                    timeoutMinutes = preferences.appLockTimeoutMinutes
+                    timeoutMinutes = preferences.appLockTimeoutMinutes,
+                    recoverySaltBase64 = preferences.recoveryPhraseSaltBase64,
+                    recoveryHashBase64 = preferences.recoveryPhraseHashBase64
                 )
                 plannerViewModel.loadSelectedCalendarSources(
                     preferences.selectedCalendarIdsCsv
@@ -257,5 +289,46 @@ class MainActivity : ComponentActivity() {
                 refreshCalendarEvents()
             }
         }
+    }
+
+    private fun isBiometricAvailable(): Boolean {
+        val manager = getSystemService(BiometricManager::class.java) ?: return false
+        return manager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) ==
+            BiometricManager.BIOMETRIC_SUCCESS
+    }
+
+    private fun requestBiometricUnlock() {
+        if (!isBiometricAvailable()) {
+            plannerViewModel.reportBiometricUnlockFailure("Biometric unlock is not available.")
+            return
+        }
+
+        biometricCancellationSignal?.cancel()
+        val cancellationSignal = CancellationSignal()
+        biometricCancellationSignal = cancellationSignal
+        BiometricPrompt.Builder(this)
+            .setTitle("Unlock Human Program")
+            .setSubtitle("Use device biometrics or enter your PIN.")
+            .setNegativeButton("Use PIN", biometricExecutor) { _, _ ->
+                plannerViewModel.reportBiometricUnlockFailure("Enter PIN to unlock.")
+            }
+            .build()
+            .authenticate(
+                cancellationSignal,
+                biometricExecutor,
+                object : BiometricPrompt.AuthenticationCallback() {
+                    override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult?) {
+                        plannerViewModel.unlockAppWithBiometric()
+                    }
+
+                    override fun onAuthenticationError(errorCode: Int, errString: CharSequence?) {
+                        plannerViewModel.reportBiometricUnlockFailure(errString?.toString().orEmpty())
+                    }
+
+                    override fun onAuthenticationFailed() {
+                        plannerViewModel.reportBiometricUnlockFailure("Biometric unlock was not accepted.")
+                    }
+                }
+            )
     }
 }

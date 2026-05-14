@@ -81,12 +81,18 @@ fun HumanProgramApp(
     onRefreshCalendarEvents: () -> Unit = {},
     onToggleCalendarSource: (String) -> Unit = {},
     onAppLockPinSet: (PinHash) -> Unit = {},
-    onAppLockTimeoutChanged: (Int) -> Unit = {}
+    onRecoveryPhraseSet: (PinHash) -> Unit = {},
+    onAppLockTimeoutChanged: (Int) -> Unit = {},
+    onBiometricUnlockChanged: (Boolean) -> Unit = {},
+    onRequestBiometricUnlock: () -> Unit = {}
 ) {
     var selectedTab by rememberSaveable { mutableStateOf(MainTab.Today) }
 
     if (viewModel.appLocked) {
-        AppLockScreen(viewModel)
+        AppLockScreen(
+            viewModel = viewModel,
+            onRequestBiometricUnlock = onRequestBiometricUnlock
+        )
         return
     }
 
@@ -155,7 +161,9 @@ fun HumanProgramApp(
                     onImportHprgmPreview = onImportHprgmPreview,
                     onReminderScheduleChanged = onReminderScheduleChanged,
                     onAppLockPinSet = onAppLockPinSet,
-                    onAppLockTimeoutChanged = onAppLockTimeoutChanged
+                    onRecoveryPhraseSet = onRecoveryPhraseSet,
+                    onAppLockTimeoutChanged = onAppLockTimeoutChanged,
+                    onBiometricUnlockChanged = onBiometricUnlockChanged
                 )
             }
         }
@@ -163,7 +171,10 @@ fun HumanProgramApp(
 }
 
 @Composable
-private fun AppLockScreen(viewModel: HumanProgramViewModel) {
+private fun AppLockScreen(
+    viewModel: HumanProgramViewModel,
+    onRequestBiometricUnlock: () -> Unit
+) {
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background
@@ -189,6 +200,24 @@ private fun AppLockScreen(viewModel: HumanProgramViewModel) {
             Spacer(Modifier.height(12.dp))
             Button(onClick = viewModel::unlockApp) {
                 Text("Unlock")
+            }
+            if (viewModel.biometricUnlockEnabled && viewModel.biometricUnlockAvailable) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(onClick = onRequestBiometricUnlock) {
+                    Text("Use Biometric Unlock")
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                modifier = Modifier.fillMaxWidth(),
+                value = viewModel.recoveryPhraseInput,
+                onValueChange = viewModel::updateRecoveryPhraseInput,
+                label = { Text("Recovery phrase") },
+                singleLine = true
+            )
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(onClick = viewModel::unlockAppWithRecoveryPhrase) {
+                Text("Use Recovery Phrase")
             }
             if (viewModel.appUnlockMessage.isNotBlank()) {
                 Spacer(Modifier.height(12.dp))
@@ -652,7 +681,9 @@ private fun SettingsScreen(
     onImportHprgmPreview: () -> Unit,
     onReminderScheduleChanged: () -> Unit,
     onAppLockPinSet: (PinHash) -> Unit,
-    onAppLockTimeoutChanged: (Int) -> Unit
+    onRecoveryPhraseSet: (PinHash) -> Unit,
+    onAppLockTimeoutChanged: (Int) -> Unit,
+    onBiometricUnlockChanged: (Boolean) -> Unit
 ) {
     var developerNameTapCount by rememberSaveable { mutableStateOf(0) }
 
@@ -744,8 +775,13 @@ private fun SettingsScreen(
         item {
             SectionCard(title = "Schedule") {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    viewModel.scheduleBlocks.forEach { block ->
-                        ScheduleBlockRow(block)
+                    viewModel.scheduleBlocks.forEachIndexed { index, block ->
+                        ScheduleBlockRow(
+                            block = block,
+                            onTitleChange = { viewModel.renameScheduleBlock(index, it) },
+                            onTimeRangeChange = { viewModel.updateScheduleBlockTimeRange(index, it) },
+                            onDelete = { viewModel.deleteScheduleBlock(index) }
+                        )
                     }
                     OutlinedTextField(
                         modifier = Modifier.fillMaxWidth(),
@@ -781,8 +817,16 @@ private fun SettingsScreen(
                         text = viewModel.exerciseRoutine.title,
                         fontWeight = FontWeight.SemiBold
                     )
-                    viewModel.exerciseRoutine.items.forEach { item ->
-                        Text(item)
+                    viewModel.exerciseRoutine.items.forEachIndexed { index, item ->
+                        ExerciseItemRow(
+                            item = item,
+                            canMoveUp = index > 0,
+                            canMoveDown = index < viewModel.exerciseRoutine.items.lastIndex,
+                            onItemChange = { viewModel.renameExerciseItem(index, it) },
+                            onMoveUp = { viewModel.moveExerciseItem(index, index - 1) },
+                            onMoveDown = { viewModel.moveExerciseItem(index, index + 1) },
+                            onDelete = { viewModel.deleteExerciseItem(index) }
+                        )
                     }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -882,8 +926,17 @@ private fun SettingsScreen(
                     viewModel.reminders.forEach { reminder ->
                         ReminderRow(
                             reminder = reminder,
+                            onTitleChange = { viewModel.renameReminder(reminder.id, it) },
+                            onTimeChange = {
+                                viewModel.updateReminderTime(reminder.id, it)
+                                onReminderScheduleChanged()
+                            },
                             onToggle = {
                                 viewModel.toggleReminder(reminder.id)
+                                onReminderScheduleChanged()
+                            },
+                            onDelete = {
+                                viewModel.deleteReminder(reminder.id)
                                 onReminderScheduleChanged()
                             }
                         )
@@ -1064,6 +1117,46 @@ private fun SettingsScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = viewModel.biometricUnlockEnabled,
+                            enabled = viewModel.biometricUnlockAvailable,
+                            onCheckedChange = onBiometricUnlockChanged
+                        )
+                        Text("Biometric unlock")
+                    }
+                    Text(
+                        text = if (viewModel.biometricUnlockAvailable) {
+                            "PIN remains available as fallback."
+                        } else {
+                            "Biometric unlock is not available on this device."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            viewModel.generateRecoveryPhrase()?.let(onRecoveryPhraseSet)
+                        }
+                    ) {
+                        Text("Generate Recovery Phrase")
+                    }
+                    if (viewModel.generatedRecoveryPhrase.isNotBlank()) {
+                        Text(
+                            text = viewModel.generatedRecoveryPhrase,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    if (viewModel.recoveryPhraseMessage.isNotBlank()) {
+                        Text(
+                            text = viewModel.recoveryPhraseMessage,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         }
@@ -1128,7 +1221,10 @@ private fun HiddenSudokuGate(viewModel: HumanProgramViewModel) {
 @Composable
 private fun ReminderRow(
     reminder: NotificationReminder,
-    onToggle: () -> Unit
+    onTitleChange: (String) -> Unit,
+    onTimeChange: (String) -> Unit,
+    onToggle: () -> Unit,
+    onDelete: () -> Unit
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -1139,14 +1235,29 @@ private fun ReminderRow(
             checked = reminder.isEnabled,
             onCheckedChange = { onToggle() }
         )
-        Column {
-            Text(
-                text = reminder.title,
-                fontWeight = FontWeight.SemiBold
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            OutlinedTextField(
+                modifier = Modifier.fillMaxWidth(),
+                value = reminder.title,
+                onValueChange = onTitleChange,
+                label = { Text("Reminder") },
+                singleLine = true
             )
-            Text(
-                text = "${reminder.reminderAt} · ${reminder.recurrence.label}",
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+            OutlinedTextField(
+                modifier = Modifier.fillMaxWidth(),
+                value = reminder.reminderAt,
+                onValueChange = onTimeChange,
+                label = { Text(reminder.recurrence.label) },
+                singleLine = true
+            )
+        }
+        IconButton(onClick = onDelete) {
+            Icon(
+                imageVector = Icons.Outlined.Delete,
+                contentDescription = "Delete reminder"
             )
         }
     }
@@ -1200,16 +1311,80 @@ private fun RecurringTemplateRow(
 }
 
 @Composable
-private fun ScheduleBlockRow(block: ScheduleBlock) {
+private fun ScheduleBlockRow(
+    block: ScheduleBlock,
+    onTitleChange: (String) -> Unit,
+    onTimeRangeChange: (String) -> Unit,
+    onDelete: () -> Unit
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(block.title)
-        Text(
-            text = block.timeRange,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+        OutlinedTextField(
+            modifier = Modifier.weight(1f),
+            value = block.title,
+            onValueChange = onTitleChange,
+            label = { Text("Block") },
+            singleLine = true
         )
+        OutlinedTextField(
+            modifier = Modifier.weight(1f),
+            value = block.timeRange,
+            onValueChange = onTimeRangeChange,
+            label = { Text("Time") },
+            singleLine = true
+        )
+        IconButton(onClick = onDelete) {
+            Icon(
+                imageVector = Icons.Outlined.Delete,
+                contentDescription = "Delete schedule block"
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExerciseItemRow(
+    item: String,
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
+    onItemChange: (String) -> Unit,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        OutlinedTextField(
+            modifier = Modifier.weight(1f),
+            value = item,
+            onValueChange = onItemChange,
+            label = { Text("Exercise") },
+            singleLine = true
+        )
+        OutlinedButton(
+            enabled = canMoveUp,
+            onClick = onMoveUp
+        ) {
+            Text("Up")
+        }
+        OutlinedButton(
+            enabled = canMoveDown,
+            onClick = onMoveDown
+        ) {
+            Text("Down")
+        }
+        IconButton(onClick = onDelete) {
+            Icon(
+                imageVector = Icons.Outlined.Delete,
+                contentDescription = "Delete exercise item"
+            )
+        }
     }
 }
 

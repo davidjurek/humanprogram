@@ -40,6 +40,7 @@ import app.humanprogram.android.planning.stats.DailyCompletionSnapshot
 import app.humanprogram.android.planning.stats.StreakCalculator
 import java.io.InputStream
 import java.io.OutputStream
+import java.security.SecureRandom
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -155,6 +156,12 @@ class HumanProgramViewModel(
     var appLockTimeoutMinutes by mutableStateOf(0)
         private set
 
+    var biometricUnlockEnabled by mutableStateOf(false)
+        private set
+
+    var biometricUnlockAvailable by mutableStateOf(false)
+        private set
+
     var appLockPinInput by mutableStateOf("")
         private set
 
@@ -168,6 +175,15 @@ class HumanProgramViewModel(
         private set
 
     var appUnlockMessage by mutableStateOf("")
+        private set
+
+    var recoveryPhraseInput by mutableStateOf("")
+        private set
+
+    var generatedRecoveryPhrase by mutableStateOf("")
+        private set
+
+    var recoveryPhraseMessage by mutableStateOf("")
         private set
 
     var resetConfirmationInput by mutableStateOf("")
@@ -206,6 +222,7 @@ class HumanProgramViewModel(
     val hiddenSudokuCells = mutableStateListOf("1", "", "", "", "", "", "", "", "")
 
     private var appLockPinHash: PinHash? = null
+    private var recoveryPhraseHash: PinHash? = null
     private var lastUnlockedAt: Instant? = null
     private var pendingHprgmImportSnapshot: PlannerSnapshot? = null
     private var unlockedPastEditDate: LocalDate? = null
@@ -399,17 +416,33 @@ class HumanProgramViewModel(
         appUnlockPinInput = value.filter { it.isDigit() }.take(12)
     }
 
+    fun updateRecoveryPhraseInput(value: String) {
+        recoveryPhraseInput = value.lowercase().take(120)
+    }
+
     fun updateResetConfirmationInput(value: String) {
         resetConfirmationInput = value.take(20)
     }
 
     fun loadStoredAppLockPin(
         enabled: Boolean,
+        biometricEnabled: Boolean,
         saltBase64: String,
         hashBase64: String,
-        timeoutMinutes: Int
+        timeoutMinutes: Int,
+        recoverySaltBase64: String = "",
+        recoveryHashBase64: String = ""
     ) {
         appLockTimeoutMinutes = timeoutMinutes.coerceAtLeast(0)
+        biometricUnlockEnabled = biometricEnabled
+        recoveryPhraseHash = if (recoverySaltBase64.isNotBlank() && recoveryHashBase64.isNotBlank()) {
+            PinHash(
+                saltBase64 = recoverySaltBase64,
+                hashBase64 = recoveryHashBase64
+            )
+        } else {
+            null
+        }
         if (enabled && saltBase64.isNotBlank() && hashBase64.isNotBlank()) {
             val wasAlreadyEnabled = appLockEnabled
             appLockEnabled = true
@@ -423,6 +456,33 @@ class HumanProgramViewModel(
             if (appLockPinMessage.isBlank()) {
                 appLockPinMessage = "App lock PIN is saved on this device."
             }
+        }
+    }
+
+    fun updateBiometricAvailability(available: Boolean) {
+        biometricUnlockAvailable = available
+        if (!available) {
+            biometricUnlockEnabled = false
+        }
+    }
+
+    fun updateBiometricUnlockEnabled(enabled: Boolean) {
+        if (enabled && !biometricUnlockAvailable) {
+            appLockPinMessage = "Biometric unlock is not available on this device."
+            biometricUnlockEnabled = false
+            return
+        }
+        if (enabled && !appLockEnabled) {
+            appLockPinMessage = "Set a PIN before enabling biometric unlock."
+            biometricUnlockEnabled = false
+            return
+        }
+
+        biometricUnlockEnabled = enabled
+        appLockPinMessage = if (enabled) {
+            "Biometric unlock is enabled. PIN remains as fallback."
+        } else {
+            "Biometric unlock is disabled."
         }
     }
 
@@ -628,14 +688,47 @@ class HumanProgramViewModel(
         val cleanTimeRange = newScheduleTimeRange.trim()
         if (cleanTitle.isEmpty() || cleanTimeRange.isEmpty()) return
 
+        val previous = scheduleBlocks.toList()
         scheduleBlocks.add(
             ScheduleBlock(
                 title = cleanTitle,
                 timeRange = cleanTimeRange
             )
         )
+        recordEdit(PlannerEdit.ReplaceScheduleBlocks(previous, scheduleBlocks.toList()))
         newScheduleTitle = ""
         newScheduleTimeRange = ""
+        saveSnapshot()
+    }
+
+    fun renameScheduleBlock(index: Int, title: String) {
+        if (index !in scheduleBlocks.indices) return
+        val cleanTitle = title.trimStart()
+        if (cleanTitle.isBlank() || scheduleBlocks[index].title == cleanTitle) return
+
+        val previous = scheduleBlocks.toList()
+        scheduleBlocks[index] = scheduleBlocks[index].copy(title = cleanTitle)
+        recordEdit(PlannerEdit.ReplaceScheduleBlocks(previous, scheduleBlocks.toList()))
+        saveSnapshot()
+    }
+
+    fun updateScheduleBlockTimeRange(index: Int, timeRange: String) {
+        if (index !in scheduleBlocks.indices) return
+        val cleanTimeRange = timeRange.trimStart()
+        if (cleanTimeRange.isBlank() || scheduleBlocks[index].timeRange == cleanTimeRange) return
+
+        val previous = scheduleBlocks.toList()
+        scheduleBlocks[index] = scheduleBlocks[index].copy(timeRange = cleanTimeRange)
+        recordEdit(PlannerEdit.ReplaceScheduleBlocks(previous, scheduleBlocks.toList()))
+        saveSnapshot()
+    }
+
+    fun deleteScheduleBlock(index: Int) {
+        if (index !in scheduleBlocks.indices) return
+
+        val previous = scheduleBlocks.toList()
+        scheduleBlocks.removeAt(index)
+        recordEdit(PlannerEdit.ReplaceScheduleBlocks(previous, scheduleBlocks.toList()))
         saveSnapshot()
     }
 
@@ -643,10 +736,51 @@ class HumanProgramViewModel(
         val cleanItem = newExerciseItem.trim()
         if (cleanItem.isEmpty()) return
 
+        val previous = exerciseRoutine
         exerciseRoutine = exerciseRoutine.copy(
             items = exerciseRoutine.items + cleanItem
         )
+        recordEdit(PlannerEdit.ReplaceExerciseRoutine(previous, exerciseRoutine))
         newExerciseItem = ""
+        saveSnapshot()
+    }
+
+    fun renameExerciseItem(index: Int, item: String) {
+        if (index !in exerciseRoutine.items.indices) return
+        val cleanItem = item.trimStart()
+        if (cleanItem.isBlank() || exerciseRoutine.items[index] == cleanItem) return
+
+        val previous = exerciseRoutine
+        val updatedItems = exerciseRoutine.items.toMutableList()
+        updatedItems[index] = cleanItem
+        exerciseRoutine = exerciseRoutine.copy(items = updatedItems)
+        recordEdit(PlannerEdit.ReplaceExerciseRoutine(previous, exerciseRoutine))
+        saveSnapshot()
+    }
+
+    fun deleteExerciseItem(index: Int) {
+        if (index !in exerciseRoutine.items.indices) return
+
+        val previous = exerciseRoutine
+        val updatedItems = exerciseRoutine.items.toMutableList()
+        updatedItems.removeAt(index)
+        exerciseRoutine = exerciseRoutine.copy(items = updatedItems)
+        recordEdit(PlannerEdit.ReplaceExerciseRoutine(previous, exerciseRoutine))
+        saveSnapshot()
+    }
+
+    fun moveExerciseItem(
+        fromIndex: Int,
+        toIndex: Int
+    ) {
+        if (fromIndex !in exerciseRoutine.items.indices || toIndex !in exerciseRoutine.items.indices) return
+
+        val previous = exerciseRoutine
+        val updatedItems = exerciseRoutine.items.toMutableList()
+        val item = updatedItems.removeAt(fromIndex)
+        updatedItems.add(toIndex, item)
+        exerciseRoutine = exerciseRoutine.copy(items = updatedItems)
+        recordEdit(PlannerEdit.ReplaceExerciseRoutine(previous, exerciseRoutine))
         saveSnapshot()
     }
 
@@ -695,7 +829,49 @@ class HumanProgramViewModel(
         val index = reminders.indexOfFirst { it.id == reminderId }
         if (index == -1) return
 
+        val previous = reminders.toList()
         reminders[index] = reminders[index].copy(isEnabled = !reminders[index].isEnabled)
+        recordEdit(PlannerEdit.ReplaceReminders(previous, reminders.toList()))
+        saveSnapshot()
+    }
+
+    fun renameReminder(
+        reminderId: String,
+        title: String
+    ) {
+        val cleanTitle = title.trimStart()
+        if (cleanTitle.isBlank()) return
+        val index = reminders.indexOfFirst { it.id == reminderId }
+        if (index == -1 || reminders[index].title == cleanTitle) return
+
+        val previous = reminders.toList()
+        reminders[index] = reminders[index].copy(title = cleanTitle)
+        recordEdit(PlannerEdit.ReplaceReminders(previous, reminders.toList()))
+        saveSnapshot()
+    }
+
+    fun updateReminderTime(
+        reminderId: String,
+        time: String
+    ) {
+        val cleanTime = time.trimStart()
+        if (cleanTime.isBlank()) return
+        val index = reminders.indexOfFirst { it.id == reminderId }
+        if (index == -1 || reminders[index].reminderAt == cleanTime) return
+
+        val previous = reminders.toList()
+        reminders[index] = reminders[index].copy(reminderAt = cleanTime)
+        recordEdit(PlannerEdit.ReplaceReminders(previous, reminders.toList()))
+        saveSnapshot()
+    }
+
+    fun deleteReminder(reminderId: String) {
+        val index = reminders.indexOfFirst { it.id == reminderId }
+        if (index == -1) return
+
+        val previous = reminders.toList()
+        reminders.removeAt(index)
+        recordEdit(PlannerEdit.ReplaceReminders(previous, reminders.toList()))
         saveSnapshot()
     }
 
@@ -712,6 +888,19 @@ class HumanProgramViewModel(
         appLockPinInput = ""
         appLockPinMessage = "App lock PIN is saved on this device."
         return appLockPinHash
+    }
+
+    fun generateRecoveryPhrase(): PinHash? {
+        if (!appLockEnabled) {
+            recoveryPhraseMessage = "Set a PIN first."
+            return null
+        }
+
+        val phrase = buildRecoveryPhrase()
+        generatedRecoveryPhrase = phrase
+        recoveryPhraseHash = pinHashService.hash(phrase)
+        recoveryPhraseMessage = "Recovery phrase generated. Store it somewhere safe."
+        return recoveryPhraseHash
     }
 
     fun testAppLockPin() {
@@ -770,6 +959,40 @@ class HumanProgramViewModel(
             appUnlockPinInput = ""
             appUnlockMessage = "PIN rejected."
         }
+    }
+
+    fun unlockAppWithRecoveryPhrase() {
+        val hash = recoveryPhraseHash
+        if (hash == null) {
+            appUnlockMessage = "No recovery phrase is saved."
+            return
+        }
+
+        if (pinHashService.verify(recoveryPhraseInput.trim().lowercase(), hash)) {
+            appLocked = false
+            lastUnlockedAt = Instant.now()
+            recoveryPhraseInput = ""
+            appUnlockMessage = ""
+        } else {
+            recoveryPhraseInput = ""
+            appUnlockMessage = "Recovery phrase rejected."
+        }
+    }
+
+    fun unlockAppWithBiometric() {
+        if (!appLockEnabled || !biometricUnlockEnabled || !biometricUnlockAvailable) {
+            appUnlockMessage = "Biometric unlock is not available."
+            return
+        }
+
+        appLocked = false
+        lastUnlockedAt = Instant.now()
+        appUnlockPinInput = ""
+        appUnlockMessage = ""
+    }
+
+    fun reportBiometricUnlockFailure(message: String) {
+        appUnlockMessage = message
     }
 
     fun updateNotificationPermissionStatus(granted: Boolean) {
@@ -1139,6 +1362,15 @@ class HumanProgramViewModel(
                     syncBacklogTaskTitle(edit.previous.id, edit.previous.title)
                 }
             }
+            is PlannerEdit.ReplaceScheduleBlocks -> {
+                scheduleBlocks.replaceWith(edit.previous)
+            }
+            is PlannerEdit.ReplaceExerciseRoutine -> {
+                exerciseRoutine = edit.previous
+            }
+            is PlannerEdit.ReplaceReminders -> {
+                reminders.replaceWith(edit.previous)
+            }
         }
         redoStack.add(edit)
         saveSnapshot()
@@ -1192,6 +1424,15 @@ class HumanProgramViewModel(
                     syncBacklogTaskTitle(edit.updated.id, edit.updated.title)
                 }
             }
+            is PlannerEdit.ReplaceScheduleBlocks -> {
+                scheduleBlocks.replaceWith(edit.updated)
+            }
+            is PlannerEdit.ReplaceExerciseRoutine -> {
+                exerciseRoutine = edit.updated
+            }
+            is PlannerEdit.ReplaceReminders -> {
+                reminders.replaceWith(edit.updated)
+            }
         }
         undoStack.add(edit)
         saveSnapshot()
@@ -1237,6 +1478,11 @@ class HumanProgramViewModel(
     private fun recordEdit(edit: PlannerEdit) {
         undoStack.add(edit)
         redoStack.clear()
+    }
+
+    private fun <T> MutableList<T>.replaceWith(items: List<T>) {
+        clear()
+        addAll(items)
     }
 
     private fun saveSnapshot() {
@@ -1386,6 +1632,39 @@ class HumanProgramViewModel(
             null
         }
     }
+
+    private fun buildRecoveryPhrase(): String {
+        val random = SecureRandom()
+        return (1..6)
+            .map { recoveryWords[random.nextInt(recoveryWords.size)] }
+            .joinToString("-")
+    }
+
+    private val recoveryWords = listOf(
+        "anchor",
+        "bright",
+        "cedar",
+        "dawn",
+        "ember",
+        "field",
+        "harbor",
+        "ivory",
+        "juniper",
+        "kindle",
+        "lantern",
+        "meadow",
+        "north",
+        "olive",
+        "prairie",
+        "quiet",
+        "river",
+        "silver",
+        "thrive",
+        "violet",
+        "willow",
+        "yonder",
+        "zenith"
+    )
 }
 
 private sealed interface PlannerEdit {
@@ -1422,6 +1701,21 @@ private sealed interface PlannerEdit {
         val index: Int,
         val previous: BacklogItem,
         val updated: BacklogItem
+    ) : PlannerEdit
+
+    data class ReplaceScheduleBlocks(
+        val previous: List<ScheduleBlock>,
+        val updated: List<ScheduleBlock>
+    ) : PlannerEdit
+
+    data class ReplaceExerciseRoutine(
+        val previous: ExerciseRoutine,
+        val updated: ExerciseRoutine
+    ) : PlannerEdit
+
+    data class ReplaceReminders(
+        val previous: List<NotificationReminder>,
+        val updated: List<NotificationReminder>
     ) : PlannerEdit
 }
 

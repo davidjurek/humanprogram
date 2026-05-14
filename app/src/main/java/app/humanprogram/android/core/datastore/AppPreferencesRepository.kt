@@ -20,9 +20,12 @@ data class AppPreferences(
     val calendarViewMode: String,
     val selectedCalendarIdsCsv: String = "",
     val appLockEnabled: Boolean = false,
+    val biometricUnlockEnabled: Boolean = false,
     val appLockTimeoutMinutes: Int = 0,
     val appLockPinSaltBase64: String = "",
-    val appLockPinHashBase64: String = ""
+    val appLockPinHashBase64: String = "",
+    val recoveryPhraseSaltBase64: String = "",
+    val recoveryPhraseHashBase64: String = ""
 )
 
 class AppPreferencesRepository(
@@ -38,9 +41,12 @@ class AppPreferencesRepository(
             calendarViewMode = prefs[Keys.CalendarViewMode] ?: "month",
             selectedCalendarIdsCsv = prefs[Keys.SelectedCalendarIdsCsv].orEmpty(),
             appLockEnabled = prefs[Keys.AppLockEnabled] ?: false,
+            biometricUnlockEnabled = prefs[Keys.BiometricUnlockEnabled] ?: false,
             appLockTimeoutMinutes = prefs[Keys.AppLockTimeoutMinutes]?.toIntOrNull() ?: 0,
             appLockPinSaltBase64 = prefs[Keys.AppLockPinSaltBase64].orEmpty(),
-            appLockPinHashBase64 = prefs[Keys.AppLockPinHashBase64].orEmpty()
+            appLockPinHashBase64 = prefs[Keys.AppLockPinHashBase64].orEmpty(),
+            recoveryPhraseSaltBase64 = prefs[Keys.RecoveryPhraseSaltBase64].orEmpty(),
+            recoveryPhraseHashBase64 = prefs[Keys.RecoveryPhraseHashBase64].orEmpty()
         )
     }
 
@@ -65,8 +71,11 @@ class AppPreferencesRepository(
         val CalendarViewMode = stringPreferencesKey("calendar_view_mode")
         val SelectedCalendarIdsCsv = stringPreferencesKey("selected_calendar_ids_csv")
         val AppLockEnabled = booleanPreferencesKey("app_lock_enabled")
+        val BiometricUnlockEnabled = booleanPreferencesKey("biometric_unlock_enabled")
         val AppLockTimeoutMinutes = stringPreferencesKey("app_lock_timeout_minutes")
         val AppLockPinSaltBase64 = stringPreferencesKey("app_lock_pin_salt_base64")
         val AppLockPinHashBase64 = stringPreferencesKey("app_lock_pin_hash_base64")
+        val RecoveryPhraseSaltBase64 = stringPreferencesKey("recovery_phrase_salt_base64")
+        val RecoveryPhraseHashBase64 = stringPreferencesKey("recovery_phrase_hash_base64")
     }
 }
