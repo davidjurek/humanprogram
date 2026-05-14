@@ -147,6 +147,9 @@ Use this file to track what has been built, what is next, and what decisions hav
 - Added historical daily task CSV export preview across saved daily pages.
 - Added Android Keystore AES-GCM encryption for the app-private planner snapshot, with plaintext snapshot migration on next save.
 - Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew test assembleDebug` successfully after project controls, daily task CSV export, and encrypted snapshot storage.
+- Added persisted first-launch welcome sequence with privacy/offline copy, optional PIN/recovery phrase setup, optional calendar permission, and Enter Today action.
+- Replaced simple reset confirmation with a staged reset sequence: start reset, backup reminder, explicit acknowledgement, typed `reset`, then reset.
+- Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew test assembleDebug` successfully after onboarding and reset sequence work.
 
 ## In Progress
 

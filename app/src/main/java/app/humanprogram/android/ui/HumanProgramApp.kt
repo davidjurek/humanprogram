@@ -80,6 +80,7 @@ fun HumanProgramApp(
     onReminderScheduleChanged: () -> Unit = {},
     onRefreshCalendarEvents: () -> Unit = {},
     onToggleCalendarSource: (String) -> Unit = {},
+    onOnboardingComplete: () -> Unit = {},
     onAppLockPinSet: (PinHash) -> Unit = {},
     onRecoveryPhraseSet: (PinHash) -> Unit = {},
     onAppLockTimeoutChanged: (Int) -> Unit = {},
@@ -92,6 +93,18 @@ fun HumanProgramApp(
         AppLockScreen(
             viewModel = viewModel,
             onRequestBiometricUnlock = onRequestBiometricUnlock
+        )
+        return
+    }
+
+    if (!viewModel.onboardingComplete) {
+        WelcomeScreen(
+            viewModel = viewModel,
+            calendarPermissionGranted = calendarPermissionGranted,
+            onRequestCalendarPermission = onRequestCalendarPermission,
+            onAppLockPinSet = onAppLockPinSet,
+            onRecoveryPhraseSet = onRecoveryPhraseSet,
+            onOnboardingComplete = onOnboardingComplete
         )
         return
     }
@@ -225,6 +238,115 @@ private fun AppLockScreen(
                     text = viewModel.appUnlockMessage,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WelcomeScreen(
+    viewModel: HumanProgramViewModel,
+    calendarPermissionGranted: Boolean,
+    onRequestCalendarPermission: () -> Unit,
+    onAppLockPinSet: (PinHash) -> Unit,
+    onRecoveryPhraseSet: (PinHash) -> Unit,
+    onOnboardingComplete: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background
+    ) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            item {
+                Header(
+                    title = "Human Program",
+                    subtitle = "Private, offline daily planning."
+                )
+            }
+
+            item {
+                SectionCard(title = "Start") {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Your data stays on this device by default.")
+                        Text("Today combines tasks, backlog, calendar items, schedule, and exercise.")
+                        Text("You can export `.hprgm` backups from Settings.")
+                    }
+                }
+            }
+
+            item {
+                SectionCard(title = "App Lock") {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        OutlinedTextField(
+                            modifier = Modifier.fillMaxWidth(),
+                            value = viewModel.appLockPinInput,
+                            onValueChange = viewModel::updateAppLockPinInput,
+                            label = { Text("Optional PIN") },
+                            singleLine = true
+                        )
+                        Button(
+                            onClick = {
+                                viewModel.setupAppLockPin()?.let(onAppLockPinSet)
+                            }
+                        ) {
+                            Text("Set PIN")
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                viewModel.generateRecoveryPhrase()?.let(onRecoveryPhraseSet)
+                            },
+                            enabled = viewModel.appLockEnabled
+                        ) {
+                            Text("Generate Recovery Phrase")
+                        }
+                        if (viewModel.generatedRecoveryPhrase.isNotBlank()) {
+                            Text(
+                                text = viewModel.generatedRecoveryPhrase,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        if (viewModel.appLockPinMessage.isNotBlank()) {
+                            Text(
+                                text = viewModel.appLockPinMessage,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (viewModel.recoveryPhraseMessage.isNotBlank()) {
+                            Text(
+                                text = viewModel.recoveryPhraseMessage,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
+            item {
+                SectionCard(title = "Calendar") {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Calendar access is optional. You can allow it now or later.")
+                        if (calendarPermissionGranted) {
+                            Text("Calendar permission is allowed.")
+                        } else {
+                            OutlinedButton(onClick = onRequestCalendarPermission) {
+                                Text("Allow Calendar")
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onOnboardingComplete
+                ) {
+                    Text("Enter Today")
+                }
             }
         }
     }
@@ -1064,16 +1186,37 @@ private fun SettingsScreen(
         item {
             SectionCard(title = "Local Reset") {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("This resets planner data stored inside the app.")
-                    OutlinedTextField(
-                        modifier = Modifier.fillMaxWidth(),
-                        value = viewModel.resetConfirmationInput,
-                        onValueChange = viewModel::updateResetConfirmationInput,
-                        label = { Text("Type reset") },
-                        singleLine = true
-                    )
-                    OutlinedButton(onClick = viewModel::factoryResetLocalPlannerData) {
-                        Text("Reset Local Data")
+                    Text("This resets planner data stored inside the app. Exported files outside app storage are not deleted.")
+                    if (!viewModel.resetSequenceStarted) {
+                        OutlinedButton(onClick = viewModel::beginResetSequence) {
+                            Text("Start Reset")
+                        }
+                    } else {
+                        Text("Step 1: Save a `.hprgm` backup first if you want to keep this data.")
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            OutlinedButton(onClick = onExportHprgm) {
+                                Text("Save Backup")
+                            }
+                            OutlinedButton(onClick = viewModel::acknowledgeResetExportReminder) {
+                                Text("I Understand")
+                            }
+                        }
+                        if (viewModel.resetExportReminderAcknowledged) {
+                            Text("Step 2: Type reset.")
+                            OutlinedTextField(
+                                modifier = Modifier.fillMaxWidth(),
+                                value = viewModel.resetConfirmationInput,
+                                onValueChange = viewModel::updateResetConfirmationInput,
+                                label = { Text("Type reset") },
+                                singleLine = true
+                            )
+                            Button(onClick = viewModel::factoryResetLocalPlannerData) {
+                                Text("Reset Local Data")
+                            }
+                        }
+                        OutlinedButton(onClick = viewModel::cancelResetSequence) {
+                            Text("Cancel Reset")
+                        }
                     }
                     if (viewModel.resetMessage.isNotBlank()) {
                         Text(

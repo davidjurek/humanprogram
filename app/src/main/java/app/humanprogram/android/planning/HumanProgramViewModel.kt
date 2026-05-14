@@ -198,6 +198,15 @@ class HumanProgramViewModel(
     var resetMessage by mutableStateOf("")
         private set
 
+    var resetSequenceStarted by mutableStateOf(false)
+        private set
+
+    var resetExportReminderAcknowledged by mutableStateOf(false)
+        private set
+
+    var onboardingComplete by mutableStateOf(false)
+        private set
+
     var hprgmMessage by mutableStateOf("")
         private set
 
@@ -432,6 +441,35 @@ class HumanProgramViewModel(
 
     fun updateResetConfirmationInput(value: String) {
         resetConfirmationInput = value.take(20)
+    }
+
+    fun loadOnboardingComplete(complete: Boolean) {
+        onboardingComplete = complete
+    }
+
+    fun completeOnboarding() {
+        onboardingComplete = true
+    }
+
+    fun beginResetSequence() {
+        resetSequenceStarted = true
+        resetExportReminderAcknowledged = false
+        resetConfirmationInput = ""
+        resetMessage = "Export a .hprgm backup first if you want to keep this data."
+    }
+
+    fun acknowledgeResetExportReminder() {
+        if (!resetSequenceStarted) return
+
+        resetExportReminderAcknowledged = true
+        resetMessage = "Type reset to confirm local planner reset."
+    }
+
+    fun cancelResetSequence() {
+        resetSequenceStarted = false
+        resetExportReminderAcknowledged = false
+        resetConfirmationInput = ""
+        resetMessage = ""
     }
 
     fun loadStoredAppLockPin(
@@ -1244,6 +1282,14 @@ class HumanProgramViewModel(
     }
 
     fun factoryResetLocalPlannerData() {
+        if (!resetSequenceStarted) {
+            resetMessage = "Start reset first."
+            return
+        }
+        if (!resetExportReminderAcknowledged) {
+            resetMessage = "Confirm that you understand export is separate first."
+            return
+        }
         if (resetConfirmationInput.trim().lowercase() != "reset") {
             resetMessage = "Type reset to confirm."
             return
@@ -1285,6 +1331,8 @@ class HumanProgramViewModel(
         )
         persistSelectedPage()
         resetConfirmationInput = ""
+        resetSequenceStarted = false
+        resetExportReminderAcknowledged = false
         resetMessage = "Local planner data reset."
         saveSnapshot()
     }

@@ -18,6 +18,7 @@ data class AppPreferences(
     val showProjectBucket: Boolean,
     val showTaskSource: Boolean,
     val calendarViewMode: String,
+    val onboardingComplete: Boolean = false,
     val selectedCalendarIdsCsv: String = "",
     val appLockEnabled: Boolean = false,
     val biometricUnlockEnabled: Boolean = false,
@@ -39,6 +40,7 @@ class AppPreferencesRepository(
             showProjectBucket = prefs[Keys.ShowProjectBucket] ?: false,
             showTaskSource = prefs[Keys.ShowTaskSource] ?: true,
             calendarViewMode = prefs[Keys.CalendarViewMode] ?: "month",
+            onboardingComplete = prefs[Keys.OnboardingComplete] ?: false,
             selectedCalendarIdsCsv = prefs[Keys.SelectedCalendarIdsCsv].orEmpty(),
             appLockEnabled = prefs[Keys.AppLockEnabled] ?: false,
             biometricUnlockEnabled = prefs[Keys.BiometricUnlockEnabled] ?: false,
@@ -69,6 +71,7 @@ class AppPreferencesRepository(
         val ShowProjectBucket = booleanPreferencesKey("show_project_bucket")
         val ShowTaskSource = booleanPreferencesKey("show_task_source")
         val CalendarViewMode = stringPreferencesKey("calendar_view_mode")
+        val OnboardingComplete = booleanPreferencesKey("onboarding_complete")
         val SelectedCalendarIdsCsv = stringPreferencesKey("selected_calendar_ids_csv")
         val AppLockEnabled = booleanPreferencesKey("app_lock_enabled")
         val BiometricUnlockEnabled = booleanPreferencesKey("biometric_unlock_enabled")

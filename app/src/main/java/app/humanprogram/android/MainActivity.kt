@@ -127,6 +127,15 @@ class MainActivity : ComponentActivity() {
                     onReminderScheduleChanged = ::syncReminderSchedule,
                     onRefreshCalendarEvents = ::refreshCalendarEvents,
                     onToggleCalendarSource = ::toggleCalendarSource,
+                    onOnboardingComplete = {
+                        plannerViewModel.completeOnboarding()
+                        lifecycleScope.launch {
+                            appPreferencesRepository.setBoolean(
+                                AppPreferencesRepository.Keys.OnboardingComplete,
+                                true
+                            )
+                        }
+                    },
                     onAppLockPinSet = { pinHash ->
                         lifecycleScope.launch {
                             appPreferencesRepository.setBoolean(
@@ -286,6 +295,7 @@ class MainActivity : ComponentActivity() {
                         .filter { it.isNotBlank() }
                         .toSet()
                 )
+                plannerViewModel.loadOnboardingComplete(preferences.onboardingComplete)
                 refreshCalendarEvents()
             }
         }

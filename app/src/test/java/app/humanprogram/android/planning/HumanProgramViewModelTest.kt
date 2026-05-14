@@ -478,6 +478,18 @@ class HumanProgramViewModelTest {
         viewModel.factoryResetLocalPlannerData()
 
         assertTrue(viewModel.todayTasks.any { it.title == "Reset target" })
+        assertEquals("Start reset first.", viewModel.resetMessage)
+
+        viewModel.beginResetSequence()
+        viewModel.factoryResetLocalPlannerData()
+
+        assertTrue(viewModel.todayTasks.any { it.title == "Reset target" })
+        assertEquals("Confirm that you understand export is separate first.", viewModel.resetMessage)
+
+        viewModel.acknowledgeResetExportReminder()
+        viewModel.factoryResetLocalPlannerData()
+
+        assertTrue(viewModel.todayTasks.any { it.title == "Reset target" })
         assertEquals("Type reset to confirm.", viewModel.resetMessage)
 
         viewModel.updateResetConfirmationInput("reset")
@@ -485,6 +497,22 @@ class HumanProgramViewModelTest {
 
         assertFalse(viewModel.todayTasks.any { it.title == "Reset target" })
         assertEquals("Local planner data reset.", viewModel.resetMessage)
+        assertFalse(viewModel.resetSequenceStarted)
+    }
+
+    @Test
+    fun onboardingCanBeCompletedAndLoaded() {
+        val viewModel = HumanProgramViewModel()
+
+        assertFalse(viewModel.onboardingComplete)
+
+        viewModel.completeOnboarding()
+
+        assertTrue(viewModel.onboardingComplete)
+
+        viewModel.loadOnboardingComplete(false)
+
+        assertFalse(viewModel.onboardingComplete)
     }
 
     @Test
