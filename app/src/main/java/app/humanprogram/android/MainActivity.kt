@@ -292,9 +292,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun isBiometricAvailable(): Boolean {
-        val manager = getSystemService(BiometricManager::class.java) ?: return false
-        return manager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) ==
-            BiometricManager.BIOMETRIC_SUCCESS
+        return runCatching {
+            val manager = getSystemService(BiometricManager::class.java) ?: return false
+            manager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) ==
+                BiometricManager.BIOMETRIC_SUCCESS
+        }.getOrDefault(false)
     }
 
     private fun requestBiometricUnlock() {

@@ -39,7 +39,7 @@ class PlannerSnapshotStore(context: Context) {
 
     fun load(): PlannerSnapshot? {
         if (encryptedFile.exists()) {
-            return runCatching {
+            val encryptedSnapshot = runCatching {
                 val wrapper = JSONObject(encryptedFile.readText())
                 val iv = Base64.getDecoder().decode(wrapper.getString("ivBase64"))
                 val cipherText = Base64.getDecoder().decode(wrapper.getString("cipherTextBase64"))
@@ -47,28 +47,39 @@ class PlannerSnapshotStore(context: Context) {
                 cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(GCM_TAG_BITS, iv))
                 PlannerSnapshotJson.decode(JSONObject(cipher.doFinal(cipherText).toString(Charsets.UTF_8)))
             }.getOrNull()
+            if (encryptedSnapshot != null) return encryptedSnapshot
         }
 
         if (!legacyFile.exists()) return null
 
-        return PlannerSnapshotJson.decode(JSONObject(legacyFile.readText()))
+        return runCatching {
+            PlannerSnapshotJson.decode(JSONObject(legacyFile.readText()))
+        }.getOrNull()
     }
 
     fun save(snapshot: PlannerSnapshot) {
-        val iv = ByteArray(IV_SIZE_BYTES)
-        SecureRandom().nextBytes(iv)
-        val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey(), GCMParameterSpec(GCM_TAG_BITS, iv))
-        val cipherText = cipher.doFinal(PlannerSnapshotJson.encode(snapshot).toString().toByteArray(Charsets.UTF_8))
-        encryptedFile.writeText(
-            JSONObject()
-                .put("schemaVersion", 1)
-                .put("algorithm", TRANSFORMATION)
-                .put("ivBase64", Base64.getEncoder().encodeToString(iv))
-                .put("cipherTextBase64", Base64.getEncoder().encodeToString(cipherText))
-                .toString()
-        )
-        legacyFile.delete()
+        val plainText = PlannerSnapshotJson.encode(snapshot).toString()
+        val encrypted = runCatching {
+            val iv = ByteArray(IV_SIZE_BYTES)
+            SecureRandom().nextBytes(iv)
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey(), GCMParameterSpec(GCM_TAG_BITS, iv))
+            val cipherText = cipher.doFinal(plainText.toByteArray(Charsets.UTF_8))
+            encryptedFile.writeText(
+                JSONObject()
+                    .put("schemaVersion", 1)
+                    .put("algorithm", TRANSFORMATION)
+                    .put("ivBase64", Base64.getEncoder().encodeToString(iv))
+                    .put("cipherTextBase64", Base64.getEncoder().encodeToString(cipherText))
+                    .toString()
+            )
+        }.isSuccess
+
+        if (encrypted) {
+            legacyFile.delete()
+        } else {
+            legacyFile.writeText(plainText)
+        }
     }
 
     private fun getOrCreateKey(): SecretKey {
