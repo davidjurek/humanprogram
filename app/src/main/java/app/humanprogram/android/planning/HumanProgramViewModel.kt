@@ -6,12 +6,24 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import app.humanprogram.android.core.notifications.NotificationScheduleRequest
+import app.humanprogram.android.gamebridge.EasterEggGateService
+import app.humanprogram.android.gamebridge.EasterEggGateState
+import app.humanprogram.android.core.export.HprgmEncryptionService
 import app.humanprogram.android.core.security.PinHash
 import app.humanprogram.android.core.security.PinHashService
+import app.humanprogram.android.core.export.HprgmExportBuilder
+import app.humanprogram.android.core.export.HprgmZipReader
+import app.humanprogram.android.core.export.HprgmZipWriter
 import app.humanprogram.android.core.storage.PlannerSnapshot
+import app.humanprogram.android.core.storage.PlannerSnapshotJson
 import app.humanprogram.android.core.storage.PlannerSnapshotStore
 import app.humanprogram.android.planning.backlog.BacklogCsvExporter
 import app.humanprogram.android.planning.backlog.BacklogCsvImporter
+import app.humanprogram.android.planning.calendar.CalendarLocalState
+import app.humanprogram.android.planning.calendar.CalendarMergeService
+import app.humanprogram.android.planning.calendar.DeviceCalendarEvent
+import app.humanprogram.android.planning.calendar.DeviceCalendarSource
 import app.humanprogram.android.planning.daily.DailyCompletionService
 import app.humanprogram.android.planning.daily.DailyPageGenerator
 import app.humanprogram.android.planning.model.BacklogItem
@@ -24,8 +36,15 @@ import app.humanprogram.android.planning.model.RecurringTaskTemplate
 import app.humanprogram.android.planning.model.ScheduleBlock
 import app.humanprogram.android.planning.stats.DailyCompletionSnapshot
 import app.humanprogram.android.planning.stats.StreakCalculator
+import java.io.InputStream
+import java.io.OutputStream
+import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
+import org.json.JSONObject
 
 class HumanProgramViewModel(
     private val snapshotStore: PlannerSnapshotStore? = null
@@ -38,6 +57,12 @@ class HumanProgramViewModel(
     private val backlogCsvExporter = BacklogCsvExporter()
     private val backlogCsvImporter = BacklogCsvImporter()
     private val pinHashService = PinHashService()
+    private val hprgmExportBuilder = HprgmExportBuilder()
+    private val hprgmEncryptionService = HprgmEncryptionService()
+    private val hprgmZipWriter = HprgmZipWriter()
+    private val hprgmZipReader = HprgmZipReader()
+    private val calendarMergeService = CalendarMergeService()
+    private val easterEggGateService = EasterEggGateService()
 
     var selectedDate by mutableStateOf(today)
         private set
@@ -61,7 +86,7 @@ class HumanProgramViewModel(
     var exerciseRoutine by mutableStateOf(
         ExerciseRoutine(
             title = "Today routine",
-            items = listOf("Exercise routine will come from weekday templates later.")
+            items = listOf("No exercise items have been added for today.")
         )
     )
         private set
@@ -71,6 +96,17 @@ class HumanProgramViewModel(
     val todayTasks = mutableStateListOf<DailyTask>()
 
     val reminders = mutableStateListOf<NotificationReminder>()
+
+    val calendarEvents = mutableStateListOf<DeviceCalendarEvent>()
+
+    val calendarSources = mutableStateListOf<DeviceCalendarSource>()
+
+    val selectedCalendarSourceIds = mutableStateListOf<String>()
+
+    val calendarLocalStates = mutableStateListOf<CalendarLocalState>()
+
+    private val undoStack = mutableStateListOf<PlannerEdit>()
+    private val redoStack = mutableStateListOf<PlannerEdit>()
 
     val routines = mutableStateListOf<String>()
 
@@ -107,24 +143,61 @@ class HumanProgramViewModel(
     var appLockEnabled by mutableStateOf(false)
         private set
 
+    var appLockTimeoutMinutes by mutableStateOf(0)
+        private set
+
     var appLockPinInput by mutableStateOf("")
         private set
 
     var appLockPinMessage by mutableStateOf("")
         private set
 
+    var appLocked by mutableStateOf(false)
+        private set
+
+    var appUnlockPinInput by mutableStateOf("")
+        private set
+
+    var appUnlockMessage by mutableStateOf("")
+        private set
+
+    var hprgmMessage by mutableStateOf("")
+        private set
+
+    var hprgmExportPassword by mutableStateOf("")
+        private set
+
+    var hprgmIncludeGameSave by mutableStateOf(false)
+        private set
+
+    var hasPendingHprgmImport by mutableStateOf(false)
+        private set
+
+    var notificationPermissionMessage by mutableStateOf("Notification permission has not been checked yet.")
+        private set
+
+    var calendarPermissionMessage by mutableStateOf("Calendar permission has not been checked yet.")
+        private set
+
+    var hiddenSudokuGateVisible by mutableStateOf(false)
+        private set
+
+    var hiddenGameUnlocked by mutableStateOf(false)
+        private set
+
+    var hiddenGateMessage by mutableStateOf("")
+        private set
+
+    val hiddenSudokuCells = mutableStateListOf("1", "", "", "", "", "", "", "", "")
+
     private var appLockPinHash: PinHash? = null
+    private var lastUnlockedAt: Instant? = null
+    private var pendingHprgmImportSnapshot: PlannerSnapshot? = null
 
     init {
         val snapshot = snapshotStore?.load()
         if (snapshot != null) {
-            backlogItems.addAll(snapshot.backlogItems)
-            todayTasks.addAll(snapshot.todayTasks)
-            recurringTemplates.addAll(snapshot.recurringTemplates.ifEmpty { defaultRecurringTemplates() })
-            scheduleBlocks.addAll(snapshot.scheduleBlocks.ifEmpty { defaultScheduleBlocks() })
-            exerciseRoutine = snapshot.exerciseRoutine
-            reminders.addAll(snapshot.reminders)
-            routines.addAll(snapshot.routines)
+            applySnapshot(snapshot)
         } else {
             recurringTemplates.addAll(defaultRecurringTemplates())
             scheduleBlocks.addAll(defaultScheduleBlocks())
@@ -184,6 +257,12 @@ class HumanProgramViewModel(
     val activeBacklogByProject: Map<String, List<BacklogItem>>
         get() = activeBacklogItems.groupBy { it.projectBucket.ifBlank { "Unorganized" } }
 
+    val canUndo: Boolean
+        get() = undoStack.isNotEmpty()
+
+    val canRedo: Boolean
+        get() = redoStack.isNotEmpty()
+
     fun updateNewTaskTitle(value: String) {
         newTaskTitle = value
     }
@@ -232,6 +311,14 @@ class HumanProgramViewModel(
         backlogCsvInput = value
     }
 
+    fun updateHprgmExportPassword(value: String) {
+        hprgmExportPassword = value
+    }
+
+    fun updateHprgmIncludeGameSave(value: Boolean) {
+        hprgmIncludeGameSave = value
+    }
+
     fun updateNewReminderTitle(value: String) {
         newReminderTitle = value
     }
@@ -246,6 +333,37 @@ class HumanProgramViewModel(
 
     fun updateAppLockPinInput(value: String) {
         appLockPinInput = value.filter { it.isDigit() }.take(12)
+    }
+
+    fun updateAppUnlockPinInput(value: String) {
+        appUnlockPinInput = value.filter { it.isDigit() }.take(12)
+    }
+
+    fun loadStoredAppLockPin(
+        enabled: Boolean,
+        saltBase64: String,
+        hashBase64: String,
+        timeoutMinutes: Int
+    ) {
+        appLockTimeoutMinutes = timeoutMinutes.coerceAtLeast(0)
+        if (enabled && saltBase64.isNotBlank() && hashBase64.isNotBlank()) {
+            val wasAlreadyEnabled = appLockEnabled
+            appLockEnabled = true
+            appLockPinHash = PinHash(
+                saltBase64 = saltBase64,
+                hashBase64 = hashBase64
+            )
+            if (!wasAlreadyEnabled) {
+                appLocked = true
+            }
+            if (appLockPinMessage.isBlank()) {
+                appLockPinMessage = "App lock PIN is saved on this device."
+            }
+        }
+    }
+
+    fun updateAppLockTimeoutMinutes(minutes: Int) {
+        appLockTimeoutMinutes = minutes.coerceAtLeast(0)
     }
 
     fun addManualTask() {
@@ -268,12 +386,31 @@ class HumanProgramViewModel(
         val index = todayTasks.indexOfFirst { it.id == taskId }
         if (index == -1) return
 
-        val updated = todayTasks[index].copy(completed = !todayTasks[index].completed)
-        todayTasks[index] = updated
+        val previous = todayTasks[index]
+        val updated = previous.copy(completed = !previous.completed)
+        applyTaskState(index, updated)
+        recordEdit(
+            PlannerEdit.ToggleTodayTask(
+                index = index,
+                previous = previous,
+                updated = updated
+            )
+        )
+        saveSnapshot()
+    }
 
-        if (updated.sourceType == DailyTaskSourceType.BACKLOG && updated.sourceId != null) {
-            updateBacklogCompletion(updated.sourceId, updated.completed)
-        }
+    fun deleteTask(taskId: String) {
+        if (!canEditSelectedDate) return
+        val index = todayTasks.indexOfFirst { it.id == taskId }
+        if (index == -1) return
+
+        val task = todayTasks.removeAt(index)
+        recordEdit(
+            PlannerEdit.DeleteTodayTask(
+                task = task,
+                index = index.coerceAtMost(todayTasks.size)
+            )
+        )
         saveSnapshot()
     }
 
@@ -292,6 +429,23 @@ class HumanProgramViewModel(
         saveSnapshot()
     }
 
+    fun deleteBacklogItem(itemId: String) {
+        val index = backlogItems.indexOfFirst { it.id == itemId }
+        if (index == -1) return
+
+        val item = backlogItems.removeAt(index)
+        todayTasks.removeAll { task ->
+            task.sourceType == DailyTaskSourceType.BACKLOG && task.sourceId == item.id
+        }
+        recordEdit(
+            PlannerEdit.DeleteBacklogItem(
+                item = item,
+                index = index.coerceAtMost(backlogItems.size)
+            )
+        )
+        saveSnapshot()
+    }
+
     fun assignBacklogItemToToday(itemId: String) {
         val index = backlogItems.indexOfFirst { it.id == itemId }
         if (index == -1) return
@@ -300,12 +454,20 @@ class HumanProgramViewModel(
         if (item.status == BacklogStatus.DONE) return
         if (todayTasks.any { it.sourceType == DailyTaskSourceType.BACKLOG && it.sourceId == item.id }) return
 
-        backlogItems[index] = item.copy(assignedDate = today)
-        todayTasks.add(
-            DailyTask(
-                title = item.title,
-                sourceType = DailyTaskSourceType.BACKLOG,
-                sourceId = item.id
+        val updatedItem = item.copy(assignedDate = today)
+        val task = DailyTask(
+            title = item.title,
+            sourceType = DailyTaskSourceType.BACKLOG,
+            sourceId = item.id
+        )
+        backlogItems[index] = updatedItem
+        todayTasks.add(task)
+        recordEdit(
+            PlannerEdit.AssignBacklogToday(
+                backlogIndex = index,
+                previousItem = item,
+                updatedItem = updatedItem,
+                task = task
             )
         )
         saveSnapshot()
@@ -409,17 +571,19 @@ class HumanProgramViewModel(
         saveSnapshot()
     }
 
-    fun setupAppLockPin() {
+    fun setupAppLockPin(): PinHash? {
         val pin = appLockPinInput
         if (pin.length < 4) {
             appLockPinMessage = "Use at least 4 digits."
-            return
+            return null
         }
 
         appLockPinHash = pinHashService.hash(pin)
         appLockEnabled = true
+        lastUnlockedAt = Instant.now()
         appLockPinInput = ""
-        appLockPinMessage = "App lock PIN is set for this session."
+        appLockPinMessage = "App lock PIN is saved on this device."
+        return appLockPinHash
     }
 
     fun testAppLockPin() {
@@ -437,12 +601,325 @@ class HumanProgramViewModel(
         appLockPinInput = ""
     }
 
+    fun lockAppIfEnabled(now: Instant = Instant.now()) {
+        if (!appLockEnabled) return
+
+        val shouldLock = appLockTimeoutMinutes == 0 ||
+            lastUnlockedAt == null ||
+            java.time.Duration.between(lastUnlockedAt, now).toMinutes() >= appLockTimeoutMinutes
+
+        if (shouldLock) {
+            appLocked = true
+            appUnlockPinInput = ""
+            appUnlockMessage = ""
+        }
+    }
+
+    fun unlockApp() {
+        val hash = appLockPinHash
+        if (hash == null) {
+            appUnlockMessage = "App lock is not set."
+            return
+        }
+
+        if (pinHashService.verify(appUnlockPinInput, hash)) {
+            appLocked = false
+            lastUnlockedAt = Instant.now()
+            appUnlockPinInput = ""
+            appUnlockMessage = ""
+        } else {
+            appUnlockPinInput = ""
+            appUnlockMessage = "PIN rejected."
+        }
+    }
+
+    fun updateNotificationPermissionStatus(granted: Boolean) {
+        notificationPermissionMessage = if (granted) {
+            "Notification permission is allowed. Saved reminders can show Android notifications."
+        } else {
+            "Notification permission is not allowed. Reminders stay saved, but Android will not show them."
+        }
+    }
+
+    fun updateCalendarPermissionStatus(granted: Boolean) {
+        calendarPermissionMessage = if (granted) {
+            "Calendar permission is allowed. Device calendar events can be read for Today and Calendar."
+        } else {
+            "Calendar permission is not allowed. Today and Calendar still work without device events."
+        }
+    }
+
+    fun updateCalendarEvents(events: List<DeviceCalendarEvent>) {
+        val refreshedEvents = events.toList()
+        calendarEvents.clear()
+        calendarEvents.addAll(refreshedEvents)
+
+        todayTasks.removeAll { it.sourceType == DailyTaskSourceType.CALENDAR }
+        calendarMergeService.merge(
+            events = refreshedEvents,
+            localStates = calendarLocalStates.filter { it.date == selectedDate }
+        ).forEach { event ->
+            todayTasks.add(
+                DailyTask(
+                    title = event.title.ifBlank { "Untitled calendar event" },
+                    sourceType = DailyTaskSourceType.CALENDAR,
+                    sourceId = event.eventId,
+                    completed = event.completed
+                )
+            )
+        }
+        saveSnapshot()
+    }
+
+    fun updateCalendarSources(sources: List<DeviceCalendarSource>) {
+        calendarSources.clear()
+        calendarSources.addAll(sources)
+    }
+
+    fun loadSelectedCalendarSources(sourceIds: Set<String>) {
+        selectedCalendarSourceIds.clear()
+        selectedCalendarSourceIds.addAll(sourceIds.sorted())
+    }
+
+    fun toggleCalendarSource(sourceId: String) {
+        if (sourceId in selectedCalendarSourceIds) {
+            selectedCalendarSourceIds.remove(sourceId)
+        } else {
+            selectedCalendarSourceIds.add(sourceId)
+            selectedCalendarSourceIds.sort()
+        }
+    }
+
+    fun requestHiddenSudokuGate() {
+        if (!isDayComplete) {
+            hiddenGateMessage = "Finish today's required tasks first."
+            return
+        }
+
+        hiddenSudokuGateVisible = true
+        hiddenGateMessage = ""
+    }
+
+    fun updateHiddenSudokuCell(
+        index: Int,
+        value: String
+    ) {
+        if (index !in hiddenSudokuCells.indices || index == 0) return
+        hiddenSudokuCells[index] = value.filter { it.isDigit() }.take(1)
+    }
+
+    fun submitHiddenSudokuGate() {
+        val solved = hiddenSudokuCells.toSet() == (1..9).map { it.toString() }.toSet() &&
+            hiddenSudokuCells.none { it.isBlank() }
+        hiddenGameUnlocked = easterEggGateService.canRevealHiddenGameEntry(
+            EasterEggGateState(
+                puzzleSolved = solved,
+                dayComplete = isDayComplete
+            )
+        )
+        hiddenGateMessage = if (hiddenGameUnlocked) {
+            "Hidden entry unlocked."
+        } else {
+            "Not solved yet."
+        }
+    }
+
+    fun hideCalendarEvent(eventId: String) {
+        updateCalendarLocalState(
+            eventId = eventId,
+            hidden = true
+        )
+        updateCalendarEvents(calendarEvents)
+    }
+
+    fun renameCalendarEvent(
+        eventId: String,
+        title: String
+    ) {
+        updateCalendarLocalState(
+            eventId = eventId,
+            titleOverride = title.trim().takeIf { it.isNotBlank() }
+        )
+        updateCalendarEvents(calendarEvents)
+    }
+
+    fun writeHprgmExport(outputStream: OutputStream) {
+        val basePackage = hprgmExportBuilder.build(snapshotForPersistence())
+        val exportPackage = if (hprgmExportPassword.isNotBlank()) {
+            runCatching {
+                hprgmEncryptionService.encryptPackage(
+                    exportPackage = basePackage,
+                    password = hprgmExportPassword,
+                    includeGameData = hprgmIncludeGameSave
+                )
+            }.getOrElse {
+                hprgmMessage = it.message ?: "Export encryption failed."
+                return
+            }
+        } else {
+            basePackage
+        }
+        hprgmZipWriter.write(
+            exportPackage = exportPackage,
+            outputStream = outputStream
+        )
+        hprgmMessage = if (hprgmExportPassword.isBlank()) {
+            ".hprgm export saved."
+        } else {
+            "Encrypted .hprgm export saved."
+        }
+    }
+
+    fun previewHprgmImport(inputStream: InputStream) {
+        val preview = hprgmZipReader.preview(inputStream)
+        val planningJson = preview.planningJson
+        hprgmMessage = if (preview.valid && planningJson != null) {
+            runCatching {
+                PlannerSnapshotJson.decode(JSONObject(planningJson))
+            }.fold(
+                onSuccess = { snapshot ->
+                    pendingHprgmImportSnapshot = snapshot
+                    hasPendingHprgmImport = true
+                    "Import preview ready: ${snapshot.todayTasks.size} tasks and ${snapshot.backlogItems.size} backlog items. Apply to replace current planner data."
+                },
+                onFailure = {
+                    pendingHprgmImportSnapshot = null
+                    hasPendingHprgmImport = false
+                    "Import preview failed: planning data could not be read."
+                }
+            )
+        } else {
+            pendingHprgmImportSnapshot = null
+            hasPendingHprgmImport = false
+            "Import preview failed: ${preview.message}"
+        }
+    }
+
+    fun applyPendingHprgmImport() {
+        val snapshot = pendingHprgmImportSnapshot
+        if (snapshot == null) {
+            hprgmMessage = "Preview an import file first."
+            return
+        }
+
+        applySnapshot(snapshot)
+        saveSnapshot()
+        pendingHprgmImportSnapshot = null
+        hasPendingHprgmImport = false
+        hprgmMessage = "Import applied: ${snapshot.todayTasks.size} tasks and ${snapshot.backlogItems.size} backlog items loaded."
+    }
+
+    fun reportHprgmError(message: String) {
+        hprgmMessage = message
+    }
+
+    fun reminderScheduleRequests(
+        now: Instant = Instant.now(),
+        zoneId: ZoneId = ZoneId.systemDefault()
+    ): List<NotificationScheduleRequest> {
+        val today = LocalDate.now(zoneId)
+        val currentTime = now.atZone(zoneId).toLocalTime()
+
+        return reminders.mapNotNull { reminder ->
+            val localTime = reminder.reminderAt.toLocalTimeOrNull() ?: return@mapNotNull null
+            val date = if (localTime.isAfter(currentTime)) today else today.plusDays(1)
+            NotificationScheduleRequest(
+                id = reminder.id,
+                title = reminder.title,
+                reminderAt = date.atTime(localTime).atZone(zoneId).toInstant(),
+                isEnabled = reminder.isEnabled
+            )
+        }
+    }
+
+    fun snapshotForPersistence(): PlannerSnapshot {
+        return currentSnapshot()
+    }
+
     fun addRoutine() {
         val cleanTitle = newRoutineTitle.trim()
         if (cleanTitle.isEmpty()) return
 
         routines.add(cleanTitle)
         newRoutineTitle = ""
+        saveSnapshot()
+    }
+
+    fun undoLastEdit() {
+        val edit = undoStack.removeLastOrNull() ?: return
+        when (edit) {
+            is PlannerEdit.AssignBacklogToday -> {
+                val index = backlogItems.indexOfFirst { it.id == edit.previousItem.id }
+                if (index != -1) {
+                    backlogItems[index] = edit.previousItem
+                } else {
+                    backlogItems.add(edit.backlogIndex.coerceIn(0, backlogItems.size), edit.previousItem)
+                }
+                todayTasks.removeAll { it.id == edit.task.id }
+            }
+            is PlannerEdit.DeleteBacklogItem -> {
+                val insertAt = edit.index.coerceIn(0, backlogItems.size)
+                backlogItems.add(insertAt, edit.item)
+                if (edit.item.assignedDate == today && todayTasks.none { it.sourceId == edit.item.id }) {
+                    todayTasks.add(
+                        DailyTask(
+                            title = edit.item.title,
+                            sourceType = DailyTaskSourceType.BACKLOG,
+                            sourceId = edit.item.id
+                        )
+                    )
+                }
+            }
+            is PlannerEdit.DeleteTodayTask -> {
+                val insertAt = edit.index.coerceIn(0, todayTasks.size)
+                todayTasks.add(insertAt, edit.task)
+            }
+            is PlannerEdit.ToggleTodayTask -> {
+                val index = todayTasks.indexOfFirst { it.id == edit.previous.id }
+                    .takeUnless { it == -1 }
+                    ?: edit.index.coerceIn(0, todayTasks.lastIndex.coerceAtLeast(0))
+                if (todayTasks.isNotEmpty()) {
+                    applyTaskState(index, edit.previous)
+                }
+            }
+        }
+        redoStack.add(edit)
+        saveSnapshot()
+    }
+
+    fun redoLastEdit() {
+        val edit = redoStack.removeLastOrNull() ?: return
+        when (edit) {
+            is PlannerEdit.AssignBacklogToday -> {
+                val index = backlogItems.indexOfFirst { it.id == edit.updatedItem.id }
+                if (index != -1) {
+                    backlogItems[index] = edit.updatedItem
+                } else {
+                    backlogItems.add(edit.backlogIndex.coerceIn(0, backlogItems.size), edit.updatedItem)
+                }
+                if (todayTasks.none { it.id == edit.task.id }) {
+                    todayTasks.add(edit.task)
+                }
+            }
+            is PlannerEdit.DeleteBacklogItem -> {
+                backlogItems.removeAll { it.id == edit.item.id }
+                todayTasks.removeAll { task ->
+                    task.sourceType == DailyTaskSourceType.BACKLOG && task.sourceId == edit.item.id
+                }
+            }
+            is PlannerEdit.DeleteTodayTask -> {
+                todayTasks.removeAll { it.id == edit.task.id }
+            }
+            is PlannerEdit.ToggleTodayTask -> {
+                val index = todayTasks.indexOfFirst { it.id == edit.updated.id }
+                    .takeUnless { it == -1 }
+                    ?: edit.index.coerceIn(0, todayTasks.lastIndex.coerceAtLeast(0))
+                if (todayTasks.isNotEmpty()) {
+                    applyTaskState(index, edit.updated)
+                }
+            }
+        }
+        undoStack.add(edit)
         saveSnapshot()
     }
 
@@ -455,18 +932,94 @@ class HumanProgramViewModel(
         )
     }
 
-    private fun saveSnapshot() {
-        snapshotStore?.save(
-            PlannerSnapshot(
-                todayTasks = todayTasks,
-                backlogItems = backlogItems,
-                recurringTemplates = recurringTemplates,
-                scheduleBlocks = scheduleBlocks,
-                exerciseRoutine = exerciseRoutine,
-                reminders = reminders,
-                routines = routines
+    private fun applyTaskState(index: Int, task: DailyTask) {
+        if (index !in todayTasks.indices) return
+
+        todayTasks[index] = task
+        if (task.sourceType == DailyTaskSourceType.BACKLOG && task.sourceId != null) {
+            updateBacklogCompletion(task.sourceId, task.completed)
+        }
+        if (task.sourceType == DailyTaskSourceType.CALENDAR && task.sourceId != null) {
+            updateCalendarLocalState(
+                eventId = task.sourceId,
+                completed = task.completed
             )
+        }
+    }
+
+    private fun recordEdit(edit: PlannerEdit) {
+        undoStack.add(edit)
+        redoStack.clear()
+    }
+
+    private fun saveSnapshot() {
+        snapshotStore?.save(currentSnapshot())
+    }
+
+    private fun applySnapshot(snapshot: PlannerSnapshot) {
+        todayTasks.clear()
+        backlogItems.clear()
+        recurringTemplates.clear()
+        scheduleBlocks.clear()
+        reminders.clear()
+        routines.clear()
+        calendarLocalStates.clear()
+
+        todayTasks.addAll(snapshot.todayTasks)
+        backlogItems.addAll(snapshot.backlogItems)
+        recurringTemplates.addAll(snapshot.recurringTemplates.ifEmpty { defaultRecurringTemplates() })
+        scheduleBlocks.addAll(snapshot.scheduleBlocks.ifEmpty { defaultScheduleBlocks() })
+        exerciseRoutine = snapshot.exerciseRoutine
+        reminders.addAll(snapshot.reminders)
+        routines.addAll(snapshot.routines)
+        calendarLocalStates.addAll(snapshot.calendarLocalStates)
+    }
+
+    private fun currentSnapshot(): PlannerSnapshot {
+        return PlannerSnapshot(
+            todayTasks = todayTasks,
+            backlogItems = backlogItems,
+            recurringTemplates = recurringTemplates,
+            scheduleBlocks = scheduleBlocks,
+            exerciseRoutine = exerciseRoutine,
+            reminders = reminders,
+            routines = routines,
+            calendarLocalStates = calendarLocalStates
         )
+    }
+
+    private fun updateCalendarLocalState(
+        eventId: String,
+        completed: Boolean? = null,
+        hidden: Boolean? = null,
+        titleOverride: String? = null,
+        notesOverride: String? = null,
+        sortOrder: Int? = null
+    ) {
+        val index = calendarLocalStates.indexOfFirst {
+            it.date == selectedDate && it.eventId == eventId
+        }
+        val current = if (index == -1) {
+            CalendarLocalState(
+                date = selectedDate,
+                eventId = eventId
+            )
+        } else {
+            calendarLocalStates[index]
+        }
+        val updated = current.copy(
+            completed = completed ?: current.completed,
+            hidden = hidden ?: current.hidden,
+            titleOverride = titleOverride ?: current.titleOverride,
+            notesOverride = notesOverride ?: current.notesOverride,
+            sortOrder = sortOrder ?: current.sortOrder
+        )
+
+        if (index == -1) {
+            calendarLocalStates.add(updated)
+        } else {
+            calendarLocalStates[index] = updated
+        }
     }
 
     private fun defaultRecurringTemplates(): List<RecurringTaskTemplate> {
@@ -490,6 +1043,39 @@ class HumanProgramViewModel(
             ScheduleBlock("Study", "16:30-20:30")
         )
     }
+
+    private fun String.toLocalTimeOrNull(): LocalTime? {
+        return try {
+            LocalTime.parse(trim())
+        } catch (_: DateTimeParseException) {
+            null
+        }
+    }
+}
+
+private sealed interface PlannerEdit {
+    data class AssignBacklogToday(
+        val backlogIndex: Int,
+        val previousItem: BacklogItem,
+        val updatedItem: BacklogItem,
+        val task: DailyTask
+    ) : PlannerEdit
+
+    data class DeleteBacklogItem(
+        val item: BacklogItem,
+        val index: Int
+    ) : PlannerEdit
+
+    data class DeleteTodayTask(
+        val task: DailyTask,
+        val index: Int
+    ) : PlannerEdit
+
+    data class ToggleTodayTask(
+        val index: Int,
+        val previous: DailyTask,
+        val updated: DailyTask
+    ) : PlannerEdit
 }
 
 class HumanProgramViewModelFactory(

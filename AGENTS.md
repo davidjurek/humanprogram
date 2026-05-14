@@ -1,7 +1,7 @@
 # Human Program Agent Instructions
 
 This file is persistent working memory for AI coding agents working on Human Program.
-The full product brief lives in `HUMAN_PROGRAM_ANDROID_AGENT_SPEC.md`; treat that file as the source of truth for product behavior.
+The full product brief lives in `ADD.md`; treat that file as the source of truth for product behavior.
 
 ## Human Owner
 
@@ -11,6 +11,7 @@ The full product brief lives in `HUMAN_PROGRAM_ANDROID_AGENT_SPEC.md`; treat tha
 - Tell the owner exactly what changed and exactly what to test.
 - Ask only questions that are truly needed.
 - Do not give long walls of text unless the owner asks for detail.
+- Avoid parallel terminal commands in this repo unless truly necessary. One command at a time keeps the session easier to follow and less likely to hang.
 
 ## Product
 
@@ -63,6 +64,8 @@ Do not add by default:
 - Keep code organized so a single app module can later split into modules.
 - Keep game access behind a small `GameAccessService` bridge.
 - Do not mix game logic into planner task logic.
+- Current app state includes a temporary app-private JSON snapshot plus Room/DataStore foundations. Keep migrating UI behavior toward Room repositories and DataStore, but do not remove the JSON fallback until replacement behavior is tested.
+- Keep Room entities, DAOs, repositories, and mappers under clear `core/database`, `core/datastore`, and planning repository/service areas.
 
 Recommended package areas:
 
@@ -126,6 +129,7 @@ Past daily pages are reached from Today by changing the date.
 - Calendar-derived Today entries count toward completion.
 - Game access unlocks only when today is complete.
 - Game progress must never be deleted just because the daily gate locks again.
+- The game is hidden. Do not show game links, cards, labels, stats, settings, or normal UI text that advertises it. Hidden gate/easter-egg code and internal save metadata are allowed.
 
 ## Safety Rules
 
@@ -135,6 +139,8 @@ Past daily pages are reached from Today by changing the date.
 - Do not wipe databases, generated files, or project history unless explicitly requested.
 - Keep the app usable after each significant chunk of work.
 - Do not make large unrelated changes.
+- Update `BUILD_STATUS.md` after every meaningful development chunk.
+- Work in tested checkpoints instead of piling up large unverified edits.
 - Commit only after behavior is working and the owner approves or asks.
 
 ## Build Order
@@ -154,6 +160,15 @@ Preferred implementation order:
 11. Game bridge.
 12. Game integration.
 
+Current priorities:
+
+- Finish moving planner UI behavior from the JSON snapshot into Room repositories.
+- Add real notification permission and reminder scheduling UX.
+- Add real calendar permission/source selection and event import UX.
+- Add durable app-lock storage and full PIN/biometric UX.
+- Add `.hprgm` file save/open flows.
+- Split large Compose files, especially `HumanProgramApp.kt`, into smaller screens/components once behavior is stable.
+
 ## Testing Expectations
 
 Add tests when implementing core rules, especially:
@@ -171,6 +186,13 @@ Add tests when implementing core rules, especially:
 - game unlock logic
 
 When possible, run Gradle tests or explain clearly why they were not run.
+For app/build changes, prefer:
+
+```text
+JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew test assembleDebug
+```
+
+If Gradle fails only because sandbox access to `~/.gradle` is blocked, rerun with the needed approval.
 
 ## Git Workflow
 

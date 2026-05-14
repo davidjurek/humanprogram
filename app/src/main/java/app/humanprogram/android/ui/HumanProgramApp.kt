@@ -1,5 +1,6 @@
 package app.humanprogram.android.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -9,12 +10,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.automirrored.outlined.FormatListBulleted
+import androidx.compose.material.icons.automirrored.outlined.Redo
+import androidx.compose.material.icons.automirrored.outlined.Undo
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Button
@@ -23,6 +28,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -49,6 +55,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.humanprogram.android.planning.HumanProgramViewModel
+import app.humanprogram.android.planning.calendar.DeviceCalendarEvent
+import app.humanprogram.android.core.security.PinHash
 import app.humanprogram.android.planning.model.BacklogItem
 import app.humanprogram.android.planning.model.BacklogStatus
 import app.humanprogram.android.planning.model.DailyTask
@@ -60,9 +68,25 @@ import app.humanprogram.android.planning.model.ScheduleBlock
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HumanProgramApp(
-    viewModel: HumanProgramViewModel = viewModel()
+    viewModel: HumanProgramViewModel = viewModel(),
+    notificationPermissionGranted: Boolean = false,
+    calendarPermissionGranted: Boolean = false,
+    onRequestNotificationPermission: () -> Unit = {},
+    onRequestCalendarPermission: () -> Unit = {},
+    onExportHprgm: () -> Unit = {},
+    onImportHprgmPreview: () -> Unit = {},
+    onReminderScheduleChanged: () -> Unit = {},
+    onRefreshCalendarEvents: () -> Unit = {},
+    onToggleCalendarSource: (String) -> Unit = {},
+    onAppLockPinSet: (PinHash) -> Unit = {},
+    onAppLockTimeoutChanged: (Int) -> Unit = {}
 ) {
     var selectedTab by rememberSaveable { mutableStateOf(MainTab.Today) }
+
+    if (viewModel.appLocked) {
+        AppLockScreen(viewModel)
+        return
+    }
 
     Scaffold(
         topBar = {
@@ -106,18 +130,80 @@ fun HumanProgramApp(
             color = MaterialTheme.colorScheme.background
         ) {
             when (selectedTab) {
-                MainTab.Today -> TodayScreen(viewModel)
+                MainTab.Today -> TodayScreen(
+                    viewModel = viewModel,
+                    onRefreshCalendarEvents = onRefreshCalendarEvents
+                )
                 MainTab.Backlog -> BacklogScreen(viewModel)
-                MainTab.Calendar -> CalendarScreen()
+                MainTab.Calendar -> CalendarScreen(
+                    viewModel = viewModel,
+                    calendarPermissionGranted = calendarPermissionGranted,
+                    onRequestCalendarPermission = onRequestCalendarPermission,
+                    onRefreshCalendarEvents = onRefreshCalendarEvents,
+                    onToggleCalendarSource = onToggleCalendarSource
+                )
                 MainTab.Routines -> RoutinesScreen(viewModel)
-                MainTab.Settings -> SettingsScreen(viewModel)
+                MainTab.Settings -> SettingsScreen(
+                    viewModel = viewModel,
+                    notificationPermissionGranted = notificationPermissionGranted,
+                    calendarPermissionGranted = calendarPermissionGranted,
+                    onRequestNotificationPermission = onRequestNotificationPermission,
+                    onRequestCalendarPermission = onRequestCalendarPermission,
+                    onExportHprgm = onExportHprgm,
+                    onImportHprgmPreview = onImportHprgmPreview,
+                    onReminderScheduleChanged = onReminderScheduleChanged,
+                    onAppLockPinSet = onAppLockPinSet,
+                    onAppLockTimeoutChanged = onAppLockTimeoutChanged
+                )
             }
         }
     }
 }
 
 @Composable
-private fun TodayScreen(viewModel: HumanProgramViewModel) {
+private fun AppLockScreen(viewModel: HumanProgramViewModel) {
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp),
+            verticalArrangement = Arrangement.Center
+        ) {
+            Header(
+                title = "Human Program",
+                subtitle = "Enter your PIN to unlock."
+            )
+            Spacer(Modifier.height(18.dp))
+            OutlinedTextField(
+                modifier = Modifier.fillMaxWidth(),
+                value = viewModel.appUnlockPinInput,
+                onValueChange = viewModel::updateAppUnlockPinInput,
+                label = { Text("PIN") },
+                singleLine = true
+            )
+            Spacer(Modifier.height(12.dp))
+            Button(onClick = viewModel::unlockApp) {
+                Text("Unlock")
+            }
+            if (viewModel.appUnlockMessage.isNotBlank()) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = viewModel.appUnlockMessage,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TodayScreen(
+    viewModel: HumanProgramViewModel,
+    onRefreshCalendarEvents: () -> Unit
+) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(20.dp),
@@ -137,23 +223,36 @@ private fun TodayScreen(viewModel: HumanProgramViewModel) {
             ) {
                 OutlinedButton(
                     modifier = Modifier.weight(1f),
-                    onClick = viewModel::goToPreviousDay
+                    onClick = {
+                        viewModel.goToPreviousDay()
+                        onRefreshCalendarEvents()
+                    }
                 ) {
                     Text("Previous")
                 }
                 OutlinedButton(
                     modifier = Modifier.weight(1f),
-                    onClick = viewModel::goToToday
+                    onClick = {
+                        viewModel.goToToday()
+                        onRefreshCalendarEvents()
+                    }
                 ) {
                     Text("Today")
                 }
                 OutlinedButton(
                     modifier = Modifier.weight(1f),
-                    onClick = viewModel::goToNextDay
+                    onClick = {
+                        viewModel.goToNextDay()
+                        onRefreshCalendarEvents()
+                    }
                 ) {
                     Text("Next")
                 }
             }
+        }
+
+        item {
+            UndoRedoBar(viewModel)
         }
 
         if (viewModel.isPastDate) {
@@ -186,6 +285,26 @@ private fun TodayScreen(viewModel: HumanProgramViewModel) {
 
         item {
             SectionCard(
+                title = "Calendar",
+                subtitle = "${viewModel.calendarEvents.size} event${if (viewModel.calendarEvents.size == 1) "" else "s"}"
+            ) {
+                if (viewModel.calendarEvents.isEmpty()) {
+                    Text(
+                        text = "No device calendar events are loaded for this day.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        viewModel.calendarEvents.forEach { event ->
+                            CalendarEventRow(event.title, event.timeLabel)
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            SectionCard(
                 title = "Today's Tasks",
                 subtitle = "${viewModel.completedTaskCount} of ${viewModel.todayTasks.size} complete"
             ) {
@@ -194,7 +313,8 @@ private fun TodayScreen(viewModel: HumanProgramViewModel) {
                         TaskRow(
                             task = task,
                             enabled = viewModel.canEditSelectedDate,
-                            onToggle = { viewModel.toggleTask(task.id) }
+                            onToggle = { viewModel.toggleTask(task.id) },
+                            onDelete = { viewModel.deleteTask(task.id) }
                         )
                     }
 
@@ -260,6 +380,10 @@ private fun BacklogScreen(viewModel: HumanProgramViewModel) {
         }
 
         item {
+            UndoRedoBar(viewModel)
+        }
+
+        item {
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                 SegmentedButton(
                     selected = !viewModel.backlogProjectView,
@@ -314,7 +438,8 @@ private fun BacklogScreen(viewModel: HumanProgramViewModel) {
                             items.forEach { backlogItem ->
                                 BacklogItemCard(
                                     item = backlogItem,
-                                    onAssignToday = { viewModel.assignBacklogItemToToday(backlogItem.id) }
+                                    onAssignToday = { viewModel.assignBacklogItemToToday(backlogItem.id) },
+                                    onDelete = { viewModel.deleteBacklogItem(backlogItem.id) }
                                 )
                             }
                         }
@@ -325,7 +450,8 @@ private fun BacklogScreen(viewModel: HumanProgramViewModel) {
             items(viewModel.activeBacklogItems, key = { it.id }) { item ->
                 BacklogItemCard(
                     item = item,
-                    onAssignToday = { viewModel.assignBacklogItemToToday(item.id) }
+                    onAssignToday = { viewModel.assignBacklogItemToToday(item.id) },
+                    onDelete = { viewModel.deleteBacklogItem(item.id) }
                 )
             }
         }
@@ -333,7 +459,13 @@ private fun BacklogScreen(viewModel: HumanProgramViewModel) {
 }
 
 @Composable
-private fun CalendarScreen() {
+private fun CalendarScreen(
+    viewModel: HumanProgramViewModel,
+    calendarPermissionGranted: Boolean,
+    onRequestCalendarPermission: () -> Unit,
+    onRefreshCalendarEvents: () -> Unit,
+    onToggleCalendarSource: (String) -> Unit
+) {
     var selectedMode by rememberSaveable { mutableStateOf(CalendarMode.Month) }
 
     LazyColumn(
@@ -368,11 +500,70 @@ private fun CalendarScreen() {
         item {
             SectionCard(title = selectedMode.label) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(selectedMode.placeholder)
+                    Text(selectedMode.description)
                     Text(
-                        text = "Calendar permission and source selection come next.",
+                        text = if (calendarPermissionGranted) {
+                            "Calendar permission is allowed. Loaded events are shown below and added to Today."
+                        } else {
+                            "Calendar permission is optional and currently not allowed."
+                        },
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    if (!calendarPermissionGranted) {
+                        OutlinedButton(onClick = onRequestCalendarPermission) {
+                            Text("Allow Calendar")
+                        }
+                    } else {
+                        OutlinedButton(onClick = onRefreshCalendarEvents) {
+                            Text("Refresh Events")
+                        }
+                    }
+                    if (viewModel.calendarEvents.isNotEmpty()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            viewModel.todayTasks
+                                .filter { it.sourceType == DailyTaskSourceType.CALENDAR && it.sourceId != null }
+                                .forEach { task ->
+                                    CalendarEventEditorRow(
+                                        title = task.title,
+                                        onTitleChange = { title ->
+                                            viewModel.renameCalendarEvent(task.sourceId.orEmpty(), title)
+                                        },
+                                        onHide = {
+                                            viewModel.hideCalendarEvent(task.sourceId.orEmpty())
+                                        }
+                                    )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (calendarPermissionGranted) {
+            item {
+                SectionCard(title = "Calendar Sources") {
+                    if (viewModel.calendarSources.isEmpty()) {
+                        Text(
+                            text = "No device calendars are available.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            viewModel.calendarSources.forEach { source ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Checkbox(
+                                        checked = source.calendarId in viewModel.selectedCalendarSourceIds,
+                                        onCheckedChange = { onToggleCalendarSource(source.calendarId) }
+                                    )
+                                    Text(source.displayName)
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -423,7 +614,7 @@ private fun RoutinesScreen(viewModel: HumanProgramViewModel) {
             items(viewModel.routines) { routine ->
                 SectionCard(title = routine) {
                     Text(
-                        text = "Routine steps will be added in a later workflow pass.",
+                        text = "Saved routine.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -433,7 +624,20 @@ private fun RoutinesScreen(viewModel: HumanProgramViewModel) {
 }
 
 @Composable
-private fun SettingsScreen(viewModel: HumanProgramViewModel) {
+private fun SettingsScreen(
+    viewModel: HumanProgramViewModel,
+    notificationPermissionGranted: Boolean,
+    calendarPermissionGranted: Boolean,
+    onRequestNotificationPermission: () -> Unit,
+    onRequestCalendarPermission: () -> Unit,
+    onExportHprgm: () -> Unit,
+    onImportHprgmPreview: () -> Unit,
+    onReminderScheduleChanged: () -> Unit,
+    onAppLockPinSet: (PinHash) -> Unit,
+    onAppLockTimeoutChanged: (Int) -> Unit
+) {
+    var developerNameTapCount by rememberSaveable { mutableStateOf(0) }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(20.dp),
@@ -576,7 +780,44 @@ private fun SettingsScreen(viewModel: HumanProgramViewModel) {
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    Text(".hprgm export comes after durable structured storage.")
+                    Text(".hprgm Package")
+                    OutlinedTextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = viewModel.hprgmExportPassword,
+                        onValueChange = viewModel::updateHprgmExportPassword,
+                        label = { Text("Export password") },
+                        singleLine = true
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = viewModel.hprgmIncludeGameSave,
+                            onCheckedChange = viewModel::updateHprgmIncludeGameSave
+                        )
+                        Text("Include game save when available")
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Button(onClick = onExportHprgm) {
+                            Text("Save .hprgm")
+                        }
+                        OutlinedButton(onClick = onImportHprgmPreview) {
+                            Text("Preview Import")
+                        }
+                    }
+                    if (viewModel.hprgmMessage.isNotBlank()) {
+                        Text(
+                            text = viewModel.hprgmMessage,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (viewModel.hasPendingHprgmImport) {
+                        Button(onClick = viewModel::applyPendingHprgmImport) {
+                            Text("Apply Import")
+                        }
+                    }
                 }
             }
         }
@@ -587,7 +828,10 @@ private fun SettingsScreen(viewModel: HumanProgramViewModel) {
                     viewModel.reminders.forEach { reminder ->
                         ReminderRow(
                             reminder = reminder,
-                            onToggle = { viewModel.toggleReminder(reminder.id) }
+                            onToggle = {
+                                viewModel.toggleReminder(reminder.id)
+                                onReminderScheduleChanged()
+                            }
                         )
                     }
                     OutlinedTextField(
@@ -609,15 +853,25 @@ private fun SettingsScreen(viewModel: HumanProgramViewModel) {
                             label = { Text("Time") },
                             singleLine = true
                         )
-                        Button(onClick = viewModel::addReminder) {
+                        Button(
+                            onClick = {
+                                viewModel.addReminder()
+                                onReminderScheduleChanged()
+                            }
+                        ) {
                             Text("Add")
                         }
                     }
                     Text(
-                        text = "Android notification scheduling comes after permission handling.",
+                        text = viewModel.notificationPermissionMessage,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    if (!notificationPermissionGranted) {
+                        OutlinedButton(onClick = onRequestNotificationPermission) {
+                            Text("Allow Notifications")
+                        }
+                    }
                 }
             }
         }
@@ -625,12 +879,15 @@ private fun SettingsScreen(viewModel: HumanProgramViewModel) {
         item {
             SectionCard(title = "Calendar Permission") {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Calendar access is optional.")
-                    Text("If denied, Today and Calendar still work without device events.")
                     Text(
-                        text = "Permission request flow is prepared by the manifest; provider reads are the next integration step.",
+                        text = viewModel.calendarPermissionMessage,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    if (!calendarPermissionGranted) {
+                        OutlinedButton(onClick = onRequestCalendarPermission) {
+                            Text("Allow Calendar")
+                        }
+                    }
                 }
             }
         }
@@ -641,8 +898,8 @@ private fun SettingsScreen(viewModel: HumanProgramViewModel) {
                     Text("Core app behavior is offline.")
                     Text("No account, analytics, ads, Firebase, or cloud backend are included.")
                     Text("Current prototype saves planner data in app-private storage.")
-                    Text("Room/DataStore foundations are in place for the durable local storage path.")
-                    Text("PIN/app-lock foundations are in place; unlock UI comes next.")
+                    Text("Planner data is mirrored into Room while the JSON fallback remains in place.")
+                    Text("A saved app-lock PIN opens a PIN screen on app start or resume.")
                 }
             }
         }
@@ -659,7 +916,11 @@ private fun SettingsScreen(viewModel: HumanProgramViewModel) {
                         singleLine = true
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Button(onClick = viewModel::setupAppLockPin) {
+                        Button(
+                            onClick = {
+                                viewModel.setupAppLockPin()?.let(onAppLockPinSet)
+                            }
+                        ) {
                             Text("Set PIN")
                         }
                         OutlinedButton(onClick = viewModel::testAppLockPin) {
@@ -672,13 +933,84 @@ private fun SettingsScreen(viewModel: HumanProgramViewModel) {
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+                    Text("Lock timing")
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(
+                            0 to "Now",
+                            1 to "1m",
+                            5 to "5m",
+                            15 to "15m"
+                        ).forEach { (minutes, label) ->
+                            OutlinedButton(
+                                onClick = { onAppLockTimeoutChanged(minutes) },
+                                enabled = viewModel.appLockTimeoutMinutes != minutes
+                            ) {
+                                Text(label)
+                            }
+                        }
+                    }
                     Text(
-                        text = "This hashes the PIN and does not store raw PIN text. Durable encrypted lock storage comes next.",
+                        text = "This saves only a salted hash, not the raw PIN text.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
+        }
+
+        item {
+            SectionCard(title = "About") {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Version 0.1.0")
+                    Text(
+                        modifier = Modifier.clickable {
+                            developerNameTapCount += 1
+                            if (developerNameTapCount >= 2) {
+                                developerNameTapCount = 0
+                                viewModel.requestHiddenSudokuGate()
+                            }
+                        },
+                        text = "Developer: Human Program",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (viewModel.hiddenGateMessage.isNotBlank()) {
+                        Text(
+                            text = viewModel.hiddenGateMessage,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (viewModel.hiddenSudokuGateVisible) {
+                        HiddenSudokuGate(viewModel)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HiddenSudokuGate(viewModel: HumanProgramViewModel) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(
+            text = "Gate",
+            fontWeight = FontWeight.SemiBold
+        )
+        viewModel.hiddenSudokuCells.chunked(3).forEachIndexed { rowIndex, row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEachIndexed { columnIndex, value ->
+                    val index = rowIndex * 3 + columnIndex
+                    OutlinedTextField(
+                        modifier = Modifier.width(56.dp),
+                        value = value,
+                        onValueChange = { viewModel.updateHiddenSudokuCell(index, it) },
+                        enabled = index != 0,
+                        singleLine = true
+                    )
+                }
+            }
+        }
+        Button(onClick = viewModel::submitHiddenSudokuGate) {
+            Text("Enter")
         }
     }
 }
@@ -748,6 +1080,47 @@ private fun ScheduleBlockRow(block: ScheduleBlock) {
         Text(block.title)
         Text(
             text = block.timeRange,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun CalendarEventEditorRow(
+    title: String,
+    onTitleChange: (String) -> Unit,
+    onHide: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        OutlinedTextField(
+            modifier = Modifier.weight(1f),
+            value = title,
+            onValueChange = onTitleChange,
+            label = { Text("Calendar event") },
+            singleLine = true
+        )
+        OutlinedButton(onClick = onHide) {
+            Text("Hide")
+        }
+    }
+}
+
+@Composable
+private fun CalendarEventRow(
+    title: String,
+    timeLabel: String
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(title.ifBlank { "Untitled event" })
+        Text(
+            text = timeLabel,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
@@ -834,7 +1207,8 @@ private fun SectionCard(
 private fun TaskRow(
     task: DailyTask,
     enabled: Boolean = true,
-    onToggle: () -> Unit
+    onToggle: () -> Unit,
+    onDelete: () -> Unit
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -857,13 +1231,23 @@ private fun TaskRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+        IconButton(
+            enabled = enabled,
+            onClick = onDelete
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.Delete,
+                contentDescription = "Delete task"
+            )
+        }
     }
 }
 
 @Composable
 private fun BacklogItemCard(
     item: BacklogItem,
-    onAssignToday: () -> Unit
+    onAssignToday: () -> Unit,
+    onDelete: () -> Unit
 ) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(
@@ -887,16 +1271,52 @@ private fun BacklogItemCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             if (item.status == BacklogStatus.BACKLOG && item.assignedDate == null) {
-                OutlinedButton(onClick = onAssignToday) {
-                    Text("Assign to Today")
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedButton(onClick = onAssignToday) {
+                        Text("Assign to Today")
+                    }
+                    IconButton(onClick = onDelete) {
+                        Icon(
+                            imageVector = Icons.Outlined.Delete,
+                            contentDescription = "Delete backlog item"
+                        )
+                    }
                 }
             } else {
-                Text(
-                    text = "No action needed",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                IconButton(onClick = onDelete) {
+                    Icon(
+                        imageVector = Icons.Outlined.Delete,
+                        contentDescription = "Delete backlog item"
+                    )
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun UndoRedoBar(viewModel: HumanProgramViewModel) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.End
+    ) {
+        IconButton(
+            enabled = viewModel.canUndo,
+            onClick = viewModel::undoLastEdit
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Outlined.Undo,
+                contentDescription = "Undo"
+            )
+        }
+        IconButton(
+            enabled = viewModel.canRedo,
+            onClick = viewModel::redoLastEdit
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Outlined.Redo,
+                contentDescription = "Redo"
+            )
         }
     }
 }
@@ -907,6 +1327,13 @@ private val DailyTaskSourceType.label: String
         DailyTaskSourceType.BACKLOG -> "Backlog"
         DailyTaskSourceType.MANUAL -> "Manual"
         DailyTaskSourceType.CALENDAR -> "Calendar"
+    }
+
+private val DeviceCalendarEvent.timeLabel: String
+    get() = when {
+        startTime != null && endTime != null -> "$startTime-$endTime"
+        startTime != null -> startTime.toString()
+        else -> "All day"
     }
 
 private enum class MainTab(
@@ -922,10 +1349,10 @@ private enum class MainTab(
 
 private enum class CalendarMode(
     val label: String,
-    val placeholder: String
+    val description: String
 ) {
-    Month("Month", "Month grid and daily event summaries will appear here."),
-    Week("Week", "A multi-day timeline will appear here."),
-    Day("Day", "A single-day timeline will appear here."),
-    Agenda("Agenda", "Upcoming events for about 30 days will appear here.")
+    Month("Month", "Events for the selected day are shown here."),
+    Week("Week", "Use Today date controls to review another day."),
+    Day("Day", "Loaded device events are listed below."),
+    Agenda("Agenda", "Refresh events after changing calendar permission or device calendar data.")
 }

@@ -6,7 +6,8 @@ import java.util.zip.ZipInputStream
 data class HprgmImportPreview(
     val valid: Boolean,
     val files: Set<String>,
-    val message: String
+    val message: String,
+    val planningJson: String? = null
 )
 
 class HprgmZipReader {
@@ -34,13 +35,29 @@ class HprgmZipReader {
             )
         }
 
-        val hasPlanning = "planning.json" in files
-        val valid = manifest.contains("\"format\":\"hprgm\"") && hasPlanning
+        val planning = contents["planning.json"]
+        val formatIsValid = manifest.contains("\"format\":\"hprgm\"")
+        if (!formatIsValid || planning == null) {
+            return HprgmImportPreview(
+                valid = false,
+                files = files,
+                message = "Import package is not valid."
+            )
+        }
+
+        val hasSnapshotShape = planning.contains("\"todayTasks\"") &&
+            planning.contains("\"backlogItems\"") &&
+            planning.contains("\"exerciseRoutine\"")
 
         return HprgmImportPreview(
-            valid = valid,
+            valid = hasSnapshotShape,
             files = files,
-            message = if (valid) "Import package looks valid." else "Import package is not valid."
+            message = if (hasSnapshotShape) {
+                "Import package looks valid."
+            } else {
+                "Planning data could not be read."
+            },
+            planningJson = planning
         )
     }
 }

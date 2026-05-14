@@ -98,6 +98,33 @@ Use this file to track what has been built, what is next, and what decisions hav
 - Added Android Calendar Provider reader that returns empty results unless calendar permission is granted.
 - Added `.hprgm` ZIP import preview reader that validates manifest/planning files.
 - Re-ran `./gradlew test assembleDebug` successfully after Android notifications, calendar provider reader, `.hprgm` import preview, and latest UI expansions.
+- Connected Android notification and calendar permission request buttons to Settings and Calendar.
+- Added `.hprgm` save/open picker flows in the app, with export writing and import preview validation.
+- Added plain Settings status messages for notification permission, calendar permission, and `.hprgm` import/export results.
+- Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew test assembleDebug` successfully after permission and `.hprgm` file-picker wiring.
+- Changed `.hprgm` planning export from title-only data to a full planner snapshot JSON.
+- Added `.hprgm` import apply behavior for valid planner snapshots.
+- Connected saved reminders to Android AlarmManager scheduling after reminder creation or toggling.
+- Added permission-gated device calendar event display in Today and Calendar.
+- Added calendar-derived Today tasks so device calendar events count toward day completion.
+- Added startup mirroring from the current JSON-backed planner snapshot into Room repositories.
+- Added durable app-lock PIN hash storage through DataStore and reload on app startup.
+- Added a ViewModel unit test for calendar events becoming required Today tasks.
+- Added a simple PIN unlock screen that appears when app lock is enabled.
+- Removed visible "comes next/later" copy from current user-facing UI sections.
+- Added ViewModel tests for calendar-derived required tasks and stored PIN lock/unlock.
+- Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew test assembleDebug` successfully after `.hprgm`, reminders, calendar tasks, Room mirroring, durable app-lock storage, and lock-screen work.
+- Updated `ADD.md` with owner decisions for daily page timing, future/past page behavior, live calendar source selection, reminders, app lock, encrypted `.hprgm` export/import, delete undo/redo, hidden game entry, stats, reset, and v1 priorities.
+- Corrected stale spec wording around import-later behavior, one-time/interval reminder-only modeling, and project deletion confirmation.
+- Restored the hidden Sudoku-style gate as part of the easter egg path: Settings -> About -> double-tap developer name -> Sudoku-style gate -> game entry if today is complete.
+- Added undo/redo support for reversible Today task and Backlog item deletes, with UI controls and ViewModel tests.
+- Added calendar source selection backed by DataStore; only selected device calendars generate Today tasks.
+- Added persisted/exported calendar local state for completion, hide, and title overrides.
+- Added Calendar UI controls for local calendar event rename and hide.
+- Added hidden Settings/About developer-label double-tap flow that reveals a Sudoku-style gate only after the day is complete.
+- Added user-selectable app-lock timeout controls backed by DataStore.
+- Changed `.hprgm` import to preview first, then apply through an explicit button.
+- Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew test assembleDebug` successfully after undo/redo, calendar source/local state, hidden Sudoku gate, app-lock timeout, and preview-then-apply import work.
 
 ## In Progress
 
@@ -114,10 +141,13 @@ Use this file to track what has been built, what is next, and what decisions hav
 1. Run the app on an emulator from Android Studio.
 2. Check that Today, Backlog, Calendar, Routines, and Settings open.
 3. Check that tasks can be added and completed.
-4. Replace in-memory state with Room/DataStore persistence.
+4. Replace temporary JSON-backed UI behavior with direct Room/DataStore reads and writes.
 5. Split the large app UI file into screen-specific files after manual testing.
 6. Add full daily page generation rules from `ADD.md`.
-7. Connect CSV import/export services to Settings UI after persistence exists.
+7. Add biometric unlock support.
+8. Expand undo/redo beyond delete into edit, assignment, and completion actions.
+9. Add encrypted full `.hprgm` export with optional game save checkbox.
+10. Replace temporary JSON-backed UI behavior with direct Room/DataStore reads and writes.
 
 ## Decisions
 
