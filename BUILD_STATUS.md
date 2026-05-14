@@ -143,6 +143,10 @@ Use this file to track what has been built, what is next, and what decisions hav
 - Added reversible exercise item editing, deletion, and reordering.
 - Added reversible reminder editing and deletion.
 - Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew test assembleDebug` successfully after biometric unlock, recovery phrase, and editor undo/redo work.
+- Added reversible project label removal and project item completion controls in the Backlog Projects view.
+- Added historical daily task CSV export preview across saved daily pages.
+- Added Android Keystore AES-GCM encryption for the app-private planner snapshot, with plaintext snapshot migration on next save.
+- Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew test assembleDebug` successfully after project controls, daily task CSV export, and encrypted snapshot storage.
 
 ## In Progress
 
@@ -156,6 +160,7 @@ Use this file to track what has been built, what is next, and what decisions hav
 - Daily page history and future preview foundations.
 - App-lock and encrypted export/import foundations.
 - Expanded reversible editing foundations.
+- App-private encrypted planner snapshot storage.
 
 ## Next Steps
 
@@ -165,8 +170,8 @@ Use this file to track what has been built, what is next, and what decisions hav
 4. Replace temporary JSON-backed UI behavior with direct Room/DataStore reads and writes.
 5. Split the large app UI file into screen-specific files after manual testing.
 6. Expand full daily page generation rules from `ADD.md`.
-7. Add database-at-rest encryption and recovery phrase security hardening.
-8. Expand undo/redo into project edit actions.
+7. Finish direct Room-backed UI replacement once manual testing confirms snapshot behavior.
+8. Split the large Compose UI file into screen-specific files.
 9. Add real game save file discovery/export once the game container exists.
 10. Add database-at-rest encryption and recovery phrase design.
 

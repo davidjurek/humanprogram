@@ -480,6 +480,16 @@ private fun BacklogScreen(viewModel: HumanProgramViewModel) {
                 item {
                     SectionCard(title = project, subtitle = "${items.size} item${if (items.size == 1) "" else "s"}") {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            if (viewModel.canDeleteSelectedProject(project)) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    OutlinedButton(onClick = { viewModel.deleteProjectLabel(project) }) {
+                                        Text("Remove Label")
+                                    }
+                                    OutlinedButton(onClick = { viewModel.completeProjectItems(project) }) {
+                                        Text("Complete Items")
+                                    }
+                                }
+                            }
                             items.forEach { backlogItem ->
                                 BacklogItemCard(
                                     item = backlogItem,
@@ -874,6 +884,17 @@ private fun SettingsScreen(
                     if (viewModel.backlogCsvExportPreview.isNotBlank()) {
                         Text(
                             text = viewModel.backlogCsvExportPreview,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Text("Daily Task History CSV")
+                    OutlinedButton(onClick = viewModel::refreshDailyTaskHistoryCsvExportPreview) {
+                        Text("Preview Daily Task CSV")
+                    }
+                    if (viewModel.dailyTaskHistoryCsvExportPreview.isNotBlank()) {
+                        Text(
+                            text = viewModel.dailyTaskHistoryCsvExportPreview,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

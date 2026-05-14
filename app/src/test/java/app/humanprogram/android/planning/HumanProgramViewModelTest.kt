@@ -264,6 +264,47 @@ class HumanProgramViewModelTest {
     }
 
     @Test
+    fun projectLabelRemovalCanUndoAndRedo() {
+        val viewModel = HumanProgramViewModel()
+        viewModel.updateNewBacklogTitle("Doctor")
+        viewModel.updateNewBacklogProject("Health")
+        viewModel.addBacklogItem()
+        val itemId = viewModel.backlogItems.first { it.title == "Doctor" }.id
+
+        viewModel.deleteProjectLabel("Health")
+
+        assertEquals("", viewModel.backlogItems.first { it.id == itemId }.projectBucket)
+
+        viewModel.undoLastEdit()
+
+        assertEquals("Health", viewModel.backlogItems.first { it.id == itemId }.projectBucket)
+
+        viewModel.redoLastEdit()
+
+        assertEquals("", viewModel.backlogItems.first { it.id == itemId }.projectBucket)
+    }
+
+    @Test
+    fun projectCompletionCanUndoAndRestoreAssignedTask() {
+        val viewModel = HumanProgramViewModel()
+        viewModel.updateNewBacklogTitle("Lab")
+        viewModel.updateNewBacklogProject("School")
+        viewModel.addBacklogItem()
+        val itemId = viewModel.backlogItems.first { it.title == "Lab" }.id
+        viewModel.assignBacklogItemToToday(itemId)
+
+        viewModel.completeProjectItems("School")
+
+        assertFalse(viewModel.activeBacklogItems.any { it.id == itemId })
+        assertFalse(viewModel.todayTasks.any { it.sourceId == itemId })
+
+        viewModel.undoLastEdit()
+
+        assertTrue(viewModel.activeBacklogItems.any { it.id == itemId })
+        assertTrue(viewModel.todayTasks.any { it.sourceId == itemId })
+    }
+
+    @Test
     fun scheduleEditsCanUndoAndRedo() {
         val viewModel = HumanProgramViewModel()
         val originalTitle = viewModel.scheduleBlocks.first().title
@@ -359,6 +400,22 @@ class HumanProgramViewModelTest {
         assertEquals(2, viewModel.completedDayCount)
         assertEquals(100, viewModel.completionRatePercent)
         assertEquals(2, viewModel.currentStreak)
+    }
+
+    @Test
+    fun dailyTaskHistoryCsvExportsSavedPages() {
+        val viewModel = HumanProgramViewModel()
+        viewModel.updateNewTaskTitle("Today, quoted \"task\"")
+        viewModel.addManualTask()
+        viewModel.goToNextDay()
+        viewModel.updateNewTaskTitle("Future task")
+        viewModel.addManualTask()
+
+        viewModel.refreshDailyTaskHistoryCsvExportPreview()
+
+        assertTrue(viewModel.dailyTaskHistoryCsvExportPreview.startsWith("date,title,source_type,source_id,completed"))
+        assertTrue(viewModel.dailyTaskHistoryCsvExportPreview.contains("\"Today, quoted \"\"task\"\"\""))
+        assertTrue(viewModel.dailyTaskHistoryCsvExportPreview.contains("Future task"))
     }
 
     @Test

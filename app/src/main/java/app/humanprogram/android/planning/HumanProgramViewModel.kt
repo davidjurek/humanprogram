@@ -21,6 +21,8 @@ import app.humanprogram.android.core.storage.PlannerSnapshotJson
 import app.humanprogram.android.core.storage.PlannerSnapshotStore
 import app.humanprogram.android.planning.backlog.BacklogCsvExporter
 import app.humanprogram.android.planning.backlog.BacklogCsvImporter
+import app.humanprogram.android.planning.backlog.ProjectBucketService
+import app.humanprogram.android.planning.backlog.ProjectDeleteMode
 import app.humanprogram.android.planning.calendar.CalendarLocalState
 import app.humanprogram.android.planning.calendar.CalendarMergeService
 import app.humanprogram.android.planning.calendar.DeviceCalendarEvent
@@ -59,6 +61,7 @@ class HumanProgramViewModel(
     private val streakCalculator = StreakCalculator()
     private val backlogCsvExporter = BacklogCsvExporter()
     private val backlogCsvImporter = BacklogCsvImporter()
+    private val projectBucketService = ProjectBucketService()
     private val pinHashService = PinHashService()
     private val hprgmExportBuilder = HprgmExportBuilder()
     private val hprgmEncryptionService = HprgmEncryptionService()
@@ -134,6 +137,9 @@ class HumanProgramViewModel(
         private set
 
     var backlogCsvExportPreview by mutableStateOf("")
+        private set
+
+    var dailyTaskHistoryCsvExportPreview by mutableStateOf("")
         private set
 
     var newReminderTitle by mutableStateOf("")
@@ -312,6 +318,10 @@ class HumanProgramViewModel(
 
     val activeBacklogByProject: Map<String, List<BacklogItem>>
         get() = activeBacklogItems.groupBy { it.projectBucket.ifBlank { "Unorganized" } }
+
+    val canDeleteSelectedProject: (String) -> Boolean = { projectName ->
+        projectName != ProjectBucketService.UNORGANIZED
+    }
 
     val canUndo: Boolean
         get() = undoStack.isNotEmpty()
@@ -626,6 +636,20 @@ class HumanProgramViewModel(
         saveSnapshot()
     }
 
+    fun deleteProjectLabel(projectName: String) {
+        deleteProject(
+            projectName = projectName,
+            mode = ProjectDeleteMode.DELETE_PROJECT_ONLY
+        )
+    }
+
+    fun completeProjectItems(projectName: String) {
+        deleteProject(
+            projectName = projectName,
+            mode = ProjectDeleteMode.DELETE_PROJECT_AND_ITEMS
+        )
+    }
+
     fun assignBacklogItemToToday(itemId: String) {
         val index = backlogItems.indexOfFirst { it.id == itemId }
         if (index == -1) return
@@ -799,6 +823,27 @@ class HumanProgramViewModel(
 
     fun refreshBacklogCsvExportPreview() {
         backlogCsvExportPreview = backlogCsvExporter.exportCurrentBacklog(backlogItems)
+    }
+
+    fun refreshDailyTaskHistoryCsvExportPreview() {
+        persistSelectedPage()
+        val rows = mutableListOf("date,title,source_type,source_id,completed")
+        dailyTaskPages
+            .toSortedMap()
+            .forEach { (date, tasks) ->
+                tasks.forEach { task ->
+                    rows.add(
+                        listOf(
+                            date.toString(),
+                            task.title,
+                            task.sourceType.name,
+                            task.sourceId.orEmpty(),
+                            task.completed.toString()
+                        ).joinToString(",") { it.toCsvCell() }
+                    )
+                }
+            }
+        dailyTaskHistoryCsvExportPreview = rows.joinToString("\n")
     }
 
     fun addReminder() {
@@ -1362,6 +1407,10 @@ class HumanProgramViewModel(
                     syncBacklogTaskTitle(edit.previous.id, edit.previous.title)
                 }
             }
+            is PlannerEdit.ReplaceBacklogItems -> {
+                backlogItems.replaceWith(edit.previous)
+                todayTasks.replaceWith(edit.previousTasks)
+            }
             is PlannerEdit.ReplaceScheduleBlocks -> {
                 scheduleBlocks.replaceWith(edit.previous)
             }
@@ -1424,6 +1473,10 @@ class HumanProgramViewModel(
                     syncBacklogTaskTitle(edit.updated.id, edit.updated.title)
                 }
             }
+            is PlannerEdit.ReplaceBacklogItems -> {
+                backlogItems.replaceWith(edit.updated)
+                todayTasks.replaceWith(edit.updatedTasks)
+            }
             is PlannerEdit.ReplaceScheduleBlocks -> {
                 scheduleBlocks.replaceWith(edit.updated)
             }
@@ -1472,6 +1525,44 @@ class HumanProgramViewModel(
             } else {
                 task
             }
+        }
+    }
+
+    private fun deleteProject(
+        projectName: String,
+        mode: ProjectDeleteMode
+    ) {
+        if (projectName == ProjectBucketService.UNORGANIZED) return
+
+        val previous = backlogItems.toList()
+        val previousTasks = todayTasks.toList()
+        val result = projectBucketService.deleteProject(
+            projectName = projectName,
+            items = previous,
+            mode = mode
+        )
+        if (result.affectedItemCount == 0) return
+
+        backlogItems.replaceWith(result.remainingItems)
+        removeCompletedBacklogTasks()
+        recordEdit(
+            PlannerEdit.ReplaceBacklogItems(
+                previous = previous,
+                previousTasks = previousTasks,
+                updated = backlogItems.toList(),
+                updatedTasks = todayTasks.toList()
+            )
+        )
+        saveSnapshot()
+    }
+
+    private fun removeCompletedBacklogTasks() {
+        val doneIds = backlogItems
+            .filter { it.status == BacklogStatus.DONE }
+            .map { it.id }
+            .toSet()
+        todayTasks.removeAll { task ->
+            task.sourceType == DailyTaskSourceType.BACKLOG && task.sourceId in doneIds
         }
     }
 
@@ -1633,6 +1724,12 @@ class HumanProgramViewModel(
         }
     }
 
+    private fun String.toCsvCell(): String {
+        val needsEscaping = any { it == ',' || it == '"' || it == '\n' || it == '\r' }
+        if (!needsEscaping) return this
+        return "\"" + replace("\"", "\"\"") + "\""
+    }
+
     private fun buildRecoveryPhrase(): String {
         val random = SecureRandom()
         return (1..6)
@@ -1701,6 +1798,13 @@ private sealed interface PlannerEdit {
         val index: Int,
         val previous: BacklogItem,
         val updated: BacklogItem
+    ) : PlannerEdit
+
+    data class ReplaceBacklogItems(
+        val previous: List<BacklogItem>,
+        val previousTasks: List<DailyTask>,
+        val updated: List<BacklogItem>,
+        val updatedTasks: List<DailyTask>
     ) : PlannerEdit
 
     data class ReplaceScheduleBlocks(
