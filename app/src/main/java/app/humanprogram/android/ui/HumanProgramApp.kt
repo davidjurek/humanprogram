@@ -11,14 +11,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.automirrored.outlined.FormatListBulleted
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.CheckCircle
-import androidx.compose.material.icons.outlined.FormatListBulleted
-import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.SportsEsports
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -31,6 +29,9 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -52,6 +53,9 @@ import app.humanprogram.android.planning.model.BacklogItem
 import app.humanprogram.android.planning.model.BacklogStatus
 import app.humanprogram.android.planning.model.DailyTask
 import app.humanprogram.android.planning.model.DailyTaskSourceType
+import app.humanprogram.android.planning.model.NotificationReminder
+import app.humanprogram.android.planning.model.RecurringTaskTemplate
+import app.humanprogram.android.planning.model.ScheduleBlock
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -123,13 +127,6 @@ private fun TodayScreen(viewModel: HumanProgramViewModel) {
             Header(
                 title = "Today",
                 subtitle = viewModel.todayLabel
-            )
-        }
-
-        item {
-            GameGateCard(
-                isUnlocked = viewModel.isDayComplete,
-                reason = viewModel.gameLockReason
             )
         }
 
@@ -255,14 +252,49 @@ private fun BacklogScreen(viewModel: HumanProgramViewModel) {
 
 @Composable
 private fun CalendarScreen() {
-    SimpleScreen(
-        title = "Calendar",
-        lines = listOf(
-            "Calendar will be optional.",
-            "The app will still work if calendar permission is denied.",
-            "Later: Month, Week, Day, and Agenda views."
-        )
-    )
+    var selectedMode by rememberSaveable { mutableStateOf(CalendarMode.Month) }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        item {
+            Header(
+                title = "Calendar",
+                subtitle = "Optional calendar features will never block the planner."
+            )
+        }
+
+        item {
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                CalendarMode.entries.forEachIndexed { index, mode ->
+                    SegmentedButton(
+                        selected = selectedMode == mode,
+                        onClick = { selectedMode = mode },
+                        shape = SegmentedButtonDefaults.itemShape(
+                            index = index,
+                            count = CalendarMode.entries.size
+                        )
+                    ) {
+                        Text(mode.label)
+                    }
+                }
+            }
+        }
+
+        item {
+            SectionCard(title = selectedMode.label) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(selectedMode.placeholder)
+                    Text(
+                        text = "Calendar permission and source selection come next.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -292,36 +324,259 @@ private fun SettingsScreen(viewModel: HumanProgramViewModel) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Today: ${viewModel.completedTaskCount} of ${viewModel.todayTasks.size} tasks complete")
                     Text("Backlog: ${viewModel.activeBacklogItems.size} active, ${viewModel.doneBacklogCount} done")
-                    Text("Game: ${if (viewModel.isDayComplete) "Unlocked" else "Locked"}")
+                    Text("Current streak: ${viewModel.currentStreak}")
+                    Text("Longest streak: ${viewModel.longestStreak}")
                 }
             }
         }
 
         item {
-            SectionCard(title = "Planning") {
+            SectionCard(title = "Recurring Tasks") {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    viewModel.recurringTemplates.forEach { template ->
+                        RecurringTemplateRow(
+                            template = template,
+                            onToggleActive = { viewModel.toggleRecurringTaskActive(template.id) }
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedTextField(
+                            modifier = Modifier.weight(1f),
+                            value = viewModel.newRecurringTitle,
+                            onValueChange = viewModel::updateNewRecurringTitle,
+                            label = { Text("New recurring task") },
+                            singleLine = true
+                        )
+                        Button(onClick = viewModel::addRecurringTask) {
+                            Text("Add")
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            SectionCard(title = "Schedule") {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    viewModel.scheduleBlocks.forEach { block ->
+                        ScheduleBlockRow(block)
+                    }
+                    OutlinedTextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = viewModel.newScheduleTitle,
+                        onValueChange = viewModel::updateNewScheduleTitle,
+                        label = { Text("Block title") },
+                        singleLine = true
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedTextField(
+                            modifier = Modifier.weight(1f),
+                            value = viewModel.newScheduleTimeRange,
+                            onValueChange = viewModel::updateNewScheduleTimeRange,
+                            label = { Text("Time range") },
+                            singleLine = true
+                        )
+                        Button(onClick = viewModel::addScheduleBlock) {
+                            Text("Add")
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            SectionCard(title = "Exercise") {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Recurring tasks")
-                    Text("Schedule editor")
-                    Text("Exercise editor")
+                    Text(
+                        text = viewModel.exerciseRoutine.title,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    viewModel.exerciseRoutine.items.forEach { item ->
+                        Text(item)
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedTextField(
+                            modifier = Modifier.weight(1f),
+                            value = viewModel.newExerciseItem,
+                            onValueChange = viewModel::updateNewExerciseItem,
+                            label = { Text("Exercise item") },
+                            singleLine = true
+                        )
+                        Button(onClick = viewModel::addExerciseItem) {
+                            Text("Add")
+                        }
+                    }
                 }
             }
         }
 
         item {
             SectionCard(title = "Import and Export") {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Backlog CSV export")
-                    Text("Historical task CSV export")
-                    Text(".hprgm export")
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Backlog CSV")
+                    OutlinedTextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = viewModel.backlogCsvInput,
+                        onValueChange = viewModel::updateBacklogCsvInput,
+                        label = { Text("Paste CSV rows") },
+                        minLines = 3
+                    )
+                    Button(onClick = viewModel::importBacklogCsvPreviewAcceptedRows) {
+                        Text("Import Accepted Rows")
+                    }
+                    if (viewModel.backlogCsvMessage.isNotBlank()) {
+                        Text(
+                            text = viewModel.backlogCsvMessage,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    OutlinedButton(onClick = viewModel::refreshBacklogCsvExportPreview) {
+                        Text("Preview Current Backlog CSV")
+                    }
+                    if (viewModel.backlogCsvExportPreview.isNotBlank()) {
+                        Text(
+                            text = viewModel.backlogCsvExportPreview,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Text(".hprgm export comes after durable structured storage.")
                 }
             }
         }
 
         item {
-            SectionCard(title = "About") {
-                Text("Human Program is local-first and private by default.")
+            SectionCard(title = "Notifications") {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    viewModel.reminders.forEach { reminder ->
+                        ReminderRow(
+                            reminder = reminder,
+                            onToggle = { viewModel.toggleReminder(reminder.id) }
+                        )
+                    }
+                    OutlinedTextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = viewModel.newReminderTitle,
+                        onValueChange = viewModel::updateNewReminderTitle,
+                        label = { Text("Reminder text") },
+                        singleLine = true
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedTextField(
+                            modifier = Modifier.weight(1f),
+                            value = viewModel.newReminderTime,
+                            onValueChange = viewModel::updateNewReminderTime,
+                            label = { Text("Time") },
+                            singleLine = true
+                        )
+                        Button(onClick = viewModel::addReminder) {
+                            Text("Add")
+                        }
+                    }
+                    Text(
+                        text = "Android notification scheduling comes after permission handling.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
+
+        item {
+            SectionCard(title = "Privacy") {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Core app behavior is offline.")
+                    Text("No account, analytics, ads, Firebase, or cloud backend are included.")
+                    Text("Current prototype saves planner data in app-private storage.")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReminderRow(
+    reminder: NotificationReminder,
+    onToggle: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Checkbox(
+            checked = reminder.isEnabled,
+            onCheckedChange = { onToggle() }
+        )
+        Column {
+            Text(
+                text = reminder.title,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = reminder.reminderAt,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecurringTemplateRow(
+    template: RecurringTaskTemplate,
+    onToggleActive: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Checkbox(
+            checked = template.active,
+            onCheckedChange = { onToggleActive() }
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                text = template.title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = "Runs on weekdays: ${template.applicableWeekdays.sorted().joinToString()}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun ScheduleBlockRow(block: ScheduleBlock) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(block.title)
+        Text(
+            text = block.timeRange,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -367,51 +622,6 @@ private fun Header(
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-        }
-    }
-}
-
-@Composable
-private fun GameGateCard(
-    isUnlocked: Boolean,
-    reason: String
-) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = if (isUnlocked) {
-                MaterialTheme.colorScheme.primary
-            } else {
-                MaterialTheme.colorScheme.surface
-            },
-            contentColor = if (isUnlocked) {
-                MaterialTheme.colorScheme.onPrimary
-            } else {
-                MaterialTheme.colorScheme.onSurface
-            }
-        )
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = if (isUnlocked) Icons.Outlined.SportsEsports else Icons.Outlined.Lock,
-                contentDescription = null
-            )
-            Column {
-                Text(
-                    text = if (isUnlocked) "Game unlocked" else "Game locked",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    text = reason,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            }
         }
     }
 }
@@ -529,8 +739,18 @@ private enum class MainTab(
     val icon: ImageVector
 ) {
     Today("Today", Icons.Outlined.CheckCircle),
-    Backlog("Backlog", Icons.Outlined.FormatListBulleted),
+    Backlog("Backlog", Icons.AutoMirrored.Outlined.FormatListBulleted),
     Calendar("Calendar", Icons.Outlined.CalendarMonth),
     Routines("Routines", Icons.Outlined.Repeat),
     Settings("Settings", Icons.Outlined.Settings)
+}
+
+private enum class CalendarMode(
+    val label: String,
+    val placeholder: String
+) {
+    Month("Month", "Month grid and daily event summaries will appear here."),
+    Week("Week", "A multi-day timeline will appear here."),
+    Day("Day", "A single-day timeline will appear here."),
+    Agenda("Agenda", "Upcoming events for about 30 days will appear here.")
 }

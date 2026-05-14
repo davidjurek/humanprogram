@@ -34,6 +34,7 @@ Use this file to track what has been built, what is next, and what decisions hav
 - Seeded Today from recurring task templates through the daily page generator.
 - Hid completed backlog items from the normal active Backlog view.
 - Added basic Settings stats for Today, Backlog, and game access.
+- Removed visible game status from normal UI because the game is an easter egg.
 - Added current backlog CSV export service.
 - Added unit tests for backlog CSV export headers, active-only behavior, and escaping.
 - Added backlog CSV import preview service.
@@ -43,6 +44,24 @@ Use this file to track what has been built, what is next, and what decisions hav
 - Configured local Android SDK path in ignored `local.properties`.
 - Ran unit tests successfully with `./gradlew test`.
 - Built debug APK successfully with `./gradlew assembleDebug`.
+- Added backlog overdue assignment cleanup service and tests.
+- Added exercise template factory that guarantees seven weekday templates and tests.
+- Added schedule conflict detection, sleep-block normalization, and tests.
+- Added streak calculation service and tests.
+- Added app-private JSON snapshot persistence for Today tasks and Backlog items.
+- Connected `MainActivity` to a ViewModel factory that loads/saves the planner snapshot.
+- Expanded Settings with Stats, Recurring Tasks, Schedule, Exercise, Import/Export, and Privacy sections.
+- Added basic streak display in Settings.
+- Added editable recurring task creation and active/inactive toggles in Settings.
+- Added editable schedule block creation in Settings.
+- Added editable exercise item creation in Settings.
+- Persisted recurring tasks, schedule blocks, and exercise routine in the app-private snapshot.
+- Added Settings UI for backlog CSV import and current backlog CSV preview/export text.
+- Added notification reminder model, persisted reminder definitions, and Settings UI to add/toggle reminders.
+- Added Calendar tab modes for Month, Week, Day, and Agenda with permission-safe placeholder states.
+- Added first `.hprgm` export package builder with manifest and planning JSON foundations.
+- Re-ran unit tests successfully with `./gradlew test` after this development pass.
+- Rebuilt debug APK successfully with `./gradlew assembleDebug` after this development pass.
 
 ## In Progress
 
@@ -50,6 +69,8 @@ Use this file to track what has been built, what is next, and what decisions hav
 - Core planning rules before database persistence.
 - CSV import/export foundations.
 - Emulator/manual UI testing.
+- Schedule, exercise, backlog maintenance, and stats rule foundations.
+- Temporary app-private persistence before Room/DataStore migration.
 
 ## Next Steps
 

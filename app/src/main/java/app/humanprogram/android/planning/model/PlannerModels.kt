@@ -54,3 +54,10 @@ data class ExerciseRoutine(
     val title: String,
     val items: List<String>
 )
+
+data class NotificationReminder(
+    val id: String = UUID.randomUUID().toString(),
+    val title: String,
+    val reminderAt: String,
+    val isEnabled: Boolean = true
+)
