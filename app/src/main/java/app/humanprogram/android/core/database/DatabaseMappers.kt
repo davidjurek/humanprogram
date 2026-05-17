@@ -46,7 +46,7 @@ fun DailyTask.toEntity(pageDate: LocalDate, sortOrder: Int): DailyPageTaskEntity
         sourceType = sourceType.name,
         sourceId = sourceId,
         title = title,
-        notes = "",
+        notes = notes,
         completed = completed,
         completedAt = null,
         sortOrder = sortOrder
@@ -59,6 +59,7 @@ fun DailyPageTaskEntity.toModel(): DailyTask {
         title = title,
         sourceType = DailyTaskSourceType.valueOf(sourceType),
         sourceId = sourceId,
+        notes = notes,
         completed = completed
     )
 }

@@ -8,8 +8,15 @@ import android.os.Build
 import android.os.Bundle
 import android.os.CancellationSignal
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.ViewModelProvider
@@ -39,6 +46,7 @@ class MainActivity : ComponentActivity() {
     private val appPreferencesRepository by lazy { AppPreferencesRepository(applicationContext) }
     private val biometricExecutor: Executor by lazy { mainExecutor }
     private var biometricCancellationSignal: CancellationSignal? = null
+    private var appearancePreference by mutableStateOf("system")
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -105,9 +113,32 @@ class MainActivity : ComponentActivity() {
         observeAppPreferences()
 
         setContent {
-            HumanProgramTheme {
+            val darkTheme = when (appearancePreference) {
+                "light" -> false
+                "dark" -> true
+                else -> isSystemInDarkTheme()
+            }
+            SideEffect {
+                val transparent = android.graphics.Color.TRANSPARENT
+                enableEdgeToEdge(
+                    statusBarStyle = if (darkTheme) {
+                        SystemBarStyle.dark(transparent)
+                    } else {
+                        SystemBarStyle.light(transparent, transparent)
+                    },
+                    navigationBarStyle = if (darkTheme) {
+                        SystemBarStyle.dark(transparent)
+                    } else {
+                        SystemBarStyle.light(transparent, transparent)
+                    }
+                )
+            }
+            HumanProgramTheme(
+                darkTheme = darkTheme
+            ) {
                 HumanProgramApp(
                     viewModel = plannerViewModel,
+                    appearance = appearancePreference,
                     notificationPermissionGranted = hasNotificationPermission(),
                     calendarPermissionGranted = hasCalendarPermission(),
                     onRequestNotificationPermission = ::requestNotificationPermission,
@@ -125,6 +156,8 @@ class MainActivity : ComponentActivity() {
                         )
                     },
                     onReminderScheduleChanged = ::syncReminderSchedule,
+                    onReminderDeleted = reminderScheduler::cancel,
+                    onPlannerDataReplacing = ::cancelCurrentReminderSchedules,
                     onRefreshCalendarEvents = ::refreshCalendarEvents,
                     onToggleCalendarSource = ::toggleCalendarSource,
                     onOnboardingComplete = {
@@ -179,6 +212,15 @@ class MainActivity : ComponentActivity() {
                             appPreferencesRepository.setBoolean(
                                 AppPreferencesRepository.Keys.BiometricUnlockEnabled,
                                 plannerViewModel.biometricUnlockEnabled
+                            )
+                        }
+                    },
+                    onAppearanceChanged = { appearance ->
+                        appearancePreference = appearance
+                        lifecycleScope.launch {
+                            appPreferencesRepository.setString(
+                                AppPreferencesRepository.Keys.Appearance,
+                                appearance
                             )
                         }
                     },
@@ -260,6 +302,12 @@ class MainActivity : ComponentActivity() {
         ).forEach(reminderScheduler::schedule)
     }
 
+    private fun cancelCurrentReminderSchedules() {
+        plannerViewModel.reminders.forEach { reminder ->
+            reminderScheduler.cancel(reminder.id)
+        }
+    }
+
     private fun migrateSnapshotToRoom() {
         val database = DatabaseProvider.get(applicationContext)
         val migration = SnapshotToRoomMigration(
@@ -280,6 +328,7 @@ class MainActivity : ComponentActivity() {
     private fun observeAppPreferences() {
         lifecycleScope.launch {
             appPreferencesRepository.preferences.collect { preferences ->
+                appearancePreference = preferences.appearance
                 plannerViewModel.loadStoredAppLockPin(
                     enabled = preferences.appLockEnabled,
                     biometricEnabled = preferences.biometricUnlockEnabled,

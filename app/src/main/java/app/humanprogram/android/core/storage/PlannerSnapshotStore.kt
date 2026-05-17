@@ -29,6 +29,7 @@ data class PlannerSnapshot(
     val exerciseRoutine: ExerciseRoutine,
     val reminders: List<NotificationReminder>,
     val routines: List<String>,
+    val projectBuckets: List<String> = emptyList(),
     val calendarLocalStates: List<CalendarLocalState> = emptyList(),
     val dailyTaskPages: Map<LocalDate, List<DailyTask>> = emptyMap()
 )

@@ -150,6 +150,80 @@ Use this file to track what has been built, what is next, and what decisions hav
 - Added persisted first-launch welcome sequence with privacy/offline copy, optional PIN/recovery phrase setup, optional calendar permission, and Enter Today action.
 - Replaced simple reset confirmation with a staged reset sequence: start reset, backup reminder, explicit acknowledgement, typed `reset`, then reset.
 - Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew test assembleDebug` successfully after onboarding and reset sequence work.
+- Captured owner UI feedback in `ADD.md`: safe-area/cutout behavior, removal of redundant app/page titles, read/edit modes, top-right menus, compact Backlog controls, Settings detail pages, Today date picker/calendar integration, dark mode, and hidden gate behavior.
+- Added normal-app design principles to `ADD.md`: read-first/edit-second, clean by default, no control dumping, compact rows, focused detail pages, and hidden easter egg behavior.
+- Added `UI_DEVELOPMENT_GUIDE.md` as the detailed professional UI redesign reference, incorporating owner screenshots, anti-examples, online UI research, current Compose audit findings, app-shell rules, design-system tokens, screen-by-screen rebuild instructions, and visual QA checks.
+- Rebuilt the Compose UI around the new professional direction: removed phone bottom tabs and persistent app title, added a Today-first command shell, Program menu sheet, compact action/overflow chrome, read/edit modes, form sheets, focused Settings detail pages, Backlog project rows/detail route, Calendar mode surfaces, Reminders/Stats/Import-Export routes, dynamic light/dark custom colors, and full-screen black hidden Sudoku gate route.
+- Wired the Appearance detail page to persisted DataStore preferences for Match System, Light, and Dark, and added concrete Today Display and Backlog detail pages instead of placeholder copy.
+- Launched the rebuilt app on the Pixel 10 Pro emulator, captured clean onboarding and Today screenshots, corrected top safe-area overlap, tightened command-bar/date typography, reduced oversized hero/title treatments, and made the Program menu scrollable so lower destinations remain reachable.
+- Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew test assembleDebug` successfully after the UI rebuild.
+- Removed the awkward paired circular controls from the Today hero and replaced them with a single compact Date action.
+- Verified the rebuilt Today, Backlog, Settings, Appearance, Program menu, and dark-mode surfaces on the Pixel 10 Pro emulator with screenshots.
+- Fixed system status/navigation bar icon coloring so persisted Dark mode has readable system chrome.
+- Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew test assembleDebug` successfully after the final visual correction pass.
+- Ran another redundant-control sweep: removed Today hero Date button, removed duplicate Add items from overflow, removed Jump to Today overflow, removed duplicate hero Add buttons from add-capable screens, and kept Project add prefilled to the current project.
+- Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew test assembleDebug` successfully after the redundant-control sweep.
+- Ran a follow-up full-screen UI cleanup: removed the duplicate Calendar settings detail, removed inline Schedule/Exercise add buttons now covered by contextual add, removed the empty Routines duplicate Add button, removed App Lock test controls, renamed `.hprgm` import selection to `Choose Backup`, and moved Today date picking into the Today hero instead of the command bar.
+- Updated `ADD.md` with the no-duplicate-date-control rule and Settings organization rules.
+- Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew test assembleDebug` successfully after the follow-up cleanup.
+- Installed the debug build on the Pixel 10 Pro emulator and captured Today, Program menu, lower Program menu, and Import/Export screenshots for visual verification.
+- Ran an additional whole-app polish sweep: removed duplicate empty-state add actions, added empty states to Backlog project/task views and Reminders, clarified `Add to Today`, grouped Settings by Personalization/Program/Privacy/System, removed the redundant Settings hero, made recovery unlock collapsible, removed normal-UI hidden-game status copy, softened backup/import/export wording, and renamed reset confirmation controls.
+- Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew test assembleDebug` successfully after the additional polish sweep.
+- Installed the latest debug build on the emulator and captured a final Today screenshot for visual verification.
+- Replaced the date picker day-by-day jump loop with a direct `goToDate` ViewModel action.
+- Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew test assembleDebug` successfully after the direct date navigation fix.
+- Ran a comprehensive debug pass with Android lint, unit tests, and debug assembly.
+- Fixed lint issues: added Android 12+ data extraction rules that exclude local app data from backup/transfer, removed obsolete notification SDK branching, removed an unused launcher color resource, switched primitive Compose state to `mutableIntStateOf`, removed redundant `androidx.core:core`, and updated AndroidX Activity/Core/DataStore/Lifecycle dependencies to current lint-reported stable versions.
+- Replaced deprecated direct system bar color writes with AndroidX `enableEdgeToEdge` and `SystemBarStyle`.
+- Fixed reminder alarm lifecycle bugs: deleting a reminder now cancels its existing Android alarm, and import/reset paths cancel existing reminder alarms before replacing planner data and then resync the new reminder set.
+- Added regression tests for direct date jumping and reset validation return behavior.
+- Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew lintDebug test assembleDebug`; lint now reports `No issues found`.
+- Installed the debug APK on the emulator and confirmed `app.humanprogram.android` launches and stays running.
+- Split the rebuilt Compose UI out of the oversized `HumanProgramApp.kt` file into focused UI files under `ui/design`, `ui/shell`, `ui/screens`, and `ui/components` while keeping behavior unchanged.
+- Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew lintDebug test assembleDebug` successfully after the Compose UI file split.
+- Completed the remaining `UI_DEVELOPMENT_GUIDE.md` implementation pass: added navigation state scaffolding, fuller design tokens, compact Backlog search/view controls, focused Calendar source selection, stronger Calendar mode surfaces with event markers/time rails, focused advanced import/export sheet, expanded Settings detail pages, staged App Lock controls, and time shortcut controls for reminder/schedule forms.
+- Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew lintDebug test assembleDebug` successfully after the final UI guide pass.
+- Installed the debug APK on the Pixel 10 Pro emulator and captured light/dark visual QA screenshots for Today, Program menu, Backlog, Settings, Appearance, and dark mode.
+- Built the iPhone `dailyOS` app from `/Users/algae/dailyOS` for the iPhone 17 Pro simulator and captured a Today reference screenshot at `build/reference-dailyos/01-launch-today.png`.
+- Folded iPhone `dailyOS` functional lessons into the maintained docs: Today schedule/date/task flow, Program navigation, Backlog project behavior, Calendar-to-Today integration, Schedule template editing, Settings detail pages, About cleanup, and hidden gate behavior.
+- Updated `AGENTS.md` and `UI_DEVELOPMENT_GUIDE.md` with the latest owner correction pass: no Today `Command Center`/`Execution mode`, Today date controls must be previous/next/Today/calendar with year, schedule must be a vertical event-box time grid, Program must become a separate folder/app-grid page, Backlog add must offer item/project, search belongs top-right, schedule pages must default to read mode, About must not show undo/redo, and the hidden gate must auto-detect completion.
+- Converted Program from a full-screen menu overlay into a real app route opened by the hamburger and closed with normal back navigation.
+- Rebuilt Today schedule as a vertical calendar-style time grid with an hour rail, hour rules, positioned schedule/calendar event boxes, and a current-time line only within the visible day range.
+- Made the hidden Sudoku gate's fixed clue visible against the black surface while keeping auto-submit behavior and no explicit Enter button.
+- Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew lintDebug test assembleDebug` successfully after the Program route, Today schedule grid, and hidden gate visibility work.
+- Folded the former `CODEX_HANDOFF.md` lessons into the maintained project docs: do not overpromise completion, do not do decorative-only UI work, audit every route for real purpose/function/persistence/tests/visual QA, and keep durable guidance in `ADD.md`, `AGENTS.md`, `UI_DEVELOPMENT_GUIDE.md`, and `BUILD_STATUS.md`.
+- Cleaned `AGENTS.md` so it contains agent workflow/coding guidance only. Product, UI, navigation, data, and build requirements remain in `ADD.md`, `UI_DEVELOPMENT_GUIDE.md`, and `BUILD_STATUS.md`.
+- Deleted the standalone `DAILYOS_REFERENCE.md` after folding its remaining lessons into `ADD.md`, `UI_DEVELOPMENT_GUIDE.md`, and `BUILD_STATUS.md`.
+- Added a comprehensive production app completion backlog to `ADD.md`, excluding Google Play/commercial release tasks per owner direction. It now covers the full UI/function inventory, opaque frosted-glass material direction, Today, daily pages, Backlog, Calendar, Schedule, Exercise, Routines, Reminders, Stats, Import/Export, Settings, App Lock, encryption/privacy, Reset, hidden gate/game bridge, onboarding, universal search, architecture cleanup, tests, and manual QA.
+- Added a complete UI function sweep to `UI_DEVELOPMENT_GUIDE.md`: every page, Program tile, Settings detail, dropdown, overflow menu, sheet, date picker, form, permission state, empty state, locked state, button, icon button, switch, chip, destructive action, undo/redo action, import/export action, and hidden path must be opened and verified. Any element without a purpose from `ADD.md` or the UI guide must be removed or given a real function.
+- Clarified the desired opaquely glassy UI in `UI_DEVELOPMENT_GUIDE.md`: frosted glass over paper, softened and translucent but still readable, closer to early iOS frosted surfaces than liquid glass.
+- Implemented the next production backlog pass: Backlog project rename/delete/detail editing, Backlog notes and assigned dates, Calendar event detail sheets with local title/notes/hide/restore behavior, editable/deletable Routines, and reusable frosted-glass surface tokens.
+- Added Today schedule timeline interactions so schedule blocks and visible calendar event boxes open focused detail sheets instead of being decorative-only timeline boxes.
+- Added recurring task template edit/delete/weekday controls with undo/redo coverage, and made newly added recurring tasks carry their template ID into Today.
+- Added app-lock PIN rate limiting after repeated wrong unlock attempts.
+- Added a real Program Search route that searches Today tasks, backlog tasks and projects, calendar events, schedule blocks, exercise items, recurring tasks, routines, reminders, and Settings detail pages, with results navigating to the relevant destination.
+- Added a purposeful hidden post-gate bridge: after the full-screen Sudoku-style gate unlocks, the quiet entry object opens an isolated container placeholder without exposing game state in normal UI.
+- Added a Today task detail sheet so read-mode task rows open to focused controls for renaming, completing/uncompleting, or deleting the task instead of requiring whole-page edit mode.
+- Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew test assembleDebug` successfully after each production backlog implementation slice.
+- Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew lintDebug test assembleDebug`; lint, unit tests, and debug assembly pass.
+- Corrected the screenshot-driven UI regressions: Program now shows only Today, Backlog, Calendar, Routines, Search, and Settings; Reminders, Stats, and Import/Export live under Settings; top-level routes use the hamburger/menu model instead of back-to-Today behavior; Program no longer shows a header or completion summary; Today date controls moved into the shared top row and the date panel shows compact `completed/total` progress; Backlog removed the Current View card and moved search/view controls to the top row; Calendar removed the hero/source cards and shows selected-day events below the calendar; Import/Export now opens focused Backup and Advanced Data pages instead of exposing password/data tools on the first page; blank CSV import is disabled/ignored; Recurring, Schedule, and Exercise settings now use row-to-detail editing instead of exploding every item inline; Stats now has a real completion graph surface and no blank placeholder strips; shared panels were changed back to plain surfaces to remove the gray-margin/white-center artifact.
+- Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew lintDebug test assembleDebug` successfully after the screenshot-driven UI correction pass.
+- Updated the Program screen from owner sketch: removed the top hamburger chrome, added a top-aligned full-width Search bar, replaced the Search tile with Stats, removed tile subtitles, and made all six Program tiles equal-size and aligned.
+- Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew lintDebug test assembleDebug` successfully after the Program screen layout change.
+- Refined Program search interaction: the default search bar now shows only a centered search icon, tapping it activates in-place text entry, the six Program tiles slide/fade down while searching, tapping outside clears search and restores the tiles, and the tile grid is shifted down for more even top/bottom spacing.
+- Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew lintDebug test assembleDebug` successfully after the Program search interaction change.
+- Updated Today per owner direction: combined top date/navigation controls into one capsule with a four-square Program button, cleaned Schedule subtitles and 3-hour time labels, made the current-time line update while open and span the schedule, compacted the date/progress card, changed Required Tasks add to a pill, removed duplicate completion/exercise subtitles, and replaced the task bottom sheet with a read/edit full-page task detail including persisted notes.
+- Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew lintDebug test assembleDebug` successfully after the Today screen and task detail changes.
+- Fixed the Today Schedule panel dimensions so the schedule surface is square again while scaling the timeline contents inside it.
+- Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew lintDebug test assembleDebug` successfully after the square Schedule panel fix.
+- Refined Today visual spacing and schedule internals: removed the blue date card and progress bar, matched Schedule/Exercise header gaps to Required Tasks, narrowed schedule event blocks and grid lines to a left rail, moved event titles/times outside the blocks, and aligned the current-time pill/line to the narrowed rail with minute-boundary updates.
+- Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew lintDebug test assembleDebug` successfully after the Today visual spacing and schedule rail changes.
+- Applied the next Today/detail polish pass: removed the date counter, made schedule rail blocks view-only and removed their inner accent bars, added a light gray rail background, aligned the current-time pill with the time labels, changed the Required Tasks add control to a thinner plus pill, shortened the Exercise empty state to centered `Nothing for today.`, moved task detail to its own route without the Today capsule, added a back/edit-save detail capsule, removed Edit Mode from the Today overflow, and added long-press haptic lock/unlock for past pages in the date row.
+- Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew lintDebug test assembleDebug` successfully after the Today/detail polish pass.
+- Refined task detail and Today task rows: read/edit task detail now keeps matching layout scale with dividers inside the top capsule, Required Tasks uses a smaller plus pill, Today task rows no longer show source subtitles, and the default Exercise routine starts empty so the centered `Nothing for today.` state appears.
+- Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew lintDebug test assembleDebug` successfully after the task detail and Today row cleanup.
+- Fixed screenshot-reported Today spacing issues: aligned the current-time pill digits with the left time labels, extended the schedule rail background equally below `24:00`, and matched the Required Tasks header gap to Schedule and Exercise.
+- Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew lintDebug test assembleDebug` successfully after the Today spacing fixes.
 
 ## In Progress
 
@@ -164,19 +238,19 @@ Use this file to track what has been built, what is next, and what decisions hav
 - App-lock and encrypted export/import foundations.
 - Expanded reversible editing foundations.
 - App-private encrypted planner snapshot storage.
+- Professional UI redesign maintenance.
+- dailyOS functional parity review for Android, now folded into `ADD.md` and `UI_DEVELOPMENT_GUIDE.md`.
+- Production app completion backlog is now documented in `ADD.md`.
+- Complete UI/control/function audit is now documented in `UI_DEVELOPMENT_GUIDE.md`.
 
 ## Next Steps
 
-1. Run the app on an emulator from Android Studio.
-2. Check that Today, Backlog, Calendar, Routines, and Settings open.
-3. Check that tasks can be added and completed.
-4. Replace temporary JSON-backed UI behavior with direct Room/DataStore reads and writes.
-5. Split the large app UI file into screen-specific files after manual testing.
-6. Expand full daily page generation rules from `ADD.md`.
-7. Finish direct Room-backed UI replacement once manual testing confirms snapshot behavior.
-8. Split the large Compose UI file into screen-specific files.
-9. Add real game save file discovery/export once the game container exists.
-10. Add database-at-rest encryption and recovery phrase design.
+1. Start the complete UI/function sweep from `UI_DEVELOPMENT_GUIDE.md`: open every route, tile, page, setting, dropdown, menu, sheet, picker, form, permission state, empty state, locked state, button, toggle, chip, destructive action, undo/redo action, import/export action, and hidden path.
+2. For every UI element, decide whether it has a purpose in `ADD.md` or `UI_DEVELOPMENT_GUIDE.md`; implement and persist it if yes, remove it if no.
+3. Capture or manually inspect screenshots for all routes, Settings details, sheets, dropdowns, permission states, empty states, locked/unlocked states, keyboard-open forms, light mode, dark mode, match-system mode, Pixel cutout, and compact phone size.
+4. Continue the owner correction/product-completion backlog now captured in `ADD.md`, with next implementation focus on About cleanup, hidden gate fade/game bridge, remaining Settings detail depth, universal search decision/implementation, direct Room/DataStore UI replacement, complete visual QA, and any remaining no-purpose UI found by the sweep.
+5. Continue direct Room/DataStore UI replacement once behavior is verified.
+6. Add real game save discovery/export after the game container exists.
 
 ## Decisions
 
@@ -190,6 +264,8 @@ Use this file to track what has been built, what is next, and what decisions hav
 - Keep beginner-friendly communication as a standing rule.
 - Compile against installed Android 16 QPR2 SDK/API 36.1 while keeping minimum Android 12/API 31.
 - Codex/agents may update `ADD.md`, `BUILD_STATUS.md`, and `AGENTS.md` as needed.
+- iPhone `dailyOS` functional lessons are folded into `ADD.md` and `UI_DEVELOPMENT_GUIDE.md`; do not recreate a separate reference file unless the owner asks for one.
+- Durable lessons from temporary handoff docs should be folded into the maintained docs, then the handoff docs should be removed to avoid stale source-of-truth drift.
 
 ## Notes For Future Agents
 

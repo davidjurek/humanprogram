@@ -12,49 +12,19 @@ The full product brief lives in `ADD.md`; treat that file as the source of truth
 - Ask only questions that are truly needed.
 - Do not give long walls of text unless the owner asks for detail.
 - Avoid parallel terminal commands in this repo unless truly necessary. One command at a time keeps the session easier to follow and less likely to hang.
+- The owner is frustrated by overpromising and partial completion claims. Do not say the app is done, complete, production-ready, or "100%" unless every core feature, flow, persistence path, and QA item has actually been verified.
+- The owner does not want decorative-only work. Every page, function, and tool must have a clear working purpose.
 
-## Product
+## Source Of Truth
 
-Human Program is a private, offline-first Android daily execution app.
-Privacy and data security are not the main product purpose, but they are core build values.
+- `ADD.md` is the product/build source of truth.
+- `UI_DEVELOPMENT_GUIDE.md` is the UI/UX source of truth.
+- `DAILYOS_REFERENCE.md` is the iPhone dailyOS functional reference.
+- `BUILD_STATUS.md` is the progress tracker and next-step source.
+- Read the relevant docs before changing related code.
+- Do not duplicate detailed product requirements in this file.
 
-Core idea:
-
-- Each day has one generated daily page.
-- The daily page combines recurring tasks, backlog items assigned to that date, calendar items, exercise information, and schedule blocks.
-- Completing all required tasks unlocks a future game for that day.
-- The planner and game must stay separate.
-- The game is an easter egg and should not be visibly advertised in normal app UI.
-- Game lock/unlock state may exist internally, but obvious game entry points should stay hidden until intentionally revealed.
-
-## Android Defaults
-
-Use these choices unless the owner explicitly changes them:
-
-- Language: Kotlin
-- UI: Jetpack Compose
-- Base design system: Material 3 with custom theme
-- Package name: `app.humanprogram.android`
-- Minimum Android version: Android 12 / API 31
-- Persistence: Room for structured data
-- Preferences: DataStore
-- Background work: WorkManager only where useful
-- Reminders: Android notification APIs
-- Calendar: optional Android Calendar Provider adapter
-- Export extension: `.hprgm`
-
-Do not add by default:
-
-- Required internet access
-- Required Google account
-- Firebase
-- Google Play Services dependency
-- Analytics
-- Ads
-- Cloud backend
-- Remote crash reporting
-
-## Architecture Preferences
+## Coding Architecture
 
 - Keep the app local-first and privacy-preserving.
 - Screens should talk to ViewModels.
@@ -92,45 +62,6 @@ game/
 testing/
 ```
 
-## Navigation
-
-The main app should use five bottom tabs:
-
-```text
-Today
-Backlog
-Calendar
-Routines
-Settings
-```
-
-Stats initially belongs inside Settings.
-Past daily pages are reached from Today by changing the date.
-
-## UI Preferences
-
-- Calm, utilitarian, pleasant, human-friendly.
-- Personal but not flashy.
-- Use Material 3 where it fits.
-- Avoid glossy translucent styling and large decorative effects.
-- Avoid one-color palettes.
-- Prefer a Georgia-like serif as the default reading font, with a future font setting.
-- Do not make a marketing landing page as the main experience.
-- The first screen should be the usable app.
-
-## Data Rules
-
-- Past daily pages are historical snapshots.
-- Template changes can update today and future pages.
-- Template changes must not rewrite past pages.
-- There are required tasks only; no optional tasks.
-- Empty Today task list does not count as complete.
-- Exercise section does not count toward day completion unless exercise is also a normal required task.
-- Calendar-derived Today entries count toward completion.
-- Game access unlocks only when today is complete.
-- Game progress must never be deleted just because the daily gate locks again.
-- The game is hidden. Do not show game links, cards, labels, stats, settings, or normal UI text that advertises it. Hidden gate/easter-egg code and internal save metadata are allowed.
-
 ## Safety Rules
 
 - Preserve user data.
@@ -143,31 +74,17 @@ Past daily pages are reached from Today by changing the date.
 - Work in tested checkpoints instead of piling up large unverified edits.
 - Commit only after behavior is working and the owner approves or asks.
 
-## Build Order
+## Work Habits
 
-Preferred implementation order:
-
-1. Project foundation: Kotlin, Compose, Material 3, package name, bottom tabs.
-2. Core data: Room entities, DAOs, repositories, DataStore preferences.
-3. Today screen: generated page, tasks, completion, schedule, exercise.
-4. Backlog: items, projects, assignment, imports/exports.
-5. Settings: recurring tasks, schedule editor, exercise editor, stats entry.
-6. Calendar adapter.
-7. Notifications.
-8. Stats.
-9. `.hprgm` export/import.
-10. App lock and encryption.
-11. Game bridge.
-12. Game integration.
-
-Current priorities:
-
-- Finish moving planner UI behavior from the JSON snapshot into Room repositories.
-- Add real notification permission and reminder scheduling UX.
-- Add real calendar permission/source selection and event import UX.
-- Add durable app-lock storage and full PIN/biometric UX.
-- Add `.hprgm` file save/open flows.
-- Split large Compose files, especially `HumanProgramApp.kt`, into smaller screens/components once behavior is stable.
+- Before coding, check `git status --short` when practical.
+- Search with `rg` or `rg --files`.
+- For UI work, read `UI_DEVELOPMENT_GUIDE.md` first.
+- For dailyOS parity work, read `DAILYOS_REFERENCE.md` first.
+- For feature scope and product rules, read `ADD.md` first.
+- For current next steps, read `BUILD_STATUS.md` first.
+- Treat remaining work as a functional product audit, not a surface redesign.
+- Remove or replace placeholder-only tools. A route is not production-ready just because it opens.
+- Keep implementation chunks small enough to test.
 
 ## Testing Expectations
 
@@ -209,3 +126,7 @@ Agents may update these files as needed while working:
 - `ADD.md`
 - `BUILD_STATUS.md`
 - `AGENTS.md`
+- `UI_DEVELOPMENT_GUIDE.md`
+- `DAILYOS_REFERENCE.md`
+
+Do not keep separate handoff documents as long-term source-of-truth files. Fold durable lessons into the maintained docs above.

@@ -41,10 +41,34 @@ These decisions override older or more generic language elsewhere in this file.
 - The game entry is completely hidden in normal UI. The intended easter egg begins in Settings -> About by double-tapping the read-only developer name label, then uses the hidden Sudoku-style gate before entering the game.
 - Local data reset belongs in Settings and requires strong confirmation.
 - v1 priority is all of the following: daily planner reliability, customization, game bridge, and import/export robustness.
+- Do not show a persistent or oversized `Human Program` title in the app chrome, onboarding, or tab pages. The user already knows what app they opened. Use the app name only where normal apps do: launcher label, About, backup/export naming, and rare contextual copy.
+- The UI must respect Android safe areas, status bars, navigation bars, and display cutouts/camera holes. Content must never sit under the Pixel camera hole, dynamic-island-style cutout, or status icons.
+- Top-level tabs must not repeat obvious page titles such as Today, Backlog, Calendar, Routines, or Settings inside the content area.
+- Android phone navigation is Today-first. The hamburger opens a separate Program page with folder/app-grid destinations. Do not use bottom tabs as the primary Android navigation unless the owner explicitly reverses this decision.
+- Settings must be a menu of detail pages, not one long page with every setting expanded. Settings entries should open pages for Appearance, Today Display, Backlog, Recurring Tasks, Schedule, Exercise, Notifications, Calendar, Import/Export, Security/App Lock, Reset, Stats, and About.
+- The app must have distinct read mode and edit mode. Read mode is clean and hides text fields, delete buttons, add fields, and bulk-edit controls. Edit mode reveals editing controls.
+- Undo/redo belongs in upper-right chrome only on pages or modes where there are actual undoable changes. Static pages such as About must not show undo/redo.
+- Each major page should have upper-right actions/overflow where needed. Search, view, filter, and sort belong in the top-right area, not in the middle of page content.
+- Today date controls should be previous, next, Today, and calendar. Today must support direct calendar date selection and must show the year.
+- Today must not have a standalone Calendar card. Calendar events should be integrated into the Schedule timeline and Today’s Tasks.
+- Today must not show `Command Center` or `Execution mode` labels.
+- Today schedule should look and behave like a vertical calendar-style time grid with a time rail, hour rules, boxes for schedule/calendar events, and a red current-time line only on today.
+- The Today manual-task plus belongs in the required-tasks section header.
+- Backlog add must offer two choices: Backlog Item or Project. Search belongs top-right. The current blue Backlog hero/header should not exist.
+- Schedule pages must default to read mode. Add Schedule Block must support clear duration selection.
+- About must not show the small extra `Human Program` label below `About`, and the developer hidden gesture must not leave an obvious selected/highlighted effect.
+- The hidden game gesture must not show visible text like “Finish today’s required tasks first.” If access is locked, the gesture should fail quietly or with an extremely subtle non-explanatory response.
+- The Sudoku-style gate must open as its own full-screen page with a completely black background. It must not appear inline inside About or Settings. It should repair black-on-black/missing cell visibility, remove the explicit Enter button, auto-detect completion, and fade toward the game entry after success.
+- Dark mode is required, with Match System, Light, and Dark appearance choices.
+- The current visual direction may use glassy/glossy opaque translucent surfaces if readability and execution clarity stay strong.
+- `UI_DEVELOPMENT_GUIDE.md` is the detailed UI implementation guide for the professional redesign. Use it for app shell, navigation, design-system, read/edit mode, screen rebuild, visual QA, and anti-stock-Android instructions. If generic UI wording in this file conflicts with the guide, prefer the newer, more specific guide unless the owner explicitly decides otherwise.
+- Functional learning from the iPhone `dailyOS` app has been folded into this spec and `UI_DEVELOPMENT_GUIDE.md`. Use those docs for Today, Backlog, Calendar, Schedule, Settings, About, and hidden gate parity work.
 
 ## 1. Agent Instructions
 
 Build **Human Program**, not a clone tied to any previous platform implementation. Treat this document as the product, architecture, and workflow source of truth.
+
+The owner has explicitly said the app must not become a decorative prototype. A screen is not complete because it looks polished or because navigation reaches it. Each page, tool, and flow must have a real daily-use purpose, working state, persistence where appropriate, clear user actions, and enough tests/manual QA to trust it.
 
 MUST:
 
@@ -57,6 +81,8 @@ MUST:
 - Use local persistence as the primary backend.
 - Preserve privacy and user ownership of data.
 - Treat privacy and data security as core build values, even though the app's main purpose is daily execution.
+- Be honest about completion status. Do not call the app production-ready until the core planner, calendar, reminders, import/export, app lock, reset, hidden game bridge, persistence, security, and QA requirements are actually verified.
+- Audit every route before release for purpose, primary data, primary action, placeholder behavior, persistence, undo/reset safety, tests, and light/dark visual QA.
 - Use `Human Program` in user-facing language.
 - Use `.hprgm` as the Human Program export file extension.
 - Keep the architecture modular enough for a full game to live in the same app.
@@ -221,17 +247,18 @@ Do not let screens directly write raw database records. Screens talk to viewmode
 
 ## 6. Core Navigation
 
-Use five bottom tabs:
+Use a Today-first Android phone shell. The hamburger opens a separate Program page with folder/app-grid destinations:
 
 ```text
 Today
 Backlog
 Calendar
 Routines
+Reminders
+Stats
+Import / Export
 Settings
 ```
-
-Stats currently lives as a Settings entry and may later become its own bottom tab if the owner wants it. The current intended first navigation keeps the five tabs above.
 
 Archive is not a tab. Past daily pages are reached by changing the date inside Today.
 
@@ -769,10 +796,10 @@ Block normalization:
 
 Today display:
 
-- Show a compact vertical daily schedule near the top of Today.
-- Show 24-hour time markers.
-- Show schedule blocks as colored rectangles.
-- Show calendar events as additional timeline segments when available.
+- Show a vertical calendar-style daily schedule near the top of Today.
+- Show a time rail and hour rules.
+- Show schedule blocks as event boxes placed by start time and duration.
+- Show calendar events as additional timeline event boxes when available.
 - Show the current-time line only on today’s page.
 - Do not show the current-time line on past or future dates.
 
@@ -947,8 +974,7 @@ About:
 - App version.
 - Build number.
 - Read-only developer name label.
-- Cat Corner-style personal media gallery.
-- Hidden document easter egg using a readable document-style screen.
+- No extra small `Human Program` subtitle directly under About.
 - Hidden Sudoku-style gate by double-tapping the developer name label after today is complete.
 
 Danger Zone:
@@ -1302,6 +1328,8 @@ Future sync:
 
 ## 21. UI Direction
 
+Detailed UI implementation instructions live in `UI_DEVELOPMENT_GUIDE.md`. This section records the product-level direction; future coding agents should read the guide before changing app UI.
+
 Overall feel:
 
 - Calm.
@@ -1310,6 +1338,30 @@ Overall feel:
 - Cozy.
 - Human-friendly.
 - Plain and straightforward.
+- Normal-app behavior over demo-app behavior.
+- Read-first, edit-second.
+- Clean by default, powerful when opened.
+- Dense enough for daily use without feeling cluttered.
+- Avoid dumping every control onto the page at once.
+
+Safe areas and system UI:
+
+- Use Android insets/window-safe padding consistently.
+- Content must start below status bars and camera/display cutouts.
+- Phone UI should not use bottom tabs as the primary app navigation. If any bottom-affixed control exists, it must respect gesture/navigation bar insets.
+- Test especially on Pixel Pro-sized devices with centered camera holes.
+- Avoid large first-screen titles near the top safe area.
+- Do not assume the status bar area is available for content.
+
+App chrome:
+
+- Do not use a persistent top app bar title that says `Human Program`.
+- Do not use page headers that simply repeat the selected tab name.
+- Top chrome should prioritize small action icons: overflow/menu, view/filter/sort, date picker, edit/read toggle, and contextual actions.
+- Important actions can live in bottom sheets or menus rather than permanent on-page controls.
+- Use a conventional overflow menu for commands such as undo, redo, edit mode, add item, select, export, and reset-related actions when appropriate.
+- Use a separate view/filter/sort button where the tab has data presentation options.
+- Avoid large segmented controls in the main content when an icon menu would be more normal and compact.
 
 Typography:
 
@@ -1327,6 +1379,7 @@ Color:
 - Avoid a single-hue theme.
 - Avoid heavy purple gradients.
 - Avoid decorative orbs/blobs.
+- Glassy/glossy opaque translucent surfaces are allowed and now desired, but only as a readable product material. Do not let blur/gloss reduce scan speed or contrast.
 
 Cards and surfaces:
 
@@ -1343,17 +1396,49 @@ Controls:
 - Use toggles for binary settings.
 - Use sliders/steppers/pickers for numeric and date/time values.
 - Use menus for option sets.
-- Use tabs for top-level navigation.
+- Use tabs only for bounded local modes where they are the clearest control. Do not use bottom tabs as the primary phone navigation.
 
 Editing:
 
-- Read mode and edit mode should remain visually stable.
+- Every major screen has read mode and edit mode.
+- Read mode is the default.
+- Read mode shows clean rows and useful status, not text fields.
+- Read mode hides delete buttons, empty input boxes, inline add fields, reorder controls, and multi-select affordances.
+- Edit mode reveals text fields, delete buttons, add controls, reorder controls, and selection controls.
+- Add flows can open from the overflow menu or a small contextual add action, not from a permanently visible empty text box.
+- Read mode and edit mode should remain visually stable enough that the screen does not feel like a different app.
 - Entering edit mode should not cause rows to jump or change shape unnecessarily.
 - Prefer selection checkmarks plus explicit toolbar actions.
 - Do not rely on swipe-to-delete as the main deletion flow.
 - Destructive editing actions, including delete, should be reversible through undo/redo.
 - Delete does not require confirmation as its primary safety layer. Use undo/redo as the normal safety layer.
+- Undo/redo must be available through the upper-right overflow menu.
+- Undo/redo must not appear as a freestanding row in the middle of normal content.
 - Keyboard dismissal should work by tapping outside and by system back/done behavior.
+
+Cards, lists, and density:
+
+- Avoid making every section a large card when a simple list section would read more like a normal app.
+- Cards should frame genuinely grouped content, not every label and every row.
+- Prefer compact section headers, list rows, bottom sheets, and detail pages for repeated app operations.
+- Empty states should be short and useful. Do not show large explanatory placeholders in normal daily use.
+- Empty states should not duplicate an add action when a visible contextual add button already exists in the app chrome.
+
+Appearance:
+
+- Support Match System, Light, and Dark.
+- Dark mode must be designed, not only automatic color inversion.
+- Color, typography, and surfaces should be tested in both light and dark modes.
+
+Settings organization:
+
+- Settings root should be a short, grouped index, not a dump of every feature page.
+- Settings root should not show a hero card that repeats the page title.
+- Group settings by purpose, such as Personalization, Program, Privacy, and System.
+- Feature-native configuration should stay with the feature when that is clearer. Calendar sources and permission belong on Calendar, not duplicated in Settings.
+- If a settings detail page already has a global contextual add action, do not also place a second inline add button at the bottom.
+- Security settings should not expose developer/test controls. Show normal user actions only, such as Set PIN, Lock Now when enabled, timeout, biometrics, and recovery phrase.
+- Lock and recovery screens should progressively disclose fallback recovery fields instead of showing every credential method at once.
 
 ## 22. Today Screen
 
@@ -1371,11 +1456,18 @@ Layout order:
 Header:
 
 - Display full date.
-- Toolbar supports previous day, next day, today, and date picker.
+- Do not show a redundant `Today` page title.
+- Do not show `Command Center` on Today.
+- Do not duplicate date controls. Today should not show both a toolbar date button and an in-content date button.
+- Date selection should live in the Today hero unless a later navigation model deliberately replaces it.
+- Date picker must allow jumping directly to any date.
+- Date picker access should be obvious and compact, preferably a calendar icon or date chip in the top area.
 - Past dates show a lock control.
 - Past dates are locked by default.
 - Long-press or deliberate unlock action unlocks a past day temporarily.
 - Past day re-locks when leaving the date or leaving Today.
+- Today screen has an upper-right overflow menu for edit mode, add task, undo, redo, refresh/regenerate where safe, and other contextual actions.
+- Today read mode must not show text fields, delete buttons, or permanent add boxes.
 
 Daily Schedule:
 
@@ -1384,6 +1476,8 @@ Daily Schedule:
 - Current-time indicator only on today.
 - Schedule template blocks displayed in stable colors.
 - Calendar events displayed as extra timeline segments.
+- Calendar events must be integrated here instead of placed in a separate Today calendar card.
+- Tapping a calendar segment opens local event controls/details where supported.
 
 Today’s Tasks:
 
@@ -1393,12 +1487,16 @@ Today’s Tasks:
 - Items keep stable order after completion.
 - Checking an item does not move it.
 - Shows add button when editable.
-- Add button creates inline manual task entry.
+- Add action is normally hidden in read mode and exposed through edit mode, overflow menu, or a compact contextual add button.
+- Add action may create inline manual task entry only after the user chooses to add.
 - Edit mode supports selecting entries, deleting selected entries, and reordering.
+- Delete buttons are visible only in edit mode.
+- Task title text fields are visible only in edit mode.
 - Calendar-derived deleted entries are hidden locally rather than deleted externally.
 - Detail button opens task/calendar details.
 - Metadata can show source and project bucket.
 - Metadata hidden by default unless setting says otherwise.
+- Calendar-derived required entries appear in Today’s Tasks, not in a separate Calendar card.
 
 Completion message:
 
@@ -1418,10 +1516,16 @@ Exercise:
 
 Backlog main toolbar:
 
+- Upper-right overflow menu for undo, redo, edit mode, select mode, add item/project, and page actions.
+- Separate compact upper-right view/filter/sort control for data presentation choices.
+- Do not use a giant segmented Item/Project control inside the content area.
 - Sort menu.
+- Filter menu.
 - View mode menu.
 - Add menu.
 - Select button.
+- Read mode shows clean rows only: no text fields, delete buttons, or permanent add boxes.
+- Edit/select mode reveals project assignment, delete, bulk actions, and other editing controls.
 
 Sort modes:
 
@@ -1458,6 +1562,7 @@ Project View:
 - `Unorganized` cannot be selected for deletion.
 - Deleting a project bucket is reversible through undo/redo and removes the label from matching items.
 - Tapping a project bucket opens that bucket’s item list.
+- Project actions such as removing a label or completing selected items belong behind a row menu or edit/select mode, not as always-visible large buttons.
 
 Backlog detail:
 
@@ -1526,6 +1631,17 @@ Event details:
 
 ## 25. Settings Detail Screens
 
+Settings is a menu, not a dumping ground. The root Settings page should be a calm list of destinations, not one long page with every editor expanded.
+
+Settings root:
+
+- Show concise rows with icon, title, short status, and chevron.
+- Do not expand every setting inline on the root page.
+- Do not show full editors for recurring tasks, schedules, exercise, import/export, app lock, reset, and appearance all at once.
+- Each row opens a focused detail page.
+- Root Settings may show urgent summaries and high-level links only.
+- Settings root has an upper-right overflow menu for edit mode, undo, redo, search, import/export shortcuts, and other contextual actions where appropriate.
+
 General Settings:
 
 - Date format options:
@@ -1585,6 +1701,8 @@ About:
 - Cat Corner-style personal media gallery.
 - Hidden document easter egg.
 - Hidden Sudoku-style gate by double-tapping the developer name label after today is complete.
+- If today is incomplete, double-tapping the developer name must not show copy about finishing tasks or reveal that a game gate exists.
+- The Sudoku-style gate opens as its own full-screen black page, not inline inside About or Settings.
 
 ## 26. Hidden Sudoku Gate And Game Unlock
 
@@ -1597,21 +1715,27 @@ Access flow:
 3. Game access for today becomes unlocked.
 4. User goes to Settings -> About.
 5. User double-taps the read-only developer name label.
-6. If today is complete, the hidden Sudoku-style gate opens.
+6. If today is complete, navigate to the hidden full-screen Sudoku-style gate.
 7. User solves the hidden Sudoku-style gate.
 8. The solved gate allows entry to the Game Container.
-9. If today is incomplete, do not enter the gate or game.
+9. If today is incomplete, do not enter the gate or game and do not explain why in visible game-related language.
 
 Hidden entry behavior:
 
 - Do not show a visible game card, visible game button, visible puzzle, visible status, or visible game settings in normal UI.
 - The developer name label should look like normal read-only About text.
 - Double-tapping the developer name is the intentional easter egg gesture that reveals the Sudoku-style gate only when allowed.
+- If access is locked, do not show text such as `Finish today’s required tasks first`, `game locked`, or any other phrase that exposes the hidden game path.
+- Locked access should fail quietly or with an extremely subtle non-explanatory response such as a tiny haptic tick.
+- Do not render the gate inline in Settings or About.
 - The hidden route must still call `GameAccessService`; it must not inspect task tables directly.
 
 Sudoku-style gate behavior:
 
 - The gate is hidden and must not be advertised in normal app UI.
+- The gate is its own full-screen route/page.
+- The gate uses a completely black background.
+- The gate hides normal app bars, bottom tabs, Settings chrome, and planner content.
 - The gate uses a small Sudoku-style number puzzle.
 - The puzzle is not the full game.
 - Solving the puzzle is the ritual step between hidden About gesture and game entry.
@@ -2084,6 +2208,17 @@ The first Android build should be boring in the best way: local, durable, testab
 - Preserve game saves.
 - Keep planner stable.
 
+### Phase 13: Production Release Audit
+
+- List every app route and settings detail.
+- Confirm each route has a real purpose, real state, a primary action, and no placeholder-only UI.
+- Confirm all important state is persisted through Room/DataStore/app-private encrypted storage.
+- Confirm JSON fallback behavior is either still intentionally needed or safely retired after Room/DataStore parity is tested.
+- Confirm every feature works offline and without Google services.
+- Confirm app lock, reset, import/export, reminders, calendar permission, and hidden gate flows are manually tested.
+- Confirm all release tests, lint, debug build, and final signed release build pass.
+- Confirm privacy/security posture before external distribution.
+
 ## 34. Required Tests
 
 Unit tests:
@@ -2147,6 +2282,327 @@ Manual QA:
 - Test dark mode.
 - Test long task titles.
 - Test large backlog.
+
+## 34A. Production App Completion Backlog
+
+This section records the complete app-readiness sweep required before Human Program can honestly be called production-ready. Do not treat visual polish or navigation reachability as completion. Every page, setting, control, dropdown, modal, and button must have a purpose, work correctly, persist correctly where appropriate, and match this spec or the UI guide.
+
+### Full UI And Function Inventory
+
+- Open every possible app route.
+- Open every Program tile.
+- Open every Settings detail.
+- Open every modal sheet.
+- Open every overflow menu.
+- Open every dropdown.
+- Open every date picker.
+- Open every add/edit form.
+- Open every permission state.
+- Open every empty state.
+- Open every locked/unlocked state.
+- Tap every button and icon button.
+- Toggle every switch.
+- Select every chip and dropdown option.
+- Try every destructive action.
+- Try every undo/redo action.
+- Try every import/export action.
+- Try every hidden/easter-egg path.
+- For each UI element, decide whether it serves a real purpose from this spec or `UI_DEVELOPMENT_GUIDE.md`.
+- If a UI element is required by the spec, make it real, persisted, tested, and visually polished.
+- If a UI element is not required by the spec and has no clear purpose, remove it.
+- If a useful UI element exists in the app but not in the spec, either document its purpose or remove it.
+- Maintain a route audit table with route, purpose, primary data, primary action, broken/placeholder behavior, persistence path, undo/reset safety, tests needed, and visual QA needed.
+
+### Opaque Glass Material Direction
+
+- Apply an opaquely glassy visual language consistently across the app.
+- The target feel is frosted or opaque glass over paper: softened, translucent, subtly blurred or veiled, and readable.
+- Do not use a flashy liquid-glass look.
+- Do not add glass as random decoration.
+- Use the material deliberately on command surfaces, panels, sheets, Program tiles, Today status/schedule surfaces, and focused forms.
+- Preserve text contrast, touch clarity, scan speed, and dark-mode readability.
+- Test the glassy material in light mode, dark mode, dense-content states, empty states, permission states, and forms.
+- Avoid default Android stock color treatment.
+- Avoid one-color palettes.
+- Avoid beige/brown monotony.
+
+### Navigation And Shell
+
+- Today remains the home screen.
+- Program remains a separate folder/app-grid page.
+- Phone UI must not use bottom tabs.
+- Every Program tile must navigate correctly.
+- Program tiles should show useful status summaries where they help.
+- Program must not become a settings junk drawer.
+- Top chrome must respect status bars, navigation bars, keyboard, and camera cutouts.
+- Back behavior must be predictable from every route.
+- Route-specific overflow actions must do real work.
+- Undo/redo must appear only when actual undoable/redoable actions exist.
+- Every top-right primary action must have a clear purpose.
+- Every overflow item and dropdown item must close correctly after selection.
+
+### Today And Daily Pages
+
+- Today must combine recurring tasks, manual tasks, assigned backlog tasks, calendar-derived tasks, schedule blocks, and exercise information.
+- Today must show dates with year.
+- Today date controls must be previous, next, Today, and calendar.
+- Today must not show `Command Center` or `Execution mode`.
+- The manual task plus belongs in the Required Tasks section header.
+- Today task rows must be read-first, with no title text fields or delete controls in read mode.
+- Add/edit task behavior must live in a focused sheet or detail flow.
+- Calendar-derived task completion, hide, rename, notes, and ordering must be local.
+- Empty Today task lists must not count as complete.
+- Past daily pages must be locked by default.
+- Past unlock must be deliberate.
+- Future pages must read as previews.
+- Daily completion must recalculate correctly after every task change.
+- Game access must follow today completion only.
+- One generated daily page must exist per date.
+- Daily pages must generate on app open and through midnight/background behavior where Android allows.
+- Past daily pages must be historical snapshots.
+- Template changes must update today/future only.
+- Template changes must never rewrite past daily pages.
+- Manual tasks must stay only on the date where they were created.
+
+### Today Schedule
+
+- Today schedule must be a true calendar-style vertical grid.
+- Schedule blocks must be positioned by start and end time.
+- Calendar events must be positioned by start and end time.
+- All-day calendar events must be represented clearly.
+- Overlapping events must be handled gracefully.
+- The current-time line appears only on today.
+- Schedule blocks and calendar event boxes must be visually distinct.
+- Tapping schedule blocks should open useful detail/edit behavior.
+- Tapping calendar events should open useful local override/detail behavior.
+
+### Backlog And Projects
+
+- Backlog add must offer Backlog Item or Project.
+- Backlog item creation must support title, notes/details, project bucket, and optional assigned date.
+- Backlog item editing must support project assignment and date assignment.
+- Backlog needs sorting and filtering.
+- Backlog search belongs in top-right chrome.
+- Completed backlog items stay hidden from active views.
+- Project View groups items into folder-like project buckets.
+- `Unorganized` is a virtual/default bucket and cannot be deleted.
+- Empty named projects remain visible.
+- Creating a project should switch to or reveal Project View.
+- Project detail must support useful active-task management.
+- Project rename must work.
+- Project delete needs two choices: remove project only and move items to Unorganized, or delete project and items.
+- Project destructive changes must be reversible through undo/redo or protected by an explicit destructive flow.
+- Assigning a backlog item to Today must work.
+- Completing a matching Today backlog task marks the source backlog item done.
+- Unchecking a matching current/future Today backlog task restores the source backlog item when rules allow.
+- Overdue assigned backlog items lose their assigned date without rolling forward.
+
+### Calendar
+
+- Calendar must function as both a standalone calendar viewer and a Today source.
+- Month view needs selected day, today marker, event dots/counts, and day selection.
+- Week view needs a real multi-day timeline.
+- Day view needs a real single-day timeline.
+- Agenda view needs grouped chronological event rows.
+- Calendar source selection must be clear and useful.
+- Calendar permission denied, granted/no source, and selected-source states must be calm and actionable.
+- Selected calendars feed Today schedule and Today tasks.
+- If no calendars are selected, Today calendar-derived tasks should be empty.
+- Local calendar completion, hide, title override, notes override, and order must persist.
+- Add a calendar event detail/local override sheet.
+- Add calendar sync/status tooling for hidden-but-present events, stale hidden events, title override differences, and resync.
+
+### Schedule Templates
+
+- Replace shallow loose schedule blocks with real named schedule templates.
+- Schedules support enabled/disabled state.
+- Schedules support weekday assignment.
+- Schedules support custom date ranges.
+- Saving/enabling schedules must enforce conflicts.
+- Conflict messages should name the conflicting schedule and weekday/date range.
+- Schedule root defaults to read mode.
+- Editing must be explicit.
+- Add/edit schedule template behavior belongs in detail pages or focused sheets.
+- Add/edit schedule block behavior must include a real duration picker.
+- Do not use cramped raw time controls.
+- Sleep is a special locked first block.
+- Sleep has editable sleep/wake times.
+- Later blocks compute start from previous block end and end from selected duration.
+- Reordering preserves durations and recomputes start/end times.
+- Sleep cannot be deleted or moved.
+- Unsaved changes should be protected.
+- Schedule changes update today/future only and never rewrite past snapshots.
+
+### Exercise
+
+- There must always be seven weekday exercise templates.
+- Exercise settings support weekday title editing.
+- Exercise settings support add/edit/delete/reorder of exercise items.
+- Blank exercise items are ignored or deleted.
+- Reordering should persist smoothly.
+- Exercise changes update today/future only and never rewrite past snapshots.
+- Exercise does not count toward completion unless also represented as a normal required task.
+
+### Routines
+
+- Routines must either have a real v1 purpose or be removed until they do.
+- If kept, routines need a model, persistence, add/edit/delete behavior, and useful detail screens.
+- Routine steps, cadence/status, and search should exist only if they serve a real workflow.
+- Routines must not feed Today unless a clear model is designed and implemented.
+
+### Reminders
+
+- Reminders root must show useful reminder rows with title, time, recurrence, enabled state, and row actions.
+- Reminder add/edit needs a real time picker where practical.
+- Reminders support daily, weekdays, and custom weekday recurrence.
+- Reminders support enabled/disabled state.
+- Reminders support general reminders and task-attached reminders if task attachment remains in scope.
+- Reminders support sound mode.
+- Optional reminder images require local storage, compression, and privacy review before release.
+- Reminder definitions save even when notification permission is denied.
+- Scheduling is skipped when notification permission is denied.
+- Only future occurrences are scheduled.
+- Missed reminders are dropped.
+- Deleting a reminder cancels its alarm.
+- Import/reset replacement cancels old alarms and resyncs new reminders.
+- Notifications must hide sensitive content when app lock is enabled.
+
+### Stats
+
+- Stats must be useful, not just a raw number list.
+- Show current streak, longest streak, completion rate, tracked days, saved daily pages, active task count, and completed task count.
+- Add a seven-day visual strip.
+- Add weekly and monthly summaries.
+- Add useful trend charts or visual summaries.
+- Future pages must not affect streaks.
+- Hidden game state must never appear in Stats.
+
+### Import And Export
+
+- Import/Export root must have clear results for every action.
+- `.hprgm` export includes manifest, planning data, preferences, calendar local state, notifications, and optional future game metadata/saves.
+- Encrypted full export must be supported.
+- Exports must never include plaintext PINs or plaintext secrets.
+- Import previews before apply.
+- Import requires unlock if app lock is enabled.
+- Import validates manifest version, schemas, file paths, file sizes, content types, and ZIP safety.
+- Import defends against path traversal and decompression bombs.
+- Import replaces current planner data only after explicit approval.
+- Current backlog CSV export must be complete.
+- Historical daily task CSV export supports Last 7, 30, 60, 90, and custom date range.
+- CSV uses UTF-8, correct escaping, ISO dates, blank optional cells, and spreadsheet formula injection defense.
+- Import/export uses Android document picker/share sheet, not broad storage permission.
+
+### Settings
+
+- Settings root must remain a menu of focused detail pages.
+- No full editors on Settings root.
+- No raw CSV areas on Settings root.
+- No PIN fields on Settings root.
+- No reset form on Settings root.
+- Settings rows show summaries.
+- Appearance detail supports Match System, Light, and Dark.
+- Today Display, Backlog, Recurring Tasks, Schedule, Exercise, Notifications, Calendar, Import/Export, Security/App Lock, Stats, Reset, and About detail pages must either have real controls or remove unused controls.
+- About shows version/build/developer plainly.
+- About must not show undo/redo.
+- About must not show the extra small `Human Program` subtitle.
+- About developer tap must not show an obvious selected/highlight state.
+
+### App Lock, Security, And Reset
+
+- PIN setup/change must be staged and tested.
+- Biometric unlock must work where supported with PIN fallback.
+- Lock timeout options include immediate, 30 seconds, 1 minute, 5 minutes, and 15 minutes.
+- Lock Now must work.
+- Planner/calendar/backlog/game content must be hidden while locked.
+- Notifications opened while locked should go to the lock screen first.
+- Add PIN attempt rate limiting.
+- Recovery phrase flow must be strong and explicit.
+- Forgotten PIN must not silently bypass encryption.
+- Destructive local reset must be clear and staged.
+- Add privacy options to hide recent-app preview and block screenshots/screen recordings for sensitive screens.
+- Reset requires backup reminder, acknowledgement, typed `reset`, and explicit destructive action.
+- Reset clears planning data, preferences, reminders, calendar local state, and generated pages.
+- Reset cancels reminders and must not leave stale alarms.
+- Reset must not delete exported files outside app-private storage.
+
+### Encryption And Privacy
+
+- Add production-grade Room database encryption.
+- Treat full-database encryption as required.
+- Use Android Keystore-backed keys.
+- Do not hardcode keys.
+- Store only salted PIN hashes/verifiers.
+- Biometric should authorize or release key access where practical.
+- Encrypt app-private snapshots.
+- Encrypt temporary export files where practical.
+- Encrypt notification images and game saves where practical.
+- Clear sensitive decrypted state from memory as much as practical when locked.
+- Keep automatic OS backup disabled or app-encrypted/user-controlled.
+- Confirm no unwanted `INTERNET`, Firebase, analytics, ads, trackers, Google Play Services, telemetry, WebView core logic, or unnecessary permissions.
+
+### Hidden Gate And Game Bridge
+
+- Hidden gesture starts from About developer label.
+- Hidden gesture fails quietly if locked.
+- Hidden gate is full-screen black with no normal app chrome.
+- Hidden gate does not expose game copy in normal UI.
+- Hidden gate has no explicit Enter button.
+- Hidden gate auto-detects completion.
+- Hidden gate fades toward game entry after success.
+- Real game entry/container still needs integration.
+- Planner and game stay separate.
+- Game access goes through `GameAccessService`.
+- Game access unlocks only when today is complete.
+- New days lock access again.
+- Game progress is never deleted by the daily lock.
+- Game save metadata and optional game export are added after the game exists.
+- Game integration must add no network, analytics, ads, or trackers.
+
+### Onboarding
+
+- Onboarding is short and polished.
+- Onboarding communicates offline/privacy clearly.
+- Optional PIN setup works.
+- Optional recovery phrase setup works.
+- Optional calendar permission works.
+- Enter Today persists onboarding completion.
+- Onboarding can be interrupted and resumed safely.
+- Onboarding works in dark mode.
+
+### Universal Search
+
+- Decide whether universal search is v1 or remove placeholder UI.
+- If v1, implement case-insensitive search with `*` wildcard support.
+- Search daily tasks across dates, backlog, projects, notes, schedule settings, exercise items, recurring tasks, routines, and local calendar content.
+- Exclude stats summaries, import/export pages, notification settings content, and unrelated preferences.
+
+### Architecture Cleanup
+
+- Continue splitting large UI files into focused screen/component folders.
+- Keep screens out of raw database writes.
+- Keep ViewModels out of Android UI details.
+- Keep repositories/services responsible for persistence, Android APIs, and file access.
+- Replace direct JSON-backed UI behavior with Room/DataStore.
+- Keep Room entities, DAOs, repositories, and mappers organized.
+- Keep DataStore preferences organized.
+- Keep game bridge separate.
+- Consider a stronger route model or Navigation Compose when current route state becomes too limited.
+- Remove stale imports, dead code, and unused placeholders.
+- Add component previews/catalog if useful.
+- Reduce random one-off spacing/color values after the design-token pass.
+- Reduce raw Material usage in screen files.
+
+### Production Testing And Manual QA
+
+- Add tests for daily generation, recurring weekdays, inactive templates, backlog assignment, backlog completion sync, overdue backlog, past snapshots, future preview, manual task date ownership, empty Today completion, exercise exclusion, calendar inclusion, calendar local state, calendar source selection, schedule conflicts, Sleep locking, streaks, import/export contents, import validation, CSV escaping, CSV formula injection defense, reminder recurrence, alarm cancellation, app lock timeout, PIN verification, recovery phrase, biometric fallback, reset sequence, game unlock, and game save persistence.
+- Perform clean-install QA.
+- Test app restart persistence.
+- Test every route, page, setting, dropdown, sheet, and action.
+- Test permission denied and granted flows.
+- Test import/export malformed and encrypted files.
+- Test app lock while notifications fire.
+- Test dark mode, match-system, small screen, Pixel camera cutout, keyboard-open forms, no tasks, many tasks, many schedule blocks, many backlog projects, and many calendar events.
 
 ## 35. Glossary
 

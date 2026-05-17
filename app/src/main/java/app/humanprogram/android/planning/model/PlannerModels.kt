@@ -27,6 +27,7 @@ data class DailyTask(
     val title: String,
     val sourceType: DailyTaskSourceType,
     val sourceId: String? = null,
+    val notes: String = "",
     val completed: Boolean = false
 )
 

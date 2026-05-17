@@ -25,6 +25,7 @@ object PlannerSnapshotJson {
             .put("exerciseRoutine", snapshot.exerciseRoutine.toJson())
             .put("reminders", snapshot.reminders.toRemindersJson())
             .put("routines", JSONArray(snapshot.routines))
+            .put("projectBuckets", JSONArray(snapshot.projectBuckets))
             .put("calendarLocalStates", snapshot.calendarLocalStates.toCalendarLocalStatesJson())
     }
 
@@ -38,6 +39,7 @@ object PlannerSnapshotJson {
                 ?: ExerciseRoutine(title = "Today routine", items = emptyList()),
             reminders = json.optJSONArray("reminders")?.toReminders().orEmpty(),
             routines = json.optJSONArray("routines")?.toStringList().orEmpty(),
+            projectBuckets = json.optJSONArray("projectBuckets")?.toStringList().orEmpty(),
             calendarLocalStates = json.optJSONArray("calendarLocalStates")?.toCalendarLocalStates().orEmpty(),
             dailyTaskPages = json.optJSONObject("dailyTaskPages")?.toDailyTaskPages().orEmpty()
         )
@@ -109,6 +111,7 @@ private fun List<DailyTask>.toDailyTasksJson(): JSONArray {
                 .put("title", task.title)
                 .put("sourceType", task.sourceType.name)
                 .put("sourceId", task.sourceId)
+                .put("notes", task.notes)
                 .put("completed", task.completed)
         )
     }
@@ -202,6 +205,7 @@ private fun JSONArray.toDailyTasks(): List<DailyTask> {
             title = item.getString("title"),
             sourceType = DailyTaskSourceType.valueOf(item.getString("sourceType")),
             sourceId = item.optString("sourceId").takeUnless { it.isBlank() || it == "null" },
+            notes = item.optString("notes"),
             completed = item.getBoolean("completed")
         )
     }
