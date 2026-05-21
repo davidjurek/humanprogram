@@ -1412,7 +1412,8 @@ Editing:
 - Do not rely on swipe-to-delete as the main deletion flow.
 - Destructive editing actions, including delete, should be reversible through undo/redo.
 - Delete does not require confirmation as its primary safety layer. Use undo/redo as the normal safety layer.
-- Undo/redo must be available through the upper-right overflow menu.
+- Undo/redo must be available through the shared six-slot top capsule. The sixth slot normally shows the three-dot button; when opened, slots 4 and 5 become undo and redo and slot 6 becomes close.
+- Undo/redo buttons remain visible in undo/redo mode even when unavailable; unavailable actions are disabled/greyed out.
 - Undo/redo must not appear as a freestanding row in the middle of normal content.
 - Keyboard dismissal should work by tapping outside and by system back/done behavior.
 
@@ -2331,13 +2332,16 @@ This section records the complete app-readiness sweep required before Human Prog
 - Today remains the home screen.
 - Program remains a separate folder/app-grid page.
 - Phone UI must not use bottom tabs.
+- Program has exactly six top-level tiles for now: Today, Backlog, Calendar, Routines, Stats, and Settings.
 - Every Program tile must navigate correctly.
-- Program tiles should show useful status summaries where they help.
+- Program tiles use opaquely glassy surfaces over the owner-selected background image, with direct icons and serif labels.
+- Program search is hidden by default, appears from a downward swipe, hides from an upward swipe, and activates into keyboard search when tapped.
 - Program must not become a settings junk drawer.
 - Top chrome must respect status bars, navigation bars, keyboard, and camera cutouts.
 - Back behavior must be predictable from every route.
 - Route-specific overflow actions must do real work.
-- Undo/redo must appear only when actual undoable/redoable actions exist.
+- The shared capsule appears consistently across in-app routes. Blank slots preserve equal spacing.
+- Undo/redo is currently scoped to Today add/check/uncheck and Backlog create/assign actions until broader reversible editing is deliberately wired.
 - Every top-right primary action must have a clear purpose.
 - Every overflow item and dropdown item must close correctly after selection.
 

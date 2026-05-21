@@ -1,5 +1,9 @@
 package app.humanprogram.android.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -46,7 +50,6 @@ import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Event
 import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.material.icons.outlined.Folder
@@ -135,8 +138,9 @@ internal fun HpAppFrame(
     primaryIcon: ImageVector?,
     primaryContentDescription: String?,
     onPrimaryAction: (() -> Unit)?,
-    routeActions: List<HpCommandAction> = emptyList(),
+    routeActions: List<HpCommandAction?> = emptyList(),
     overflowExpanded: Boolean,
+    undoRedoMessage: String?,
     canEdit: Boolean,
     canUndo: Boolean,
     canRedo: Boolean,
@@ -151,53 +155,62 @@ internal fun HpAppFrame(
         modifier = Modifier.fillMaxSize(),
         color = HpColors.canvas
     ) {
-        Column(
-            modifier = Modifier
+        val frameModifier = if (route == HpRoute.PROGRAM) {
+            Modifier.fillMaxSize()
+        } else {
+            Modifier
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.safeDrawing)
+        }
+
+        Column(
+            modifier = frameModifier
         ) {
-            if (route == HpRoute.TODAY) {
-                HpTodayCommandCapsule(
-                    onMenu = onMenu,
-                    routeActions = routeActions,
-                    overflowExpanded = overflowExpanded,
-                    canEdit = canEdit,
+            if (route != HpRoute.PROGRAM && route != HpRoute.HIDDEN_GATE) {
+                HpCommandCapsule(
+                    slots = routeActions,
+                    undoRedoMode = overflowExpanded,
                     canUndo = canUndo,
                     canRedo = canRedo,
-                    onOverflow = onOverflow,
-                    onOverflowDismiss = onOverflowDismiss,
-                    onToggleMode = onToggleMode,
+                    onUndoRedoMode = onOverflow,
+                    onCloseUndoRedoMode = onOverflowDismiss,
                     onUndo = onUndo,
                     onRedo = onRedo
                 )
-            } else if (route != HpRoute.PROGRAM && route != HpRoute.TASK_DETAIL) {
-                HpCommandBar(
-                    title = title,
-                    subtitle = subtitle,
-                    showBack = route == HpRoute.PROJECT || (route == HpRoute.SETTINGS && title != "Settings"),
-                    mode = mode,
-                    onMenu = onMenu,
-                    onBack = onBack,
-                    primaryIcon = primaryIcon,
-                    primaryContentDescription = primaryContentDescription,
-                    onPrimaryAction = onPrimaryAction,
-                    routeActions = routeActions,
-                    overflowExpanded = overflowExpanded,
-                    canEdit = canEdit,
-                    canUndo = canUndo,
-                    canRedo = canRedo,
-                    onOverflow = onOverflow,
-                    onOverflowDismiss = onOverflowDismiss,
-                    onToggleMode = onToggleMode,
-                    onUndo = onUndo,
-                    onRedo = onRedo
-                )
+                AnimatedVisibility(
+                    visible = undoRedoMessage != null,
+                    enter = fadeIn(animationSpec = tween(durationMillis = 120)),
+                    exit = fadeOut(animationSpec = tween(durationMillis = 120))
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 18.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(HpColors.glass)
+                                .border(1.dp, HpColors.glassBorder.copy(alpha = 0.72f), RoundedCornerShape(999.dp))
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                                .align(Alignment.Center),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = undoRedoMessage.orEmpty(),
+                                color = HpColors.ink,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
             }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .imePadding()
-                    .navigationBarsPadding()
+                    .then(if (route == HpRoute.PROGRAM) Modifier else Modifier.navigationBarsPadding())
             ) {
                 content()
             }
@@ -206,130 +219,37 @@ internal fun HpAppFrame(
 }
 
 @Composable
-internal fun HpCommandBar(
-    title: String,
-    subtitle: String?,
-    showBack: Boolean,
-    mode: HpMode,
-    onMenu: () -> Unit,
-    onBack: () -> Unit,
-    primaryIcon: ImageVector?,
-    primaryContentDescription: String?,
-    onPrimaryAction: (() -> Unit)?,
-    routeActions: List<HpCommandAction>,
-    overflowExpanded: Boolean,
-    canEdit: Boolean,
+private fun HpCommandCapsule(
+    slots: List<HpCommandAction?>,
+    undoRedoMode: Boolean,
     canUndo: Boolean,
     canRedo: Boolean,
-    onOverflow: () -> Unit,
-    onOverflowDismiss: () -> Unit,
-    onToggleMode: () -> Unit,
+    onUndoRedoMode: () -> Unit,
+    onCloseUndoRedoMode: () -> Unit,
     onUndo: () -> Unit,
     onRedo: () -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 18.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        HpCircleIconButton(
-            icon = if (showBack) Icons.AutoMirrored.Outlined.ArrowBack else Icons.Outlined.Menu,
-            contentDescription = if (showBack) "Back" else "Open menu",
-            onClick = if (showBack) onBack else onMenu
+    val visibleSlots = List(5) { index -> slots.getOrNull(index) }.toMutableList()
+    if (undoRedoMode) {
+        visibleSlots[3] = HpCommandAction(
+            icon = Icons.AutoMirrored.Outlined.Undo,
+            contentDescription = "Undo",
+            enabled = canUndo,
+            onClick = onUndo
         )
-        Column(modifier = Modifier.weight(if (title.isBlank() && subtitle.isNullOrBlank()) 0.1f else 1f)) {
-            if (title.isNotBlank()) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = HpColors.ink
-                )
-            }
-            if (!subtitle.isNullOrBlank()) {
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = HpColors.muted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-        }
-        if (primaryIcon != null && onPrimaryAction != null && primaryContentDescription != null) {
-            HpCircleIconButton(
-                icon = primaryIcon,
-                contentDescription = primaryContentDescription,
-                onClick = onPrimaryAction,
-                containerColor = HpColors.accent,
-                contentColor = Color.White
-            )
-        }
-        val hasOverflowActions = canEdit || canUndo || canRedo
-        if (hasOverflowActions) {
-            Box {
-                HpCircleIconButton(Icons.Outlined.MoreHoriz, "More actions", onOverflow)
-                DropdownMenu(expanded = overflowExpanded, onDismissRequest = onOverflowDismiss) {
-                if (canEdit) {
-                    DropdownMenuItem(
-                        text = { Text(if (mode == HpMode.READ) "Edit Mode" else "Read Mode") },
-                        leadingIcon = { Icon(Icons.Outlined.Edit, null) },
-                        onClick = onToggleMode
-                    )
-                }
-                if (canUndo) {
-                    DropdownMenuItem(
-                        text = { Text("Undo") },
-                        leadingIcon = { Icon(Icons.AutoMirrored.Outlined.Undo, null) },
-                        onClick = onUndo
-                    )
-                }
-                if (canRedo) {
-                    DropdownMenuItem(
-                        text = { Text("Redo") },
-                        leadingIcon = { Icon(Icons.AutoMirrored.Outlined.Redo, null) },
-                        onClick = onRedo
-                    )
-                }
-            }
-            }
-        }
-        routeActions.forEach { action ->
-            if (action.label == null) {
-                HpCircleIconButton(
-                    icon = action.icon,
-                    contentDescription = action.contentDescription,
-                    onClick = action.onClick
-                )
-            } else {
-                HpSecondaryButton(action.label, action.onClick)
-            }
-        }
+        visibleSlots[4] = HpCommandAction(
+            icon = Icons.AutoMirrored.Outlined.Redo,
+            contentDescription = "Redo",
+            enabled = canRedo,
+            onClick = onRedo
+        )
     }
-}
+    val finalSlot = if (undoRedoMode) {
+        HpCommandAction(Icons.Outlined.Close, "Close undo and redo", onClick = onCloseUndoRedoMode)
+    } else {
+        slots.getOrNull(5) ?: HpCommandAction(Icons.Outlined.MoreHoriz, "Undo and redo", onClick = onUndoRedoMode)
+    }
 
-@Composable
-private fun HpTodayCommandCapsule(
-    onMenu: () -> Unit,
-    routeActions: List<HpCommandAction>,
-    overflowExpanded: Boolean,
-    canEdit: Boolean,
-    canUndo: Boolean,
-    canRedo: Boolean,
-    onOverflow: () -> Unit,
-    onOverflowDismiss: () -> Unit,
-    onToggleMode: () -> Unit,
-    onUndo: () -> Unit,
-    onRedo: () -> Unit
-) {
-    val previous = routeActions.getOrNull(0)
-    val today = routeActions.getOrNull(1)
-    val next = routeActions.getOrNull(2)
-    val calendar = routeActions.getOrNull(3)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -340,60 +260,45 @@ private fun HpTodayCommandCapsule(
             .border(1.dp, HpColors.glassBorder.copy(alpha = 0.72f), RoundedCornerShape(999.dp)),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        HpCapsuleIconButton(Icons.Outlined.Apps, "Program", onMenu, Modifier.weight(1f))
-        HpCapsuleDivider()
-        HpCapsuleIconButton(previous?.icon ?: Icons.AutoMirrored.Outlined.ArrowBack, previous?.contentDescription ?: "Previous day", { previous?.onClick?.invoke() }, Modifier.weight(1f))
-        HpCapsuleDivider()
-        Box(
-            modifier = Modifier
-                .weight(1.55f)
-                .fillMaxHeight()
-                .clickable { today?.onClick?.invoke() },
-            contentAlignment = Alignment.Center
-        ) {
-            Text("Today", color = HpColors.ink, fontWeight = FontWeight.SemiBold)
-        }
-        HpCapsuleDivider()
-        HpCapsuleIconButton(next?.icon ?: Icons.AutoMirrored.Outlined.KeyboardArrowRight, next?.contentDescription ?: "Next day", { next?.onClick?.invoke() }, Modifier.weight(1f))
-        HpCapsuleDivider()
-        HpCapsuleIconButton(calendar?.icon ?: Icons.Outlined.CalendarMonth, calendar?.contentDescription ?: "Choose date", { calendar?.onClick?.invoke() }, Modifier.weight(1f))
-        HpCapsuleDivider()
-        Box(modifier = Modifier.weight(1f)) {
-            HpCapsuleIconButton(Icons.Outlined.MoreHoriz, "More actions", onOverflow, Modifier.fillMaxWidth())
-            DropdownMenu(expanded = overflowExpanded, onDismissRequest = onOverflowDismiss) {
-                if (canUndo) {
-                    DropdownMenuItem(
-                        text = { Text("Undo") },
-                        leadingIcon = { Icon(Icons.AutoMirrored.Outlined.Undo, null) },
-                        onClick = onUndo
-                    )
-                }
-                if (canRedo) {
-                    DropdownMenuItem(
-                        text = { Text("Redo") },
-                        leadingIcon = { Icon(Icons.AutoMirrored.Outlined.Redo, null) },
-                        onClick = onRedo
-                    )
-                }
-            }
+        (visibleSlots + finalSlot).forEachIndexed { index, action ->
+            HpCapsuleSlot(action = action, modifier = Modifier.weight(1f))
+            if (index != 5) HpCapsuleDivider()
         }
     }
 }
 
 @Composable
-private fun HpCapsuleIconButton(
-    icon: ImageVector,
-    contentDescription: String,
-    onClick: () -> Unit,
+private fun HpCapsuleSlot(
+    action: HpCommandAction?,
     modifier: Modifier = Modifier
 ) {
-    Box(
-        modifier = modifier
+    if (action == null) {
+        Spacer(modifier = modifier.fillMaxHeight())
+        return
+    }
+    val tint = if (action.enabled) HpColors.ink else HpColors.muted.copy(alpha = 0.45f)
+    val slotModifier = if (action.enabled) {
+        modifier
             .fillMaxHeight()
-            .clickable(onClick = onClick),
+            .clickable(onClick = action.onClick)
+    } else {
+        modifier.fillMaxHeight()
+    }
+    Box(
+        modifier = slotModifier,
         contentAlignment = Alignment.Center
     ) {
-        Icon(icon, contentDescription = contentDescription, tint = HpColors.ink)
+        if (action.label != null) {
+            Text(
+                text = action.label,
+                color = tint,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        } else {
+            Icon(action.icon, contentDescription = action.contentDescription, tint = tint)
+        }
     }
 }
 
@@ -411,5 +316,6 @@ internal data class HpCommandAction(
     val icon: ImageVector,
     val contentDescription: String,
     val label: String? = null,
+    val enabled: Boolean = true,
     val onClick: () -> Unit
 )

@@ -905,6 +905,10 @@ data class ScreenChromeState(
 )
 ```
 
+### Layout Stability
+
+Read mode and edit mode must not move content. Switching modes may change icons, backgrounds, borders, and whether fields accept input, but the outer size, spacing, and text positions of the page must stay fixed. Use the same layout container for read and edit states, especially on task/detail pages, so titles, metadata rows, section labels, and note content do not jump when editing is toggled.
+
 ### Undo/Redo
 
 Undo/redo must remain available but not as a visible row in normal content.
@@ -1836,7 +1840,12 @@ Data model lessons to preserve or expose:
 
 - The hamburger opens a separate Program page, not a bottom sheet.
 - Program destinations should read as folder/app icons, similar to an app-view/watch-view mental model.
-- Program destinations include Today, Backlog, Calendar, Routines, Reminders, Stats, Import/Export, Settings, and any other first-class areas.
+- Program currently shows exactly six large destinations: Today, Backlog, Calendar, Routines, Stats, and Settings.
+- Reminders and Import/Export live under Settings unless the owner later promotes them back to top-level tiles.
+- The Program page uses the Van Gogh background asset full-screen, including behind status and navigation areas.
+- Program app tiles use the same opaque glass material as the search bar, direct icons, and serif labels; do not reintroduce nested icon boxes or visible tile borders.
+- Search is hidden by default. A downward swipe reveals it, an upward swipe hides it, and tapping the search bar focuses text input, shows the keyboard, and hides the six tiles.
+- The search bar must sit below centered camera cutouts/status icons when visible.
 
 ### Backlog Acceptance Rules
 
@@ -2002,6 +2011,7 @@ The desired Human Program surface style is opaquely glassy, like frosted glass o
 Apply this direction to:
 
 - command surfaces
+- shared six-slot top capsule
 - Today status and schedule panels
 - Program folder/app tiles
 - focused forms
@@ -2025,8 +2035,8 @@ Rules:
 
 Audit all of these current UI elements and either complete their function or remove/rework them:
 
-- Program: Today tile, Backlog tile, Calendar tile, Routines tile, Reminders tile, Stats tile, Import/Export tile, Settings tile.
-- Shell: menu, back, primary add/done, overflow, Edit Mode, Read Mode, Undo, Redo.
+- Program: Today tile, Backlog tile, Calendar tile, Routines tile, Stats tile, Settings tile, hidden-by-default search bar, active search state, keyboard-open search state, downward-swipe reveal, upward-swipe hide.
+- Shell: shared six-slot capsule, menu, back, blank slots, page-specific slots, overflow/close toggle, disabled undo, disabled redo, enabled undo, enabled redo, undo/redo feedback popup.
 - Today: previous day, next day, Today, calendar picker, past unlock, manual task add, task create sheet, task checkbox, task title edit, task delete, schedule boxes, calendar boxes, exercise section.
 - Backlog: view dropdown, Projects option, Tasks option, search toggle, search field, add sheet, Backlog Item option, Project option, Add to Today, delete, project detail, Delete Project Label, Complete All.
 - Calendar: date picker, mode dropdown, Month, Week, Day, Agenda, Refresh, Sources, source toggles, event rows, event detail/local override behavior.

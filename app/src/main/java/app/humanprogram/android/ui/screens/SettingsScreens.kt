@@ -520,10 +520,13 @@ internal fun ExerciseSettings(viewModel: HumanProgramViewModel) {
         item {
             HpSectionHeader("Exercise", viewModel.exerciseRoutine.title)
         }
-        if (viewModel.exerciseRoutine.items.isEmpty()) {
-            item { HpEmptyState("No exercise items have been added for today.", null, null) }
+        val visibleExerciseItems = viewModel.exerciseRoutine.items
+            .mapIndexed { index, item -> index to item }
+            .filterNot { (_, item) -> item.equals("No exercise items have been added for today.", ignoreCase = true) }
+        if (visibleExerciseItems.isEmpty()) {
+            item { HpEmptyState("Nothing for today.", null, null) }
         }
-        itemsIndexed(viewModel.exerciseRoutine.items) { index, item ->
+        items(visibleExerciseItems) { (index, item) ->
             SettingsRow(Icons.Outlined.FitnessCenter, item, "Exercise item") { selectedIndex = index }
         }
     }

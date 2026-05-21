@@ -8,8 +8,9 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
@@ -112,8 +113,10 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -122,6 +125,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import app.humanprogram.android.R
 import app.humanprogram.android.core.security.PinHash
 import app.humanprogram.android.planning.HumanProgramViewModel
 import app.humanprogram.android.planning.calendar.DeviceCalendarEvent
@@ -620,6 +624,7 @@ internal fun ProgramScreen(
     onNavigate: (HpRoute) -> Unit
 ) {
     var searchActive by rememberSaveable { mutableStateOf(false) }
+    var searchVisible by rememberSaveable { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
@@ -633,21 +638,46 @@ internal fun ProgramScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .pointerInput(searchActive) {
-                detectTapGestures {
-                    if (searchActive) {
-                        searchQuery = ""
-                        searchActive = false
-                        focusManager.clearFocus()
+            .pointerInput(Unit) {
+                var dragTotal = 0f
+                detectVerticalDragGestures(
+                    onDragStart = { dragTotal = 0f },
+                    onVerticalDrag = { _, dragAmount ->
+                        dragTotal += dragAmount
+                        when {
+                            dragTotal > 24f -> searchVisible = true
+                            dragTotal < -24f -> {
+                                searchVisible = false
+                                searchActive = false
+                                searchQuery = ""
+                                focusManager.clearFocus()
+                            }
+                        }
                     }
-                }
+                )
             }
     ) {
-        LazyColumn(
+        Image(
+            painter = painterResource(R.drawable.van_gogh),
+            contentDescription = null,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 22.dp, top = 16.dp, end = 22.dp, bottom = 28.dp)
+            contentScale = ContentScale.Crop
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.10f))
+        )
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(start = 22.dp, top = 74.dp, end = 22.dp, bottom = 28.dp)
         ) {
-            item {
+            AnimatedVisibility(
+                visible = searchVisible,
+                enter = fadeIn() + slideInVertically(initialOffsetY = { -it / 2 }),
+                exit = fadeOut() + slideOutVertically(targetOffsetY = { -it / 2 })
+            ) {
                 ProgramSearchBar(
                     active = searchActive,
                     query = searchQuery,
@@ -656,9 +686,16 @@ internal fun ProgramScreen(
                     onQueryChange = { searchQuery = it }
                 )
             }
-            item { Spacer(Modifier.height(54.dp)) }
-            item {
-                AnimatedVisibility(visible = searchActive && searchQuery.trim().isNotBlank()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentAlignment = Alignment.Center
+            ) {
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = searchActive && searchQuery.trim().isNotBlank(),
+                    modifier = Modifier.align(Alignment.TopCenter)
+                ) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         val hits = buildProgramSearchHits(viewModel, searchQuery.trim())
                         if (hits.isEmpty()) {
@@ -670,14 +707,12 @@ internal fun ProgramScreen(
                         }
                     }
                 }
-            }
-            item {
-                AnimatedVisibility(
+                androidx.compose.animation.AnimatedVisibility(
                     visible = !searchActive,
                     enter = fadeIn() + slideInVertically(initialOffsetY = { it / 5 }),
                     exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 5 })
                 ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(22.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(40.dp)) {
                         menuRows.chunked(2).forEach { rowPair ->
                             Row(horizontalArrangement = Arrangement.spacedBy(22.dp), modifier = Modifier.fillMaxWidth()) {
                                 rowPair.forEach { row ->
@@ -708,7 +743,7 @@ private fun ProgramSearchBar(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(58.dp)
+            .height(48.dp)
             .clip(RoundedCornerShape(18.dp))
             .background(HpColors.glass)
             .border(1.dp, HpColors.glassBorder.copy(alpha = 0.72f), RoundedCornerShape(18.dp))
@@ -726,12 +761,13 @@ private fun ProgramSearchBar(
                 singleLine = true,
                 textStyle = MaterialTheme.typography.titleMedium.copy(
                     color = HpColors.ink,
-                    fontWeight = FontWeight.Medium
+                    fontWeight = FontWeight.Medium,
+                    fontFamily = FontFamily.Serif
                 ),
                 cursorBrush = androidx.compose.ui.graphics.SolidColor(HpColors.accent)
             )
         } else {
-            Icon(Icons.Outlined.Search, contentDescription = "Search", tint = HpColors.accent)
+            Icon(Icons.Outlined.Search, contentDescription = "Search", tint = HpColors.accent, modifier = Modifier.size(24.dp))
         }
     }
 }
@@ -758,6 +794,7 @@ private fun ProgramSearchHitRow(
             modifier = Modifier.weight(1f),
             color = HpColors.ink,
             fontWeight = FontWeight.SemiBold,
+            fontFamily = FontFamily.Serif,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -824,23 +861,21 @@ private fun ProgramFolderTile(
             .height(178.dp)
             .clip(RoundedCornerShape(24.dp))
             .background(HpColors.glass)
-            .border(1.dp, HpColors.glassBorder.copy(alpha = 0.72f), RoundedCornerShape(24.dp))
             .clickable(onClick = onClick)
             .padding(18.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Box(
-            modifier = Modifier
-                .size(60.dp)
-                .clip(RoundedCornerShape(18.dp))
-                .background(HpColors.glassStrong)
-                .border(1.dp, HpColors.glassBorder.copy(alpha = 0.64f), RoundedCornerShape(18.dp)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(row.icon, contentDescription = null, tint = HpColors.accent)
-        }
+        Icon(row.icon, contentDescription = null, tint = HpColors.accent, modifier = Modifier.size(34.dp))
         Spacer(Modifier.height(16.dp))
-        Text(row.label, color = HpColors.ink, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(
+            row.label,
+            color = HpColors.ink,
+            fontWeight = FontWeight.SemiBold,
+            fontFamily = FontFamily.Serif,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }

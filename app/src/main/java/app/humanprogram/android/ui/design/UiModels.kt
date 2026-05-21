@@ -213,6 +213,14 @@ internal enum class BacklogView {
     TASKS
 }
 
+internal enum class BacklogSort {
+    DEFAULT,
+    DATE_ASC,
+    DATE_DESC,
+    TITLE_ASC,
+    TITLE_DESC
+}
+
 internal enum class CalendarMode(val label: String) {
     MONTH("Month"),
     WEEK("Week"),

@@ -252,7 +252,7 @@ class HumanProgramViewModel(
     private var failedPinUnlockAttempts: Int = 0
     private var pinUnlockBlockedUntil: Instant? = null
     private var pendingHprgmImportSnapshot: PlannerSnapshot? = null
-    private var unlockedPastEditDate: LocalDate? = null
+    private var unlockedPastEditDate by mutableStateOf<LocalDate?>(null)
 
     init {
         val snapshot = snapshotStore?.load()
@@ -361,6 +361,12 @@ class HumanProgramViewModel(
 
     val canRedo: Boolean
         get() = redoStack.isNotEmpty()
+
+    val canUserUndo: Boolean
+        get() = undoStack.lastOrNull()?.isUserUndoable == true
+
+    val canUserRedo: Boolean
+        get() = redoStack.lastOrNull()?.isUserUndoable == true
 
     fun updateNewTaskTitle(value: String) {
         newTaskTitle = value
@@ -588,10 +594,15 @@ class HumanProgramViewModel(
         val cleanTitle = newTaskTitle.trim()
         if (cleanTitle.isEmpty()) return
 
-        todayTasks.add(
-            DailyTask(
-                title = cleanTitle,
-                sourceType = DailyTaskSourceType.MANUAL
+        val task = DailyTask(
+            title = cleanTitle,
+            sourceType = DailyTaskSourceType.MANUAL
+        )
+        todayTasks.add(task)
+        recordEdit(
+            PlannerEdit.AddTodayTask(
+                task = task,
+                index = todayTasks.lastIndex
             )
         )
         newTaskTitle = ""
@@ -677,16 +688,24 @@ class HumanProgramViewModel(
         if (cleanTitle.isEmpty()) return
 
         val cleanProject = newBacklogProject.trim()
+        val previousProjects = projectBuckets.toList()
         if (cleanProject.isNotEmpty() && cleanProject !in projectBuckets) {
             projectBuckets.add(cleanProject)
             projectBuckets.sort()
         }
-        backlogItems.add(
-            BacklogItem(
-                title = cleanTitle,
-                notes = newBacklogNotes.trim(),
-                projectBucket = cleanProject,
-                assignedDate = parseDateInput(newBacklogAssignedDate)
+        val item = BacklogItem(
+            title = cleanTitle,
+            notes = newBacklogNotes.trim(),
+            projectBucket = cleanProject,
+            assignedDate = parseDateInput(newBacklogAssignedDate)
+        )
+        backlogItems.add(item)
+        recordEdit(
+            PlannerEdit.AddBacklogItem(
+                item = item,
+                index = backlogItems.lastIndex,
+                previousProjects = previousProjects,
+                updatedProjects = projectBuckets.toList()
             )
         )
         newBacklogTitle = ""
@@ -699,9 +718,19 @@ class HumanProgramViewModel(
     fun addProjectBucket() {
         val cleanProject = newBacklogProject.trim()
         if (cleanProject.isEmpty() || cleanProject == ProjectBucketService.UNORGANIZED) return
+        val previousProjects = projectBuckets.toList()
         if (cleanProject !in projectBuckets) {
             projectBuckets.add(cleanProject)
             projectBuckets.sort()
+        }
+        if (previousProjects != projectBuckets.toList()) {
+            recordEdit(
+                PlannerEdit.AddProjectBucket(
+                    project = cleanProject,
+                    previousProjects = previousProjects,
+                    updatedProjects = projectBuckets.toList()
+                )
+            )
         }
         newBacklogProject = ""
         saveSnapshot()
@@ -1738,9 +1767,12 @@ class HumanProgramViewModel(
         saveSnapshot()
     }
 
-    fun undoLastEdit() {
-        val edit = undoStack.removeLastOrNull() ?: return
+    fun undoLastEdit(): String? {
+        val edit = undoStack.removeLastOrNull() ?: return null
         when (edit) {
+            is PlannerEdit.AddTodayTask -> {
+                todayTasks.removeAll { it.id == edit.task.id }
+            }
             is PlannerEdit.AssignBacklogToday -> {
                 val index = backlogItems.indexOfFirst { it.id == edit.previousItem.id }
                 if (index != -1) {
@@ -1762,6 +1794,16 @@ class HumanProgramViewModel(
                         )
                     )
                 }
+            }
+            is PlannerEdit.AddBacklogItem -> {
+                backlogItems.removeAll { it.id == edit.item.id }
+                todayTasks.removeAll { task ->
+                    task.sourceType == DailyTaskSourceType.BACKLOG && task.sourceId == edit.item.id
+                }
+                projectBuckets.replaceWith(edit.previousProjects)
+            }
+            is PlannerEdit.AddProjectBucket -> {
+                projectBuckets.replaceWith(edit.previousProjects)
             }
             is PlannerEdit.DeleteTodayTask -> {
                 val insertAt = edit.index.coerceIn(0, todayTasks.size)
@@ -1816,11 +1858,18 @@ class HumanProgramViewModel(
         }
         redoStack.add(edit)
         saveSnapshot()
+        return edit.undoMessage
     }
 
-    fun redoLastEdit() {
-        val edit = redoStack.removeLastOrNull() ?: return
+    fun redoLastEdit(): String? {
+        val edit = redoStack.removeLastOrNull() ?: return null
         when (edit) {
+            is PlannerEdit.AddTodayTask -> {
+                val insertAt = edit.index.coerceIn(0, todayTasks.size)
+                if (todayTasks.none { it.id == edit.task.id }) {
+                    todayTasks.add(insertAt, edit.task)
+                }
+            }
             is PlannerEdit.AssignBacklogToday -> {
                 val index = backlogItems.indexOfFirst { it.id == edit.updatedItem.id }
                 if (index != -1) {
@@ -1837,6 +1886,16 @@ class HumanProgramViewModel(
                 todayTasks.removeAll { task ->
                     task.sourceType == DailyTaskSourceType.BACKLOG && task.sourceId == edit.item.id
                 }
+            }
+            is PlannerEdit.AddBacklogItem -> {
+                val insertAt = edit.index.coerceIn(0, backlogItems.size)
+                if (backlogItems.none { it.id == edit.item.id }) {
+                    backlogItems.add(insertAt, edit.item)
+                }
+                projectBuckets.replaceWith(edit.updatedProjects)
+            }
+            is PlannerEdit.AddProjectBucket -> {
+                projectBuckets.replaceWith(edit.updatedProjects)
             }
             is PlannerEdit.DeleteTodayTask -> {
                 todayTasks.removeAll { it.id == edit.task.id }
@@ -1890,6 +1949,15 @@ class HumanProgramViewModel(
         }
         undoStack.add(edit)
         saveSnapshot()
+        return edit.redoMessage
+    }
+
+    fun undoLastUserEdit(): String? {
+        return if (undoStack.lastOrNull()?.isUserUndoable == true) undoLastEdit() else null
+    }
+
+    fun redoLastUserEdit(): String? {
+        return if (redoStack.lastOrNull()?.isUserUndoable == true) redoLastEdit() else null
     }
 
     private fun updateBacklogCompletion(itemId: String, completed: Boolean) {
@@ -2223,11 +2291,29 @@ class HumanProgramViewModel(
 }
 
 private sealed interface PlannerEdit {
+    data class AddTodayTask(
+        val task: DailyTask,
+        val index: Int
+    ) : PlannerEdit
+
     data class AssignBacklogToday(
         val backlogIndex: Int,
         val previousItem: BacklogItem,
         val updatedItem: BacklogItem,
         val task: DailyTask
+    ) : PlannerEdit
+
+    data class AddBacklogItem(
+        val item: BacklogItem,
+        val index: Int,
+        val previousProjects: List<String>,
+        val updatedProjects: List<String>
+    ) : PlannerEdit
+
+    data class AddProjectBucket(
+        val project: String,
+        val previousProjects: List<String>,
+        val updatedProjects: List<String>
     ) : PlannerEdit
 
     data class DeleteBacklogItem(
@@ -2294,6 +2380,36 @@ private sealed interface PlannerEdit {
         val updated: List<String>
     ) : PlannerEdit
 }
+
+private val PlannerEdit.isUserUndoable: Boolean
+    get() = when (this) {
+        is PlannerEdit.AddTodayTask,
+        is PlannerEdit.ToggleTodayTask,
+        is PlannerEdit.AddBacklogItem,
+        is PlannerEdit.AddProjectBucket,
+        is PlannerEdit.AssignBacklogToday -> true
+        else -> false
+    }
+
+private val PlannerEdit.undoMessage: String
+    get() = when (this) {
+        is PlannerEdit.AddTodayTask -> "Undid adding task"
+        is PlannerEdit.ToggleTodayTask -> if (updated.completed) "Undid checking task" else "Undid unchecking task"
+        is PlannerEdit.AddBacklogItem -> "Undid creating backlog item"
+        is PlannerEdit.AddProjectBucket -> "Undid creating project"
+        is PlannerEdit.AssignBacklogToday -> "Undid assigning backlog item"
+        else -> "Undid change"
+    }
+
+private val PlannerEdit.redoMessage: String
+    get() = when (this) {
+        is PlannerEdit.AddTodayTask -> "Redid adding task"
+        is PlannerEdit.ToggleTodayTask -> if (updated.completed) "Redid checking task" else "Redid unchecking task"
+        is PlannerEdit.AddBacklogItem -> "Redid creating backlog item"
+        is PlannerEdit.AddProjectBucket -> "Redid creating project"
+        is PlannerEdit.AssignBacklogToday -> "Redid assigning backlog item"
+        else -> "Redid change"
+    }
 
 class HumanProgramViewModelFactory(
     private val snapshotStore: PlannerSnapshotStore

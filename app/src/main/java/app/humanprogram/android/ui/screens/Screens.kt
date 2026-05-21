@@ -2,9 +2,11 @@ package app.humanprogram.android.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -197,7 +199,7 @@ internal fun TodayScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                HpSectionHeader("Required Tasks", null)
+                HpSectionHeader("Things to Do", null)
                 Spacer(Modifier.weight(1f))
                 if (viewModel.canEditSelectedDate) {
                     Box(
@@ -239,7 +241,9 @@ internal fun TodayScreen(
             HpSectionHeader("Exercise", null)
             Spacer(Modifier.height(14.dp))
             HpSoftPanel {
-                if (viewModel.exerciseRoutine.items.isEmpty()) {
+                val exerciseItems = viewModel.exerciseRoutine.items
+                    .filterNot { it.equals("No exercise items have been added for today.", ignoreCase = true) }
+                if (exerciseItems.isEmpty()) {
                     Text(
                         text = "Nothing for today.",
                         modifier = Modifier.fillMaxWidth(),
@@ -249,7 +253,7 @@ internal fun TodayScreen(
                     )
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        viewModel.exerciseRoutine.items.forEach { item ->
+                        exerciseItems.forEach { item ->
                             Text(item, color = HpColors.ink, style = MaterialTheme.typography.bodyMedium)
                         }
                     }
@@ -264,14 +268,14 @@ internal fun DayStatusPanel(
     viewModel: HumanProgramViewModel
 ) {
     val haptics = LocalHapticFeedback.current
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(42.dp)
     ) {
         Text(
             text = viewModel.selectedDateLabel,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.align(Alignment.CenterStart),
             style = MaterialTheme.typography.titleLarge,
             fontFamily = FontFamily.Serif,
             fontWeight = FontWeight.SemiBold,
@@ -280,18 +284,22 @@ internal fun DayStatusPanel(
         if (viewModel.isPastDate) {
             Box(
                 modifier = Modifier
-                    .height(42.dp)
+                    .align(Alignment.CenterEnd)
+                    .width(82.dp)
+                    .fillMaxHeight()
                     .clip(RoundedCornerShape(999.dp))
                     .background(HpColors.glass)
-                    .pointerInput(viewModel.canEditSelectedDate) {
+                    .pointerInput(viewModel.selectedDate, viewModel.canEditSelectedDate) {
                         detectTapGestures(
+                            onTap = {
+                                viewModel.toggleSelectedPastDateEditLock()
+                            },
                             onLongPress = {
                                 viewModel.toggleSelectedPastDateEditLock()
                                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                             }
                         )
-                    }
-                    .padding(horizontal = 18.dp),
+                    },
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -344,18 +352,20 @@ internal fun ScheduleTimeline(
                 .fillMaxWidth()
                 .aspectRatio(1f)
         ) {
-            val timelineHeight = maxHeight - 18.dp
-            val dayHeight = timelineHeight - 16.dp
+            val timelineHeight = maxHeight
+            val timelineVerticalPadding = 12.dp
+            val dayHeight = timelineHeight - (timelineVerticalPadding * 2)
             val timeLabelWidth = 48.dp
             val railGap = 10.dp
             val railWidth = (maxWidth - timeLabelWidth - railGap) / 6f
             fun yForMinute(minute: Int): Dp {
                 val dayMinute = (minute - timelineStartHour * 60).coerceIn(0, (timelineEndHour - timelineStartHour) * 60)
-                return dayHeight * (dayMinute / ((timelineEndHour - timelineStartHour) * 60f))
+                return timelineVerticalPadding + dayHeight * (dayMinute / ((timelineEndHour - timelineStartHour) * 60f))
             }
             fun yForHour(hour: Int): Dp = yForMinute(hour * 60)
             fun heightForMinutes(minutes: Int): Dp =
                 dayHeight * (minutes / ((timelineEndHour - timelineStartHour) * 60f))
+            fun labelYForHour(hour: Int): Dp = yForHour(hour) - 9.dp
 
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Box(
@@ -368,7 +378,7 @@ internal fun ScheduleTimeline(
                             "%02d:00".format(hour),
                             color = HpColors.muted,
                             style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.offset(y = yForHour(hour))
+                            modifier = Modifier.offset(y = labelYForHour(hour))
                         )
                     }
                 }
@@ -380,7 +390,8 @@ internal fun ScheduleTimeline(
                     Box(
                         modifier = Modifier
                             .width(railWidth)
-                            .fillMaxHeight()
+                            .offset(y = timelineVerticalPadding)
+                            .height(dayHeight)
                             .background(Color(0xFFF7F7F7).copy(alpha = 0.7f))
                     )
                     (timelineStartHour..timelineEndHour step 3).forEach { hour ->
@@ -388,7 +399,7 @@ internal fun ScheduleTimeline(
                             modifier = Modifier
                                 .width(railWidth)
                                 .height(1.dp)
-                                .offset(y = yForHour(hour) + 8.dp)
+                                .offset(y = yForHour(hour))
                                 .background(HpColors.divider)
                         )
                     }
@@ -451,19 +462,22 @@ private fun TimelineNowRow(
     }
     val nowMinute = now.toSecondOfDay() / 60
     if (nowMinute !in (timelineStartHour * 60)..(timelineEndHour * 60)) return
-    Row(
+    val pillOverhang = 14.dp
+    val pillWidth = timeLabelWidth + pillOverhang
+    Box(
         modifier = Modifier
             .width(timeLabelWidth + railGap + railWidth)
-            .offset(y = yForMinute(nowMinute) + 3.dp)
-            .height(24.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .offset(y = yForMinute(nowMinute) - 12.dp)
+            .height(24.dp)
     ) {
         Box(
             modifier = Modifier
-                .width(timeLabelWidth)
+                .width(pillWidth)
+                .fillMaxHeight()
+                .offset(x = -pillOverhang)
                 .clip(RoundedCornerShape(999.dp))
                 .background(Color(0xFFFF3B42))
-                .padding(vertical = 3.dp),
+                .padding(start = pillOverhang, top = 3.dp, bottom = 3.dp),
             contentAlignment = Alignment.CenterStart
         ) {
             Text(
@@ -473,11 +487,12 @@ private fun TimelineNowRow(
                 fontWeight = FontWeight.Bold
             )
         }
-        Spacer(Modifier.width(railGap))
         Box(
             modifier = Modifier
+                .align(Alignment.CenterStart)
+                .offset(x = timeLabelWidth)
+                .width(railGap + railWidth)
                 .height(2.dp)
-                .weight(1f)
                 .background(Color(0xFFFF3B42))
         )
     }
@@ -563,11 +578,13 @@ internal fun ScheduleBlockDetailSheet(
 internal fun TodayTaskDetailPage(
     task: DailyTask,
     viewModel: HumanProgramViewModel,
+    editing: Boolean,
+    titleDraft: String,
+    notesDraft: String,
+    onTitleDraftChange: (String) -> Unit,
+    onNotesDraftChange: (String) -> Unit,
     onBack: () -> Unit
 ) {
-    var editing by rememberSaveable(task.id) { mutableStateOf(false) }
-    var titleDraft by rememberSaveable(task.id, task.title) { mutableStateOf(task.title) }
-    var notesDraft by rememberSaveable(task.id, task.notes) { mutableStateOf(task.notes) }
     val sourceBacklogItem = viewModel.backlogItems.firstOrNull { it.id == task.sourceId }
     val projectBucket = sourceBacklogItem?.projectBucket?.ifBlank { "Unorganized" } ?: "None"
     val titleTextStyle = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.SemiBold)
@@ -575,72 +592,16 @@ internal fun TodayTaskDetailPage(
 
     HpList {
         item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(HpColors.glass)
-                    .padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .width(58.dp)
-                        .clickable(onClick = onBack),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back", tint = HpColors.ink)
-                }
-                Box(
-                    modifier = Modifier
-                        .width(1.dp)
-                        .height(26.dp)
-                        .background(HpColors.divider)
-                )
-                Spacer(Modifier.weight(1f))
-                Box(
-                    modifier = Modifier
-                        .width(1.dp)
-                        .height(26.dp)
-                        .background(HpColors.divider)
-                )
-                Box(
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .width(82.dp)
-                        .clip(RoundedCornerShape(999.dp))
-                        .clickable(enabled = viewModel.canEditSelectedDate) {
-                            if (editing) {
-                                viewModel.renameTask(task.id, titleDraft)
-                                viewModel.updateTaskNotes(task.id, notesDraft)
-                            }
-                            editing = !editing
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (editing) {
-                        Icon(Icons.Outlined.Save, contentDescription = "Save", tint = HpColors.ink)
-                    } else {
-                        Text("Edit", color = HpColors.ink, fontWeight = FontWeight.SemiBold)
-                    }
-                }
-            }
-        }
-        item {
-            if (editing) {
-                OutlinedTextField(
-                    modifier = Modifier.fillMaxWidth(),
-                    value = titleDraft,
-                    onValueChange = { titleDraft = it },
-                    textStyle = titleTextStyle,
-                    singleLine = true,
-                    shape = RoundedCornerShape(HpTheme.radii.card)
-                )
-            } else {
-                HpSoftPanel { Text(text = task.title, color = HpColors.ink, style = titleTextStyle) }
-            }
+            StableDetailTextArea(
+                value = if (editing) titleDraft else task.title,
+                onValueChange = onTitleDraftChange,
+                editing = editing,
+                textStyle = titleTextStyle,
+                minHeight = 70.dp,
+                singleLine = true,
+                placeholder = null,
+                verticalPadding = 16.dp
+            )
         }
         item {
             HpSoftPanel {
@@ -652,26 +613,64 @@ internal fun TodayTaskDetailPage(
             }
         }
         item {
-            HpSectionHeader("Note", null)
-            if (editing) {
-                OutlinedTextField(
-                    modifier = Modifier.fillMaxWidth(),
-                    value = notesDraft,
-                    onValueChange = { notesDraft = it },
-                    textStyle = noteTextStyle,
-                    minLines = 4,
-                    shape = RoundedCornerShape(HpTheme.radii.card)
-                )
-            } else {
-                HpSoftPanel {
-                    Text(
-                        text = task.notes.ifBlank { "No notes." },
-                        color = if (task.notes.isBlank()) HpColors.muted else HpColors.ink,
-                        style = noteTextStyle
-                    )
-                }
+            Box(Modifier.padding(start = 16.dp)) {
+                HpSectionHeader("Note", null)
             }
+            StableDetailTextArea(
+                value = if (editing) notesDraft else task.notes.ifBlank { "No notes." },
+                onValueChange = onNotesDraftChange,
+                editing = editing,
+                textStyle = noteTextStyle,
+                minHeight = 136.dp,
+                singleLine = false,
+                placeholder = if (task.notes.isBlank() && !editing) "No notes." else null,
+                verticalPadding = 24.dp
+            )
         }
+    }
+}
+
+@Composable
+private fun StableDetailTextArea(
+    value: String,
+    onValueChange: (String) -> Unit,
+    editing: Boolean,
+    textStyle: androidx.compose.ui.text.TextStyle,
+    minHeight: Dp,
+    singleLine: Boolean,
+    placeholder: String?,
+    verticalPadding: Dp
+) {
+    val shape = RoundedCornerShape(HpTheme.radii.card)
+    val fieldModifier = Modifier
+        .fillMaxWidth()
+        .height(minHeight)
+        .then(
+            if (editing) {
+                Modifier
+                    .clip(shape)
+                    .background(HpColors.surface)
+                    .border(1.dp, HpColors.muted, shape)
+            } else {
+                Modifier
+            }
+        )
+        .padding(horizontal = 16.dp, vertical = verticalPadding)
+    if (editing) {
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = fieldModifier,
+            textStyle = textStyle.copy(color = HpColors.ink),
+            singleLine = singleLine
+        )
+    } else {
+        Text(
+            text = value,
+            modifier = fieldModifier,
+            color = if (placeholder != null) HpColors.muted else HpColors.ink,
+            style = textStyle
+        )
     }
 }
 
@@ -745,6 +744,7 @@ internal fun BacklogScreen(
     viewModel: HumanProgramViewModel,
     mode: HpMode,
     view: BacklogView,
+    sort: BacklogSort,
     searchOpen: Boolean,
     onChangeView: (BacklogView) -> Unit,
     onOpenProject: (String) -> Unit
@@ -758,6 +758,14 @@ internal fun BacklogScreen(
             it.title.contains(normalizedQuery, ignoreCase = true) ||
                 it.projectBucket.contains(normalizedQuery, ignoreCase = true)
         }
+    }.let { items ->
+        when (sort) {
+            BacklogSort.DEFAULT -> items
+            BacklogSort.DATE_ASC -> items.sortedBy { it.assignedDate ?: LocalDate.MAX }
+            BacklogSort.DATE_DESC -> items.sortedByDescending { it.assignedDate ?: LocalDate.MIN }
+            BacklogSort.TITLE_ASC -> items.sortedBy { it.title.lowercase() }
+            BacklogSort.TITLE_DESC -> items.sortedByDescending { it.title.lowercase() }
+        }
     }
     val filteredProjects = viewModel.activeBacklogByProject
         .filterKeys { normalizedQuery.isBlank() || it.contains(normalizedQuery, ignoreCase = true) }
@@ -770,7 +778,7 @@ internal fun BacklogScreen(
             }
         }
         if (view == BacklogView.PROJECTS) {
-            item { HpSectionHeader("Projects", "Folders for backlog tasks") }
+            item { HpSectionHeader("Projects", null) }
             if (filteredProjects.isEmpty()) {
                 item { HpEmptyState("No active projects.", null, null) }
             }
@@ -778,7 +786,7 @@ internal fun BacklogScreen(
                 HpProjectRow(project, "${items.size} active", onClick = { onOpenProject(project) })
             }
         } else {
-            item { HpSectionHeader("Active Tasks", "Unscheduled or assigned work") }
+            item { HpSectionHeader("Active Tasks", null) }
             if (filteredBacklogItems.isEmpty()) {
                 item { HpEmptyState("No active backlog tasks.", null, null) }
             }
@@ -808,27 +816,6 @@ internal fun ProjectDetailScreen(
     val items = viewModel.activeBacklogByProject[projectName].orEmpty()
     var projectNameDraft by rememberSaveable(projectName) { mutableStateOf(projectName) }
     HpList {
-        item {
-            HpHeroPanel {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Icon(Icons.Outlined.Folder, contentDescription = null, tint = HpColors.accent)
-                    Column(Modifier.weight(1f)) {
-                        if (mode == HpMode.EDIT && viewModel.canDeleteSelectedProject(projectName)) {
-                            OutlinedTextField(
-                                value = projectNameDraft,
-                                onValueChange = { projectNameDraft = it },
-                                singleLine = true,
-                                label = { Text("Project name") },
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        } else {
-                            Text(projectName, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = HpColors.ink)
-                        }
-                        Text("${items.size} active task${if (items.size == 1) "" else "s"}", color = HpColors.muted)
-                    }
-                }
-            }
-        }
         if (mode == HpMode.EDIT && viewModel.canDeleteSelectedProject(projectName)) {
             item {
                 HpSoftPanel {

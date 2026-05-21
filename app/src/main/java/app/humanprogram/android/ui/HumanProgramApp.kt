@@ -39,6 +39,7 @@ import androidx.compose.material.icons.automirrored.outlined.Redo
 import androidx.compose.material.icons.automirrored.outlined.ShowChart
 import androidx.compose.material.icons.automirrored.outlined.Undo
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CheckCircle
@@ -62,6 +63,7 @@ import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.RestartAlt
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -90,6 +92,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -120,6 +123,7 @@ import app.humanprogram.android.planning.model.NotificationReminder
 import app.humanprogram.android.planning.model.RecurringTaskTemplate
 import app.humanprogram.android.planning.model.ReminderRecurrence
 import app.humanprogram.android.planning.model.ScheduleBlock
+import kotlinx.coroutines.delay
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -151,9 +155,13 @@ fun HumanProgramApp(
     var route by rememberSaveable { mutableStateOf(HpRoute.TODAY) }
     var selectedProject by rememberSaveable { mutableStateOf("") }
     var selectedTaskId by rememberSaveable { mutableStateOf<String?>(null) }
+    var taskDetailEditing by rememberSaveable { mutableStateOf(false) }
+    var taskDetailTitleDraft by rememberSaveable { mutableStateOf("") }
+    var taskDetailNotesDraft by rememberSaveable { mutableStateOf("") }
     var settingsDetail by rememberSaveable { mutableStateOf<SettingsDetail?>(null) }
     var mode by rememberSaveable { mutableStateOf(HpMode.READ) }
-    var overflowOpen by rememberSaveable { mutableStateOf(false) }
+    var undoRedoMode by rememberSaveable { mutableStateOf(false) }
+    var undoRedoMessage by rememberSaveable { mutableStateOf<String?>(null) }
     var showTaskSheet by rememberSaveable { mutableStateOf(false) }
     var showBacklogSheet by rememberSaveable { mutableStateOf(false) }
     var showRoutineSheet by rememberSaveable { mutableStateOf(false) }
@@ -162,8 +170,21 @@ fun HumanProgramApp(
     var showExerciseSheet by rememberSaveable { mutableStateOf(false) }
     var showDatePicker by rememberSaveable { mutableStateOf(false) }
     var backlogView by rememberSaveable { mutableStateOf(BacklogView.PROJECTS) }
+    var backlogSort by rememberSaveable { mutableStateOf(BacklogSort.DEFAULT) }
     var backlogSearchOpen by rememberSaveable { mutableStateOf(false) }
     var calendarMode by rememberSaveable { mutableStateOf(CalendarMode.MONTH) }
+
+    LaunchedEffect(route, settingsDetail, selectedProject) {
+        undoRedoMode = false
+        undoRedoMessage = null
+    }
+
+    LaunchedEffect(undoRedoMessage) {
+        if (undoRedoMessage != null) {
+            delay(2_000)
+            undoRedoMessage = null
+        }
+    }
 
     val darkUi = when (appearance) {
         "light" -> false
@@ -357,8 +378,24 @@ fun HumanProgramApp(
             addAction != null -> addAction
             else -> null
         }
-        val routeActions = when (route) {
+        val openProgram: () -> Unit = { route = HpRoute.PROGRAM }
+        val goBack: () -> Unit = {
+            when {
+                route == HpRoute.PROJECT -> route = HpRoute.BACKLOG
+                route == HpRoute.SETTINGS && settingsDetail != null -> settingsDetail = null
+                route == HpRoute.TASK_DETAIL -> {
+                    route = HpRoute.TODAY
+                    selectedTaskId = null
+                    taskDetailEditing = false
+                }
+                route != HpRoute.PROGRAM -> route = HpRoute.PROGRAM
+            }
+        }
+        val menuSlot = HpCommandAction(Icons.Outlined.Apps, "Program", onClick = openProgram)
+        val backSlot = HpCommandAction(Icons.AutoMirrored.Outlined.ArrowBack, "Back", onClick = goBack)
+        val routeActions: List<HpCommandAction?> = when (route) {
             HpRoute.TODAY -> listOf(
+                menuSlot,
                 HpCommandAction(Icons.AutoMirrored.Outlined.ArrowBack, "Previous day") {
                     viewModel.goToPreviousDay()
                     onRefreshCalendarEvents()
@@ -374,21 +411,75 @@ fun HumanProgramApp(
                 HpCommandAction(Icons.Outlined.CalendarMonth, "Choose date") { showDatePicker = true }
             )
             HpRoute.BACKLOG -> listOf(
+                menuSlot,
+                HpCommandAction(Icons.Outlined.Add, "Add backlog item or project") { showBacklogSheet = true },
                 HpCommandAction(Icons.Outlined.Tune, "Toggle backlog view") {
                     backlogView = if (backlogView == BacklogView.PROJECTS) BacklogView.TASKS else BacklogView.PROJECTS
+                },
+                HpCommandAction(Icons.AutoMirrored.Outlined.FormatListBulleted, "Sort backlog") {
+                    backlogSort = BacklogSort.entries[(backlogSort.ordinal + 1) % BacklogSort.entries.size]
                 },
                 HpCommandAction(Icons.Outlined.Search, "Search backlog") {
                     backlogSearchOpen = !backlogSearchOpen
                 }
             )
+            HpRoute.PROJECT -> listOf(
+                backSlot,
+                HpCommandAction(Icons.Outlined.Add, "Add backlog item to project") {
+                    viewModel.updateNewBacklogProject(selectedProject.takeUnless { it == "Unorganized" }.orEmpty())
+                    showBacklogSheet = true
+                },
+                null,
+                null,
+                null
+            )
             HpRoute.CALENDAR -> listOf(
-                HpCommandAction(Icons.Outlined.CalendarMonth, "Choose date") { showDatePicker = true },
+                menuSlot,
+                HpCommandAction(Icons.Outlined.Add, "Add calendar event") {},
+                HpCommandAction(Icons.Outlined.CalendarMonth, "Today") {
+                    viewModel.goToToday()
+                    onRefreshCalendarEvents()
+                },
                 HpCommandAction(Icons.Outlined.Tune, "Change calendar view") {
                     calendarMode = CalendarMode.entries[(calendarMode.ordinal + 1) % CalendarMode.entries.size]
                 },
                 HpCommandAction(Icons.Outlined.RestartAlt, "Refresh calendar", onClick = onRefreshCalendarEvents)
             )
-            else -> emptyList()
+            HpRoute.SETTINGS -> listOf(
+                if (settingsDetail == null) menuSlot else backSlot,
+                null,
+                null,
+                null,
+                null
+            )
+            HpRoute.TASK_DETAIL -> {
+                val task = viewModel.todayTasks.firstOrNull { it.id == selectedTaskId }
+                listOf(
+                    backSlot,
+                    null,
+                    null,
+                    null,
+                    null,
+                    HpCommandAction(
+                        icon = if (taskDetailEditing) Icons.Outlined.Save else Icons.Outlined.Edit,
+                        contentDescription = if (taskDetailEditing) "Save task" else "Edit task",
+                        enabled = task != null && viewModel.canEditSelectedDate,
+                        onClick = {
+                            val currentTask = viewModel.todayTasks.firstOrNull { it.id == selectedTaskId } ?: return@HpCommandAction
+                            if (taskDetailEditing) {
+                                viewModel.renameTask(currentTask.id, taskDetailTitleDraft)
+                                viewModel.updateTaskNotes(currentTask.id, taskDetailNotesDraft)
+                                taskDetailEditing = false
+                            } else {
+                                taskDetailTitleDraft = currentTask.title
+                                taskDetailNotesDraft = currentTask.notes
+                                taskDetailEditing = true
+                            }
+                        }
+                    )
+                )
+            }
+            else -> listOf(menuSlot, null, null, null, null)
         }
 
         HpAppFrame(
@@ -402,39 +493,31 @@ fun HumanProgramApp(
         },
         route = route,
         mode = mode,
-        onMenu = { route = HpRoute.PROGRAM },
-        onBack = {
-            when {
-                route == HpRoute.PROJECT -> route = HpRoute.BACKLOG
-                route == HpRoute.SETTINGS && settingsDetail != null -> settingsDetail = null
-                route == HpRoute.TASK_DETAIL -> {
-                    route = HpRoute.TODAY
-                    selectedTaskId = null
-                }
-                route != HpRoute.PROGRAM -> route = HpRoute.PROGRAM
-            }
-        },
+        onMenu = openProgram,
+        onBack = goBack,
         primaryIcon = primaryIcon,
         primaryContentDescription = primaryContentDescription,
         onPrimaryAction = primaryAction,
         routeActions = routeActions,
-        overflowExpanded = overflowOpen,
+        overflowExpanded = undoRedoMode,
+        undoRedoMessage = undoRedoMessage,
         canEdit = supportsEditMode,
-        canUndo = viewModel.canUndo && route in setOf(HpRoute.TODAY, HpRoute.BACKLOG, HpRoute.PROJECT, HpRoute.REMINDERS, HpRoute.SETTINGS) && settingsDetail != SettingsDetail.ABOUT,
-        canRedo = viewModel.canRedo && route in setOf(HpRoute.TODAY, HpRoute.BACKLOG, HpRoute.PROJECT, HpRoute.REMINDERS, HpRoute.SETTINGS) && settingsDetail != SettingsDetail.ABOUT,
-        onOverflow = { overflowOpen = true },
-        onOverflowDismiss = { overflowOpen = false },
+        canUndo = viewModel.canUserUndo,
+        canRedo = viewModel.canUserRedo,
+        onOverflow = { undoRedoMode = true },
+        onOverflowDismiss = {
+            undoRedoMode = false
+            undoRedoMessage = null
+        },
         onToggleMode = {
             mode = if (mode == HpMode.READ) HpMode.EDIT else HpMode.READ
-            overflowOpen = false
+            undoRedoMode = false
         },
         onUndo = {
-            viewModel.undoLastEdit()
-            overflowOpen = false
+            undoRedoMessage = viewModel.undoLastUserEdit()
         },
         onRedo = {
-            viewModel.redoLastEdit()
-            overflowOpen = false
+            undoRedoMessage = viewModel.redoLastUserEdit()
         }
     ) {
         when (route) {
@@ -457,6 +540,10 @@ fun HumanProgramApp(
                 onAddTask = { showTaskSheet = true },
                 onOpenTaskDetails = {
                     selectedTaskId = it
+                    val selectedTask = viewModel.todayTasks.firstOrNull { task -> task.id == it }
+                    taskDetailTitleDraft = selectedTask?.title.orEmpty()
+                    taskDetailNotesDraft = selectedTask?.notes.orEmpty()
+                    taskDetailEditing = false
                     route = HpRoute.TASK_DETAIL
                     mode = HpMode.READ
                 }
@@ -473,6 +560,7 @@ fun HumanProgramApp(
                 viewModel = viewModel,
                 mode = mode,
                 view = backlogView,
+                sort = backlogSort,
                 searchOpen = backlogSearchOpen,
                 onChangeView = { backlogView = it },
                 onOpenProject = {
@@ -544,9 +632,15 @@ fun HumanProgramApp(
                     TodayTaskDetailPage(
                         task = task,
                         viewModel = viewModel,
+                        editing = taskDetailEditing,
+                        titleDraft = taskDetailTitleDraft,
+                        notesDraft = taskDetailNotesDraft,
+                        onTitleDraftChange = { taskDetailTitleDraft = it },
+                        onNotesDraftChange = { taskDetailNotesDraft = it },
                         onBack = {
                             route = HpRoute.TODAY
                             selectedTaskId = null
+                            taskDetailEditing = false
                         }
                     )
                 }
