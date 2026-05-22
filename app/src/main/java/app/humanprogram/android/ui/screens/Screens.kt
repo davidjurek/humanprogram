@@ -1,9 +1,12 @@
 package app.humanprogram.android.ui
 
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
@@ -90,6 +93,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -101,17 +105,25 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.key
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
@@ -123,6 +135,8 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
+import kotlin.math.roundToInt
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.humanprogram.android.core.security.PinHash
 import app.humanprogram.android.planning.HumanProgramViewModel
@@ -180,6 +194,35 @@ internal fun TodayScreen(
             onDismiss = { selectedCalendarEventId = null }
         )
     }
+    var draggedTaskId by remember { mutableStateOf<String?>(null) }
+    var dragStartIndex by remember { mutableIntStateOf(-1) }
+    var dragOffset by remember { mutableStateOf(0f) }
+    var dropIndex by remember { mutableIntStateOf(-1) }
+    var taskListTop by remember { mutableStateOf(0f) }
+    var taskListBottom by remember { mutableStateOf(0f) }
+    var taskRowHeight by remember { mutableStateOf(56f) }
+    var overlayRootLeft by remember { mutableStateOf(0f) }
+    var overlayRootTop by remember { mutableStateOf(0f) }
+    val taskRowTops = remember { mutableStateMapOf<String, Float>() }
+    val taskRowLefts = remember { mutableStateMapOf<String, Float>() }
+    val taskRowWidths = remember { mutableStateMapOf<String, Int>() }
+    val draggedTask = draggedTaskId?.let { id -> viewModel.todayTasks.firstOrNull { it.id == id } }
+    val draggedTaskTop = draggedTaskId?.let { taskRowTops[it] } ?: 0f
+    val draggedTaskLeft = draggedTaskId?.let { taskRowLefts[it] } ?: 0f
+    val draggedTaskWidth = draggedTaskId?.let { taskRowWidths[it] } ?: 0
+    val density = LocalDensity.current
+    val dragScale by animateFloatAsState(if (draggedTask != null) 1.03f else 1f, label = "task-drag-scale")
+    val dragElevation by animateDpAsState(if (draggedTask != null) 12.dp else 0.dp, label = "task-drag-elevation")
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .onGloballyPositioned { coordinates ->
+                val position = coordinates.positionInRoot()
+                overlayRootLeft = position.x
+                overlayRootTop = position.y
+            }
+    ) {
     HpList {
         item {
             DayStatusPanel(
@@ -224,17 +267,96 @@ internal fun TodayScreen(
                 if (viewModel.todayTasks.isEmpty()) {
                     HpEmptyState("No required tasks for this day.", null, null)
                 } else {
-                    Column {
+                    Column(
+                        modifier = Modifier.onGloballyPositioned { coordinates ->
+                            val top = coordinates.positionInRoot().y - overlayRootTop
+                            taskListTop = top
+                            taskListBottom = top + coordinates.size.height
+                        }
+                    ) {
                         viewModel.todayTasks.forEachIndexed { index, task ->
-                            TaskRow(
-                                task = task,
-                                mode = mode,
-                                enabled = viewModel.canEditSelectedDate,
-                                onToggle = { viewModel.toggleTask(task.id) },
-                                onTitleChange = { viewModel.renameTask(task.id, it) },
-                                onDelete = { viewModel.deleteTask(task.id) },
-                                onOpenDetails = { onOpenTaskDetails(task.id) }
-                            )
+                            key(task.id) {
+                                val isDragging = draggedTaskId == task.id
+                                val showDropLineBefore = dropIndex != -1 && dropIndex == index && dropIndex <= dragStartIndex
+                                val showDropLineAfter = dropIndex != -1 && dropIndex == index && dropIndex > dragStartIndex
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(
+                                            color = if (isDragging) HpColors.divider.copy(alpha = 0.55f) else Color.Transparent,
+                                            shape = RoundedCornerShape(12.dp)
+                                        )
+                                        .onGloballyPositioned { coordinates ->
+                                            val position = coordinates.positionInRoot()
+                                            taskRowTops[task.id] = position.y - overlayRootTop
+                                            taskRowLefts[task.id] = position.x - overlayRootLeft
+                                            taskRowWidths[task.id] = coordinates.size.width
+                                            if (coordinates.size.height > 0) {
+                                                taskRowHeight = coordinates.size.height.toFloat()
+                                            }
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (showDropLineBefore) ReorderDropLine(Modifier.align(Alignment.TopCenter))
+                                    if (showDropLineAfter) ReorderDropLine(Modifier.align(Alignment.BottomCenter))
+                                    TaskRow(
+                                        task = task,
+                                        mode = mode,
+                                        enabled = viewModel.canEditSelectedDate,
+                                        modifier = Modifier
+                                            .graphicsLayer {
+                                                alpha = if (isDragging) 0f else 1f
+                                            }
+                                            .pointerInput(task.id, viewModel.canEditSelectedDate) {
+                                                if (!viewModel.canEditSelectedDate) return@pointerInput
+
+                                                detectDragGesturesAfterLongPress(
+                                                    onDragStart = {
+                                                        draggedTaskId = task.id
+                                                        dragStartIndex = viewModel.todayTasks.indexOfFirst { it.id == task.id }
+                                                        dropIndex = dragStartIndex
+                                                        dragOffset = 0f
+                                                    },
+                                                    onDragCancel = {
+                                                        draggedTaskId = null
+                                                        dragStartIndex = -1
+                                                        dropIndex = -1
+                                                        dragOffset = 0f
+                                                    },
+                                                    onDragEnd = {
+                                                        val fromIndex = dragStartIndex
+                                                        val toIndex = dropIndex
+                                                        if (fromIndex != -1 && toIndex != -1 && fromIndex != toIndex) {
+                                                            viewModel.moveTodayTask(fromIndex, toIndex)
+                                                        }
+                                                        draggedTaskId = null
+                                                        dragStartIndex = -1
+                                                        dropIndex = -1
+                                                        dragOffset = 0f
+                                                    },
+                                                    onDrag = { change, dragAmount ->
+                                                        change.consume()
+                                                        if (draggedTaskId != task.id || dragStartIndex == -1) return@detectDragGesturesAfterLongPress
+
+                                                        dragOffset += dragAmount.y
+                                                        val draggedCenter = draggedTaskTop + (taskRowHeight / 2f) + dragOffset
+                                                        dropIndex = if (draggedCenter in taskListTop..taskListBottom) {
+                                                            ((draggedCenter - taskListTop) / taskRowHeight)
+                                                                .roundToInt()
+                                                                .coerceIn(0, viewModel.todayTasks.lastIndex)
+                                                        } else {
+                                                            -1
+                                                        }
+                                                    }
+                                                )
+                                            },
+                                        onToggle = { viewModel.toggleTask(task.id) },
+                                        onTitleChange = { viewModel.renameTask(task.id, it) },
+                                        onDelete = { viewModel.deleteTask(task.id) },
+                                        onOpenDetails = { onOpenTaskDetails(task.id) }
+                                    )
+                                }
+                            }
                             if (index != viewModel.todayTasks.lastIndex) HorizontalDivider(color = HpColors.divider)
                         }
                     }
@@ -265,6 +387,40 @@ internal fun TodayScreen(
             }
         }
     }
+        if (draggedTask != null) {
+            TaskRow(
+                task = draggedTask,
+                mode = mode,
+                enabled = viewModel.canEditSelectedDate,
+                modifier = Modifier
+                    .offset { IntOffset(draggedTaskLeft.roundToInt(), (draggedTaskTop + dragOffset).roundToInt()) }
+                    .width(with(density) { draggedTaskWidth.toDp() })
+                    .zIndex(100f)
+                    .graphicsLayer {
+                        scaleX = dragScale
+                        scaleY = dragScale
+                    }
+                    .shadow(dragElevation, RoundedCornerShape(12.dp))
+                    .background(HpColors.surface, RoundedCornerShape(12.dp)),
+                onToggle = {},
+                onTitleChange = {},
+                onDelete = {},
+                onOpenDetails = {}
+            )
+        }
+    }
+}
+
+@Composable
+private fun ReorderDropLine(
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(3.dp)
+            .background(Color(0xFF1A73E8))
+    )
 }
 
 @Composable
@@ -1213,7 +1369,8 @@ private fun PopupTextOption(
 internal fun BacklogUnsavedChoicePopup(
     onDiscard: () -> Unit,
     onSave: () -> Unit,
-    saveEnabled: Boolean
+    saveEnabled: Boolean,
+    saveLabel: String = "Save"
 ) {
     Box(
         modifier = Modifier.fillMaxSize(),
@@ -1239,7 +1396,7 @@ internal fun BacklogUnsavedChoicePopup(
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
-                    text = "Save",
+                    text = saveLabel,
                     modifier = if (saveEnabled) Modifier.clickable(onClick = onSave) else Modifier,
                     color = if (saveEnabled) HpColors.ink else HpColors.muted.copy(alpha = 0.45f),
                     fontFamily = FontFamily.Serif,
@@ -1385,6 +1542,7 @@ internal fun BacklogTaskEditPage(
     assignedDate: String,
     notes: String,
     projects: List<String>,
+    editing: Boolean,
     onTitleChange: (String) -> Unit,
     onProjectChange: (String) -> Unit,
     onAssignedDateChange: (String) -> Unit,
@@ -1434,31 +1592,26 @@ internal fun BacklogTaskEditPage(
     ) {
         HpList {
             item {
-                OutlinedTextField(
-                    modifier = Modifier.fillMaxWidth(),
+                BacklogDetailTextField(
                     value = title,
                     onValueChange = onTitleChange,
-                    placeholder = { Text("Title") },
+                    placeholder = "Title",
+                    editing = editing,
                     singleLine = true,
-                    shape = RoundedCornerShape(28.dp)
+                    readOnlyEmphasis = true
                 )
             }
             item {
                 BoxWithConstraints {
-                    OutlinedButton(
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = { projectMenuOpen = true },
-                        shape = RoundedCornerShape(28.dp)
-                    ) {
-                        Text(
-                            text = project.ifBlank { "No project" },
-                            modifier = Modifier.weight(1f),
-                            textAlign = TextAlign.Start
-                        )
-                        Icon(Icons.Outlined.KeyboardArrowDown, contentDescription = null)
-                    }
+                    BacklogDetailButtonLikeField(
+                        text = project.ifBlank { "No project" },
+                        editing = editing,
+                        icon = Icons.Outlined.KeyboardArrowDown,
+                        readOnlyMuted = true,
+                        onClick = { projectMenuOpen = true }
+                    )
                     DropdownMenu(
-                        expanded = projectMenuOpen,
+                        expanded = editing && projectMenuOpen,
                         onDismissRequest = { projectMenuOpen = false },
                         modifier = Modifier.width(maxWidth),
                         shape = RoundedCornerShape(28.dp),
@@ -1484,30 +1637,92 @@ internal fun BacklogTaskEditPage(
                 }
             }
             item {
-                OutlinedButton(
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = { showAssignedDatePicker = true },
-                    shape = RoundedCornerShape(28.dp)
-                ) {
-                    Text(
-                        text = assignedDate.ifBlank { "No date assigned" },
-                        modifier = Modifier.weight(1f),
-                        textAlign = TextAlign.Start
-                    )
-                    Icon(Icons.Outlined.CalendarMonth, contentDescription = null)
-                }
+                BacklogDetailButtonLikeField(
+                    text = "Date: ${assignedDate.ifBlank { "No date assigned" }}",
+                    editing = editing,
+                    icon = Icons.Outlined.CalendarMonth,
+                    readOnlyMuted = true,
+                    onClick = { showAssignedDatePicker = true }
+                )
             }
             item {
-                OutlinedTextField(
-                    modifier = Modifier.fillMaxWidth(),
+                BacklogDetailTextField(
                     value = notes,
                     onValueChange = onNotesChange,
-                    placeholder = { Text("Note") },
-                    minLines = 6,
-                    shape = RoundedCornerShape(28.dp)
+                    placeholder = "Note",
+                    editing = editing,
+                    minLines = 6
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun BacklogDetailTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    editing: Boolean,
+    singleLine: Boolean = false,
+    minLines: Int = 1,
+    readOnlyEmphasis: Boolean = false
+) {
+    OutlinedTextField(
+        modifier = Modifier.fillMaxWidth(),
+        value = value,
+        onValueChange = onValueChange,
+        enabled = editing,
+        placeholder = { Text(placeholder) },
+        singleLine = singleLine,
+        minLines = minLines,
+        shape = RoundedCornerShape(28.dp),
+        colors = OutlinedTextFieldDefaults.colors(
+            disabledTextColor = HpColors.ink,
+            disabledBorderColor = Color.Transparent,
+            disabledContainerColor = Color.Transparent,
+            disabledPlaceholderColor = HpColors.ink
+        ),
+        textStyle = if (readOnlyEmphasis) {
+            MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+        } else {
+            MaterialTheme.typography.bodyLarge
+        }
+    )
+}
+
+@Composable
+private fun BacklogDetailButtonLikeField(
+    text: String,
+    editing: Boolean,
+    icon: ImageVector,
+    readOnlyMuted: Boolean = false,
+    onClick: () -> Unit
+) {
+    OutlinedButton(
+        modifier = Modifier.fillMaxWidth(),
+        enabled = editing,
+        onClick = onClick,
+        shape = RoundedCornerShape(28.dp),
+        border = if (editing) ButtonDefaults.outlinedButtonBorder(enabled = true) else null,
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        colors = ButtonDefaults.outlinedButtonColors(
+            disabledContainerColor = Color.Transparent,
+            contentColor = if (readOnlyMuted) HpColors.muted else HpColors.ink,
+            disabledContentColor = if (readOnlyMuted) HpColors.muted else HpColors.ink
+        )
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.weight(1f),
+            textAlign = TextAlign.Start,
+            color = if (readOnlyMuted) HpColors.muted else Color.Unspecified
+        )
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = if (editing) HpColors.ink else Color.Transparent
+        )
     }
 }
 

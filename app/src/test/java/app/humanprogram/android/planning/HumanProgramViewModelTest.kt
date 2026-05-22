@@ -423,6 +423,88 @@ class HumanProgramViewModelTest {
     }
 
     @Test
+    fun assignedBacklogAppearsOnFutureTodayPageAfterPageAlreadyExists() {
+        val viewModel = HumanProgramViewModel()
+        val futureDate = LocalDate.now().plusDays(2)
+
+        viewModel.goToDate(futureDate)
+        viewModel.goToToday()
+        viewModel.updateNewBacklogTitle("Future paperwork")
+        viewModel.addBacklogItem()
+        val itemId = viewModel.backlogItems.first { it.title == "Future paperwork" }.id
+
+        viewModel.updateBacklogItemDetails(
+            itemId = itemId,
+            title = "Future paperwork",
+            notes = "",
+            project = "",
+            assignedDateInput = futureDate.toString()
+        )
+        viewModel.goToDate(futureDate)
+
+        assertTrue(viewModel.todayTasks.any { it.sourceType == DailyTaskSourceType.BACKLOG && it.sourceId == itemId })
+    }
+
+    @Test
+    fun assignedBacklogDoesNotChangeLockedPastTodayPage() {
+        val viewModel = HumanProgramViewModel()
+        val pastDate = LocalDate.now().minusDays(2)
+
+        viewModel.goToDate(pastDate)
+        val archivedTaskIds = viewModel.todayTasks.map { it.id }
+        viewModel.goToToday()
+        viewModel.updateNewBacklogTitle("Past paperwork")
+        viewModel.addBacklogItem()
+        val itemId = viewModel.backlogItems.first { it.title == "Past paperwork" }.id
+
+        viewModel.updateBacklogItemDetails(
+            itemId = itemId,
+            title = "Past paperwork",
+            notes = "",
+            project = "",
+            assignedDateInput = pastDate.toString()
+        )
+        viewModel.goToDate(pastDate)
+
+        assertEquals(archivedTaskIds, viewModel.todayTasks.map { it.id })
+        assertFalse(viewModel.todayTasks.any { it.sourceType == DailyTaskSourceType.BACKLOG && it.sourceId == itemId })
+    }
+
+    @Test
+    fun todayTasksUseDefaultSourceOrderAndManualTasksStayLast() {
+        val viewModel = HumanProgramViewModel()
+        val itemId = viewModel.backlogItems.first().id
+
+        viewModel.updateNewTaskTitle("Manual note")
+        viewModel.addManualTask()
+        viewModel.assignBacklogItemToToday(itemId)
+        viewModel.updateCalendarEvents(listOf(calendarEvent()))
+
+        assertEquals(
+            listOf(
+                DailyTaskSourceType.RECURRING,
+                DailyTaskSourceType.RECURRING,
+                DailyTaskSourceType.BACKLOG,
+                DailyTaskSourceType.CALENDAR,
+                DailyTaskSourceType.MANUAL
+            ),
+            viewModel.todayTasks.map { it.sourceType }
+        )
+    }
+
+    @Test
+    fun todayTasksCanBeManuallyReordered() {
+        val viewModel = HumanProgramViewModel()
+        viewModel.updateNewTaskTitle("Manual note")
+        viewModel.addManualTask()
+        val manualId = viewModel.todayTasks.last().id
+
+        viewModel.moveTodayTask(viewModel.todayTasks.lastIndex, 0)
+
+        assertEquals(manualId, viewModel.todayTasks.first().id)
+    }
+
+    @Test
     fun projectCompletionCanUndoAndRestoreAssignedTask() {
         val viewModel = HumanProgramViewModel()
         viewModel.updateNewBacklogTitle("Lab")

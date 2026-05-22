@@ -167,6 +167,7 @@ fun HumanProgramApp(
     var backlogEditProjectDraft by rememberSaveable { mutableStateOf("") }
     var backlogEditNotesDraft by rememberSaveable { mutableStateOf("") }
     var backlogEditAssignedDateDraft by rememberSaveable { mutableStateOf("") }
+    var backlogTaskEditing by rememberSaveable { mutableStateOf(false) }
     var backlogTaskFormReturnProject by rememberSaveable { mutableStateOf<String?>(null) }
     var taskDetailEditing by rememberSaveable { mutableStateOf(false) }
     var taskDetailTitleDraft by rememberSaveable { mutableStateOf("") }
@@ -195,6 +196,7 @@ fun HumanProgramApp(
     var projectTaskSelectMode by rememberSaveable { mutableStateOf(false) }
     var showProjectTitleDialog by rememberSaveable { mutableStateOf(false) }
     var showBacklogTaskUnsavedDialog by rememberSaveable { mutableStateOf(false) }
+    var showBacklogTaskEditUnsavedDialog by rememberSaveable { mutableStateOf(false) }
     var showRoutineSheet by rememberSaveable { mutableStateOf(false) }
     var showReminderSheet by rememberSaveable { mutableStateOf(false) }
     var showScheduleSheet by rememberSaveable { mutableStateOf(false) }
@@ -507,8 +509,28 @@ fun HumanProgramApp(
             backlogEditProjectDraft = item.projectBucket
             backlogEditNotesDraft = item.notes
             backlogEditAssignedDateDraft = item.assignedDate?.toString().orEmpty()
+            backlogTaskEditing = false
             route = HpRoute.BACKLOG_TASK_EDIT
             mode = HpMode.READ
+        }
+        fun selectedBacklogEditItem(): BacklogItem? {
+            return viewModel.activeBacklogItems.firstOrNull { it.id == selectedBacklogItemId }
+        }
+        fun hasBacklogTaskEditChanges(): Boolean {
+            val item = selectedBacklogEditItem() ?: return false
+            return backlogEditTitleDraft != item.title ||
+                backlogEditProjectDraft != item.projectBucket ||
+                backlogEditNotesDraft != item.notes ||
+                backlogEditAssignedDateDraft != item.assignedDate?.toString().orEmpty()
+        }
+        fun leaveBacklogTaskEdit() {
+            if (backlogTaskEditing && hasBacklogTaskEditChanges()) {
+                showBacklogTaskEditUnsavedDialog = true
+                return
+            }
+            selectedBacklogItemId = null
+            backlogTaskEditing = false
+            route = HpRoute.BACKLOG
         }
         fun saveBacklogTaskEdit() {
             val itemId = selectedBacklogItemId ?: return
@@ -519,14 +541,13 @@ fun HumanProgramApp(
                 project = backlogEditProjectDraft,
                 assignedDateInput = backlogEditAssignedDateDraft
             )
-            route = HpRoute.BACKLOG
+            backlogTaskEditing = false
         }
         BackHandler(enabled = route == HpRoute.BACKLOG_TASK_FORM) {
             leaveBacklogTaskForm()
         }
         BackHandler(enabled = route == HpRoute.BACKLOG_TASK_EDIT) {
-            selectedBacklogItemId = null
-            route = HpRoute.BACKLOG
+            leaveBacklogTaskEdit()
         }
         val goBack: () -> Unit = {
             when {
@@ -537,10 +558,7 @@ fun HumanProgramApp(
                 }
                 route == HpRoute.SETTINGS && settingsDetail != null -> settingsDetail = null
                 route == HpRoute.BACKLOG_TASK_FORM -> leaveBacklogTaskForm()
-                route == HpRoute.BACKLOG_TASK_EDIT -> {
-                    selectedBacklogItemId = null
-                    route = HpRoute.BACKLOG
-                }
+                route == HpRoute.BACKLOG_TASK_EDIT -> leaveBacklogTaskEdit()
                 route == HpRoute.TASK_DETAIL -> {
                     route = HpRoute.TODAY
                     selectedTaskId = null
@@ -725,12 +743,21 @@ fun HumanProgramApp(
                 null,
                 null,
                 null,
-                HpCommandAction(
-                    icon = Icons.Outlined.Check,
-                    contentDescription = "Save task",
-                    enabled = backlogEditTitleDraft.trim().isNotEmpty() && selectedBacklogItemId != null,
-                    onClick = { saveBacklogTaskEdit() }
-                )
+                if (backlogTaskEditing) {
+                    HpCommandAction(
+                        icon = Icons.Outlined.Check,
+                        contentDescription = "Save task",
+                        enabled = backlogEditTitleDraft.trim().isNotEmpty() && selectedBacklogItemId != null,
+                        onClick = { saveBacklogTaskEdit() }
+                    )
+                } else {
+                    HpCommandAction(
+                        icon = Icons.Outlined.Edit,
+                        contentDescription = "Edit task",
+                        enabled = selectedBacklogItemId != null,
+                        onClick = { backlogTaskEditing = true }
+                    )
+                }
             )
             HpRoute.CALENDAR -> listOf(
                 menuSlot,
@@ -917,6 +944,7 @@ fun HumanProgramApp(
                         assignedDate = backlogEditAssignedDateDraft,
                         notes = backlogEditNotesDraft,
                         projects = viewModel.projectBuckets.toList(),
+                        editing = backlogTaskEditing,
                         onTitleChange = { backlogEditTitleDraft = it },
                         onProjectChange = { backlogEditProjectDraft = it },
                         onAssignedDateChange = { backlogEditAssignedDateDraft = it.take(10) },
@@ -1249,6 +1277,21 @@ fun HumanProgramApp(
                         backlogTaskFormReturnProject = null
                     },
                     saveEnabled = viewModel.newBacklogTitle.trim().isNotEmpty()
+                )
+            }
+            if (showBacklogTaskEditUnsavedDialog) {
+                BacklogUnsavedChoicePopup(
+                    onDiscard = {
+                        showBacklogTaskEditUnsavedDialog = false
+                        selectedBacklogItemId = null
+                        backlogTaskEditing = false
+                        route = HpRoute.BACKLOG
+                    },
+                    onSave = {
+                        showBacklogTaskEditUnsavedDialog = false
+                    },
+                    saveEnabled = true,
+                    saveLabel = "Cancel"
                 )
             }
         }

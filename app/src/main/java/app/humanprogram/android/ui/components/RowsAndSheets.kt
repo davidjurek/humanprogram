@@ -152,13 +152,14 @@ internal fun TaskRow(
     task: DailyTask,
     mode: HpMode,
     enabled: Boolean,
+    modifier: Modifier = Modifier,
     onToggle: () -> Unit,
     onTitleChange: (String) -> Unit,
     onDelete: () -> Unit,
     onOpenDetails: () -> Unit
 ) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .clickable(enabled = mode == HpMode.READ, onClick = onOpenDetails)

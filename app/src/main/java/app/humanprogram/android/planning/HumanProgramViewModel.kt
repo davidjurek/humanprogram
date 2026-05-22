@@ -610,6 +610,19 @@ class HumanProgramViewModel(
         saveSnapshot()
     }
 
+    fun moveTodayTask(
+        fromIndex: Int,
+        toIndex: Int
+    ) {
+        if (!canEditSelectedDate) return
+        if (fromIndex == toIndex) return
+        if (fromIndex !in todayTasks.indices || toIndex !in todayTasks.indices) return
+
+        val task = todayTasks.removeAt(fromIndex)
+        todayTasks.add(toIndex, task)
+        saveSnapshot()
+    }
+
     fun toggleTask(taskId: String) {
         if (!canEditSelectedDate) return
         val index = todayTasks.indexOfFirst { it.id == taskId }
@@ -701,6 +714,7 @@ class HumanProgramViewModel(
             assignedDate = parseDateInput(newBacklogAssignedDate)
         )
         backlogItems.add(item)
+        refreshSelectedGeneratedTasks()
         recordEdit(
             PlannerEdit.AddBacklogItem(
                 item = item,
@@ -853,6 +867,7 @@ class HumanProgramViewModel(
 
         backlogItems[index] = updated
         syncBacklogTaskTitle(updated.id, updated.title)
+        refreshSelectedGeneratedTasks()
         recordEdit(
             PlannerEdit.RenameBacklogItem(
                 index = index,
@@ -901,7 +916,7 @@ class HumanProgramViewModel(
             sourceId = item.id
         )
         backlogItems[index] = updatedItem
-        todayTasks.add(task)
+        insertTaskInDefaultOrder(todayTasks, task)
         recordEdit(
             PlannerEdit.AssignBacklogToday(
                 backlogIndex = index,
@@ -1136,6 +1151,7 @@ class HumanProgramViewModel(
         val preview = backlogCsvImporter.preview(backlogCsvInput)
         if (preview.accepted.isNotEmpty()) {
             backlogItems.addAll(preview.accepted)
+            refreshSelectedGeneratedTasks()
             saveSnapshot()
         }
 
@@ -1401,10 +1417,11 @@ class HumanProgramViewModel(
 
         todayTasks.removeAll { it.sourceType == DailyTaskSourceType.CALENDAR }
         calendarMergeService.merge(
-            events = refreshedEvents,
+            events = refreshedEvents.filter { it.date == selectedDate },
             localStates = calendarLocalStates.filter { it.date == selectedDate }
         ).forEach { event ->
-            todayTasks.add(
+            insertTaskInDefaultOrder(
+                todayTasks,
                 DailyTask(
                     title = event.title.ifBlank { "Untitled calendar event" },
                     sourceType = DailyTaskSourceType.CALENDAR,
@@ -1787,7 +1804,8 @@ class HumanProgramViewModel(
                 val insertAt = edit.index.coerceIn(0, backlogItems.size)
                 backlogItems.add(insertAt, edit.item)
                 if (edit.item.assignedDate == today && todayTasks.none { it.sourceId == edit.item.id }) {
-                    todayTasks.add(
+                    insertTaskInDefaultOrder(
+                        todayTasks,
                         DailyTask(
                             title = edit.item.title,
                             sourceType = DailyTaskSourceType.BACKLOG,
@@ -1879,7 +1897,7 @@ class HumanProgramViewModel(
                     backlogItems.add(edit.backlogIndex.coerceIn(0, backlogItems.size), edit.updatedItem)
                 }
                 if (todayTasks.none { it.id == edit.task.id }) {
-                    todayTasks.add(edit.task)
+                    insertTaskInDefaultOrder(todayTasks, edit.task)
                 }
             }
             is PlannerEdit.DeleteBacklogItem -> {
@@ -2137,17 +2155,74 @@ class HumanProgramViewModel(
     }
 
     private fun loadSelectedPage() {
-        val pageTasks = dailyTaskPages[selectedDate]
-            ?: dailyPageGenerator.generate(
+        val pageTasks = dailyTaskPages[selectedDate]?.let { tasks ->
+            if (selectedDate.isBefore(today)) {
+                tasks
+            } else {
+                reconcileGeneratedTasks(selectedDate, tasks)
+            }
+        } ?: dailyPageGenerator.generate(
                 date = selectedDate,
                 recurringTemplates = recurringTemplates,
-                backlogItems = backlogItems
+                backlogItems = if (selectedDate.isBefore(today)) emptyList() else backlogItems
             ).tasks.also { generatedTasks ->
                 dailyTaskPages[selectedDate] = generatedTasks
             }
 
         todayTasks.clear()
         todayTasks.addAll(pageTasks)
+    }
+
+    private fun refreshSelectedGeneratedTasks() {
+        if (selectedDate.isBefore(today)) return
+
+        val reconciled = reconcileGeneratedTasks(selectedDate, todayTasks)
+        todayTasks.replaceWith(reconciled)
+    }
+
+    private fun reconcileGeneratedTasks(
+        date: LocalDate,
+        currentTasks: List<DailyTask>
+    ): List<DailyTask> {
+        val generatedTasks = dailyPageGenerator.generate(
+            date = date,
+            recurringTemplates = recurringTemplates,
+            backlogItems = backlogItems
+        ).tasks
+        val generatedKeys = generatedTasks.map { it.generatedSourceKey() }.toSet()
+        val generatedByKey = generatedTasks.associateBy { it.generatedSourceKey() }
+        val mergedTasks = currentTasks
+            .filterNot { task ->
+                task.sourceType in generatedTodaySourceTypes &&
+                    task.generatedSourceKey() !in generatedKeys
+            }
+            .map { task ->
+                generatedByKey[task.generatedSourceKey()]?.let { generated ->
+                    task.copy(title = generated.title)
+                } ?: task
+            }
+            .toMutableList()
+
+        generatedTasks.forEach { generated ->
+            if (mergedTasks.none { it.generatedSourceKey() == generated.generatedSourceKey() }) {
+                insertTaskInDefaultOrder(mergedTasks, generated)
+            }
+        }
+
+        return mergedTasks
+    }
+
+    private fun insertTaskInDefaultOrder(
+        tasks: MutableList<DailyTask>,
+        task: DailyTask
+    ) {
+        val priority = task.defaultSortPriority()
+        val insertIndex = tasks.indexOfFirst { it.defaultSortPriority() > priority }
+        if (insertIndex == -1) {
+            tasks.add(task)
+        } else {
+            tasks.add(insertIndex, task)
+        }
     }
 
     private fun updateCalendarLocalState(
@@ -2420,6 +2495,24 @@ private val PlannerEdit.redoMessage: String
         is PlannerEdit.AssignBacklogToday -> "Redo assigning backlog item"
         else -> "Redo change"
     }
+
+private val generatedTodaySourceTypes = setOf(
+    DailyTaskSourceType.RECURRING,
+    DailyTaskSourceType.BACKLOG
+)
+
+private fun DailyTask.generatedSourceKey(): String {
+    return "${sourceType.name}:${sourceId ?: title}"
+}
+
+private fun DailyTask.defaultSortPriority(): Int {
+    return when (sourceType) {
+        DailyTaskSourceType.RECURRING -> 0
+        DailyTaskSourceType.BACKLOG -> 1
+        DailyTaskSourceType.CALENDAR -> 2
+        DailyTaskSourceType.MANUAL -> 3
+    }
+}
 
 class HumanProgramViewModelFactory(
     private val snapshotStore: PlannerSnapshotStore
