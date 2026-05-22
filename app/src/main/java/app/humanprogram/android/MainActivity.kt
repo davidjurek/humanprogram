@@ -47,6 +47,8 @@ class MainActivity : ComponentActivity() {
     private val biometricExecutor: Executor by lazy { mainExecutor }
     private var biometricCancellationSignal: CancellationSignal? = null
     private var appearancePreference by mutableStateOf("system")
+    private var backlogViewPreference by mutableStateOf("tasks")
+    private var backlogSortPreference by mutableStateOf("creation")
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -139,6 +141,8 @@ class MainActivity : ComponentActivity() {
                 HumanProgramApp(
                     viewModel = plannerViewModel,
                     appearance = appearancePreference,
+                    backlogViewPreference = backlogViewPreference,
+                    backlogSortPreference = backlogSortPreference,
                     notificationPermissionGranted = hasNotificationPermission(),
                     calendarPermissionGranted = hasCalendarPermission(),
                     onRequestNotificationPermission = ::requestNotificationPermission,
@@ -221,6 +225,24 @@ class MainActivity : ComponentActivity() {
                             appPreferencesRepository.setString(
                                 AppPreferencesRepository.Keys.Appearance,
                                 appearance
+                            )
+                        }
+                    },
+                    onBacklogViewPreferenceChanged = { view ->
+                        backlogViewPreference = view
+                        lifecycleScope.launch {
+                            appPreferencesRepository.setString(
+                                AppPreferencesRepository.Keys.BacklogView,
+                                view
+                            )
+                        }
+                    },
+                    onBacklogSortPreferenceChanged = { sort ->
+                        backlogSortPreference = sort
+                        lifecycleScope.launch {
+                            appPreferencesRepository.setString(
+                                AppPreferencesRepository.Keys.BacklogSort,
+                                sort
                             )
                         }
                     },
@@ -329,6 +351,8 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             appPreferencesRepository.preferences.collect { preferences ->
                 appearancePreference = preferences.appearance
+                backlogViewPreference = preferences.backlogView
+                backlogSortPreference = preferences.backlogSort
                 plannerViewModel.loadStoredAppLockPin(
                     enabled = preferences.appLockEnabled,
                     biometricEnabled = preferences.biometricUnlockEnabled,

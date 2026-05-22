@@ -12,8 +12,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -29,6 +31,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -163,9 +166,10 @@ internal fun HpAppFrame(
                 .windowInsetsPadding(WindowInsets.safeDrawing)
         }
 
-        Column(
-            modifier = frameModifier
-        ) {
+        Box(modifier = frameModifier) {
+            Column(
+                modifier = Modifier.fillMaxSize()
+            ) {
             if (route != HpRoute.PROGRAM && route != HpRoute.HIDDEN_GATE) {
                 HpCommandCapsule(
                     slots = routeActions,
@@ -177,34 +181,6 @@ internal fun HpAppFrame(
                     onUndo = onUndo,
                     onRedo = onRedo
                 )
-                AnimatedVisibility(
-                    visible = undoRedoMessage != null,
-                    enter = fadeIn(animationSpec = tween(durationMillis = 120)),
-                    exit = fadeOut(animationSpec = tween(durationMillis = 120))
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 18.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(999.dp))
-                                .background(HpColors.glass)
-                                .border(1.dp, HpColors.glassBorder.copy(alpha = 0.72f), RoundedCornerShape(999.dp))
-                                .padding(horizontal = 16.dp, vertical = 8.dp)
-                                .align(Alignment.Center),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = undoRedoMessage.orEmpty(),
-                                color = HpColors.ink,
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-                }
             }
             Box(
                 modifier = Modifier
@@ -213,6 +189,33 @@ internal fun HpAppFrame(
                     .then(if (route == HpRoute.PROGRAM) Modifier else Modifier.navigationBarsPadding())
             ) {
                 content()
+            }
+            }
+            if (route != HpRoute.PROGRAM && route != HpRoute.HIDDEN_GATE) {
+                AnimatedVisibility(
+                    visible = undoRedoMessage != null,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 70.dp),
+                    enter = fadeIn(animationSpec = tween(durationMillis = 120)),
+                    exit = fadeOut(animationSpec = tween(durationMillis = 120))
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(HpColors.glass)
+                            .border(1.dp, HpColors.glassBorder.copy(alpha = 0.72f), RoundedCornerShape(999.dp))
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = undoRedoMessage.orEmpty(),
+                            color = HpColors.ink,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
             }
         }
     }
@@ -310,6 +313,59 @@ private fun HpCapsuleDivider() {
             .height(26.dp)
             .background(HpColors.divider)
     )
+}
+
+internal enum class HpCapsuleMenuAnchor {
+    SeparatorStart,
+    ContentStart
+}
+
+@Composable
+internal fun HpCapsuleAnchoredMenu(
+    slotIndex: Int,
+    anchor: HpCapsuleMenuAnchor = HpCapsuleMenuAnchor.SeparatorStart,
+    minWidth: Dp = 108.dp,
+    maxWidth: Dp = 300.dp,
+    topPadding: Dp = 4.dp,
+    onDismiss: () -> Unit,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .clickable(onClick = onDismiss)
+    ) {
+        val capsuleHorizontalPadding = 18.dp
+        val dividerWidth = 1.dp
+        val slotCount = 6
+        val dividerCount = slotCount - 1
+        val iconTouchTargetWidth = 48.dp
+        val slotWidth = (this.maxWidth - (capsuleHorizontalPadding * 2) - (dividerWidth * dividerCount)) / slotCount
+        val separatorStart = capsuleHorizontalPadding +
+            (slotWidth * slotIndex) +
+            (dividerWidth * (slotIndex - 1).coerceAtLeast(0))
+        val contentStart = separatorStart + dividerWidth + ((slotWidth - iconTouchTargetWidth) / 2)
+        val menuStart = when (anchor) {
+            HpCapsuleMenuAnchor.SeparatorStart -> separatorStart
+            HpCapsuleMenuAnchor.ContentStart -> contentStart
+        }
+        Surface(
+            modifier = Modifier
+                .padding(start = menuStart, top = topPadding)
+                .width(IntrinsicSize.Min)
+                .widthIn(min = minWidth, max = maxWidth)
+                .clickable(onClick = {}),
+            shape = RoundedCornerShape(20.dp),
+            color = HpColors.surface,
+            tonalElevation = 6.dp,
+            shadowElevation = 8.dp
+        ) {
+            Column(
+                modifier = Modifier.padding(vertical = 4.dp),
+                content = content
+            )
+        }
+    }
 }
 
 internal data class HpCommandAction(

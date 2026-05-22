@@ -26,7 +26,9 @@ data class AppPreferences(
     val appLockPinSaltBase64: String = "",
     val appLockPinHashBase64: String = "",
     val recoveryPhraseSaltBase64: String = "",
-    val recoveryPhraseHashBase64: String = ""
+    val recoveryPhraseHashBase64: String = "",
+    val backlogView: String = "tasks",
+    val backlogSort: String = "creation"
 )
 
 class AppPreferencesRepository(
@@ -48,7 +50,9 @@ class AppPreferencesRepository(
             appLockPinSaltBase64 = prefs[Keys.AppLockPinSaltBase64].orEmpty(),
             appLockPinHashBase64 = prefs[Keys.AppLockPinHashBase64].orEmpty(),
             recoveryPhraseSaltBase64 = prefs[Keys.RecoveryPhraseSaltBase64].orEmpty(),
-            recoveryPhraseHashBase64 = prefs[Keys.RecoveryPhraseHashBase64].orEmpty()
+            recoveryPhraseHashBase64 = prefs[Keys.RecoveryPhraseHashBase64].orEmpty(),
+            backlogView = prefs[Keys.BacklogView] ?: "tasks",
+            backlogSort = prefs[Keys.BacklogSort] ?: "creation"
         )
     }
 
@@ -80,5 +84,7 @@ class AppPreferencesRepository(
         val AppLockPinHashBase64 = stringPreferencesKey("app_lock_pin_hash_base64")
         val RecoveryPhraseSaltBase64 = stringPreferencesKey("recovery_phrase_salt_base64")
         val RecoveryPhraseHashBase64 = stringPreferencesKey("recovery_phrase_hash_base64")
+        val BacklogView = stringPreferencesKey("backlog_view")
+        val BacklogSort = stringPreferencesKey("backlog_sort")
     }
 }

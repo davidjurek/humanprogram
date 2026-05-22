@@ -346,6 +346,7 @@ class HumanProgramViewModel(
     val activeBacklogByProject: Map<String, List<BacklogItem>>
         get() {
             val grouped = activeBacklogItems.groupBy { it.projectBucket.ifBlank { "Unorganized" } }.toMutableMap()
+            grouped.putIfAbsent("Unorganized", emptyList())
             projectBuckets.forEach { project ->
                 grouped.putIfAbsent(project, emptyList())
             }
@@ -2387,28 +2388,37 @@ private val PlannerEdit.isUserUndoable: Boolean
         is PlannerEdit.ToggleTodayTask,
         is PlannerEdit.AddBacklogItem,
         is PlannerEdit.AddProjectBucket,
+        is PlannerEdit.DeleteBacklogItem,
+        is PlannerEdit.RenameBacklogItem,
+        is PlannerEdit.ReplaceBacklogItems,
         is PlannerEdit.AssignBacklogToday -> true
         else -> false
     }
 
 private val PlannerEdit.undoMessage: String
     get() = when (this) {
-        is PlannerEdit.AddTodayTask -> "Undid adding task"
-        is PlannerEdit.ToggleTodayTask -> if (updated.completed) "Undid checking task" else "Undid unchecking task"
-        is PlannerEdit.AddBacklogItem -> "Undid creating backlog item"
-        is PlannerEdit.AddProjectBucket -> "Undid creating project"
-        is PlannerEdit.AssignBacklogToday -> "Undid assigning backlog item"
-        else -> "Undid change"
+        is PlannerEdit.AddTodayTask -> "Undo adding task"
+        is PlannerEdit.ToggleTodayTask -> if (updated.completed) "Undo checking task" else "Undo unchecking task"
+        is PlannerEdit.AddBacklogItem -> "Undo creating backlog item"
+        is PlannerEdit.AddProjectBucket -> "Undo creating project"
+        is PlannerEdit.DeleteBacklogItem -> "Undo deleting backlog item"
+        is PlannerEdit.RenameBacklogItem -> "Undo editing backlog item"
+        is PlannerEdit.ReplaceBacklogItems -> "Undo changing backlog"
+        is PlannerEdit.AssignBacklogToday -> "Undo assigning backlog item"
+        else -> "Undo change"
     }
 
 private val PlannerEdit.redoMessage: String
     get() = when (this) {
-        is PlannerEdit.AddTodayTask -> "Redid adding task"
-        is PlannerEdit.ToggleTodayTask -> if (updated.completed) "Redid checking task" else "Redid unchecking task"
-        is PlannerEdit.AddBacklogItem -> "Redid creating backlog item"
-        is PlannerEdit.AddProjectBucket -> "Redid creating project"
-        is PlannerEdit.AssignBacklogToday -> "Redid assigning backlog item"
-        else -> "Redid change"
+        is PlannerEdit.AddTodayTask -> "Redo adding task"
+        is PlannerEdit.ToggleTodayTask -> if (updated.completed) "Redo checking task" else "Redo unchecking task"
+        is PlannerEdit.AddBacklogItem -> "Redo creating backlog item"
+        is PlannerEdit.AddProjectBucket -> "Redo creating project"
+        is PlannerEdit.DeleteBacklogItem -> "Redo deleting backlog item"
+        is PlannerEdit.RenameBacklogItem -> "Redo editing backlog item"
+        is PlannerEdit.ReplaceBacklogItems -> "Redo changing backlog"
+        is PlannerEdit.AssignBacklogToday -> "Redo assigning backlog item"
+        else -> "Redo change"
     }
 
 class HumanProgramViewModelFactory(

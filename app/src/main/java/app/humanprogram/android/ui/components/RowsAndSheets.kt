@@ -5,9 +5,12 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -69,6 +72,7 @@ import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.RestartAlt
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.AlertDialog
@@ -104,6 +108,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -183,22 +188,45 @@ internal fun TaskRow(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun BacklogTaskRow(
     item: BacklogItem,
     mode: HpMode,
+    selected: Boolean,
+    selectMode: Boolean,
     onTitleChange: (String) -> Unit,
     onSaveDetails: (String, String, String, String) -> Unit,
-    onAssignToday: () -> Unit,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
     onDelete: () -> Unit
 ) {
     var titleDraft by rememberSaveable(item.id) { mutableStateOf(item.title) }
     var notesDraft by rememberSaveable(item.id) { mutableStateOf(item.notes) }
     var projectDraft by rememberSaveable(item.id) { mutableStateOf(item.projectBucket) }
     var assignedDateDraft by rememberSaveable(item.id) { mutableStateOf(item.assignedDate?.toString().orEmpty()) }
-    HpSoftPanel(contentPadding = 12.dp) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Icon(Icons.AutoMirrored.Outlined.FormatListBulleted, contentDescription = null, tint = HpColors.muted)
+    val interactionSource = remember { MutableInteractionSource() }
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .combinedClickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = onClick,
+                    onLongClick = onLongClick
+                )
+                .padding(horizontal = 0.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            if (selectMode) {
+                Icon(
+                    if (selected) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
+                    contentDescription = null,
+                    tint = if (selected) HpColors.accent else HpColors.muted
+                )
+            }
             if (mode == HpMode.EDIT) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(modifier = Modifier.fillMaxWidth(), value = titleDraft, onValueChange = { titleDraft = it }, singleLine = true, label = { Text("Title") })
@@ -216,19 +244,38 @@ internal fun BacklogTaskRow(
                     }
                 }
             } else {
-                Column(Modifier.weight(1f)) {
-                    Text(item.title, color = HpColors.ink, fontWeight = FontWeight.Medium)
+                Column(
+                    Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        item.title,
+                        color = HpColors.ink,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                     val dateText = item.assignedDate?.let { " / $it" }.orEmpty()
-                    Text(item.projectBucket.ifBlank { "Unorganized" } + dateText, color = HpColors.muted, style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        item.projectBucket.ifBlank { "Unorganized" } + dateText,
+                        color = HpColors.muted,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                     if (item.notes.isNotBlank()) {
-                        Text(item.notes, color = HpColors.muted, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            item.notes,
+                            color = HpColors.muted,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
-                }
-                if (item.status == BacklogStatus.BACKLOG && item.assignedDate == null) {
-                    HpSecondaryButton("Add to Today", onAssignToday)
                 }
             }
         }
+        HorizontalDivider(color = HpColors.divider)
     }
 }
 
@@ -379,34 +426,6 @@ internal fun TaskFormSheet(
     HpSheet(title = "Add Task", onDismiss = onDismiss) {
         HpFormTextField("Task", viewModel.newTaskTitle, viewModel::updateNewTaskTitle)
         HpPrimaryButton("Create Task", onSave)
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-internal fun BacklogFormSheet(
-    viewModel: HumanProgramViewModel,
-    onDismiss: () -> Unit,
-    onCreateItem: () -> Unit,
-    onCreateProject: () -> Unit
-) {
-    var kind by rememberSaveable { mutableStateOf<String?>(null) }
-    HpSheet(title = "Add Backlog", onDismiss = onDismiss) {
-        if (kind == null) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                HpSecondaryButton("Backlog Item") { kind = "item" }
-                HpSecondaryButton("Project") { kind = "project" }
-            }
-        } else if (kind == "item") {
-            HpFormTextField("Task", viewModel.newBacklogTitle, viewModel::updateNewBacklogTitle)
-            HpFormTextField("Project", viewModel.newBacklogProject, viewModel::updateNewBacklogProject)
-            HpFormTextField("Notes", viewModel.newBacklogNotes, viewModel::updateNewBacklogNotes)
-            HpFormTextField("Assigned date", viewModel.newBacklogAssignedDate, viewModel::updateNewBacklogAssignedDate, placeholder = "YYYY-MM-DD")
-            HpPrimaryButton("Create Item", onCreateItem)
-        } else {
-            HpFormTextField("Project", viewModel.newBacklogProject, viewModel::updateNewBacklogProject)
-            HpPrimaryButton("Create Project", onCreateProject)
-        }
     }
 }
 

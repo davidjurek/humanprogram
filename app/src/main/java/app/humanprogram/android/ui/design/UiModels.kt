@@ -199,6 +199,8 @@ internal enum class HpRoute {
     IMPORT_EXPORT,
     SEARCH,
     SETTINGS,
+    BACKLOG_TASK_FORM,
+    BACKLOG_TASK_EDIT,
     TASK_DETAIL,
     HIDDEN_GATE
 }

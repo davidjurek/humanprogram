@@ -1,5 +1,6 @@
 package app.humanprogram.android.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -37,6 +38,7 @@ import androidx.compose.material.icons.automirrored.outlined.FormatListBulleted
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.Redo
 import androidx.compose.material.icons.automirrored.outlined.ShowChart
+import androidx.compose.material.icons.automirrored.outlined.Sort
 import androidx.compose.material.icons.automirrored.outlined.Undo
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Apps
@@ -65,6 +67,7 @@ import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -133,6 +136,8 @@ import java.time.ZoneOffset
 fun HumanProgramApp(
     viewModel: HumanProgramViewModel = viewModel(),
     appearance: String = "system",
+    backlogViewPreference: String = "tasks",
+    backlogSortPreference: String = "creation",
     notificationPermissionGranted: Boolean = false,
     calendarPermissionGranted: Boolean = false,
     onRequestNotificationPermission: () -> Unit = {},
@@ -150,11 +155,19 @@ fun HumanProgramApp(
     onAppLockTimeoutChanged: (Int) -> Unit = {},
     onBiometricUnlockChanged: (Boolean) -> Unit = {},
     onAppearanceChanged: (String) -> Unit = {},
+    onBacklogViewPreferenceChanged: (String) -> Unit = {},
+    onBacklogSortPreferenceChanged: (String) -> Unit = {},
     onRequestBiometricUnlock: () -> Unit = {}
 ) {
     var route by rememberSaveable { mutableStateOf(HpRoute.TODAY) }
     var selectedProject by rememberSaveable { mutableStateOf("") }
     var selectedTaskId by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedBacklogItemId by rememberSaveable { mutableStateOf<String?>(null) }
+    var backlogEditTitleDraft by rememberSaveable { mutableStateOf("") }
+    var backlogEditProjectDraft by rememberSaveable { mutableStateOf("") }
+    var backlogEditNotesDraft by rememberSaveable { mutableStateOf("") }
+    var backlogEditAssignedDateDraft by rememberSaveable { mutableStateOf("") }
+    var backlogTaskFormReturnProject by rememberSaveable { mutableStateOf<String?>(null) }
     var taskDetailEditing by rememberSaveable { mutableStateOf(false) }
     var taskDetailTitleDraft by rememberSaveable { mutableStateOf("") }
     var taskDetailNotesDraft by rememberSaveable { mutableStateOf("") }
@@ -163,20 +176,59 @@ fun HumanProgramApp(
     var undoRedoMode by rememberSaveable { mutableStateOf(false) }
     var undoRedoMessage by rememberSaveable { mutableStateOf<String?>(null) }
     var showTaskSheet by rememberSaveable { mutableStateOf(false) }
-    var showBacklogSheet by rememberSaveable { mutableStateOf(false) }
+    var showBacklogAddPopup by rememberSaveable { mutableStateOf(false) }
+    var showBacklogViewPopup by rememberSaveable { mutableStateOf(false) }
+    var showBacklogSortPopup by rememberSaveable { mutableStateOf(false) }
+    var showBacklogBulkMenu by rememberSaveable { mutableStateOf(false) }
+    var showBacklogProjectAssignPopup by rememberSaveable { mutableStateOf(false) }
+    var showBacklogBulkDatePicker by rememberSaveable { mutableStateOf(false) }
+    var showProjectRenamePopup by rememberSaveable { mutableStateOf(false) }
+    var showProjectDeleteChoicePopup by rememberSaveable { mutableStateOf(false) }
+    var showProjectMoveDestinationPopup by rememberSaveable { mutableStateOf(false) }
+    var showProjectTaskAssignPopup by rememberSaveable { mutableStateOf(false) }
+    var deleteProjectsAfterMove by rememberSaveable { mutableStateOf(false) }
+    var selectedBacklogTaskIds by rememberSaveable { mutableStateOf(setOf<String>()) }
+    var selectedBacklogProjects by rememberSaveable { mutableStateOf(setOf<String>()) }
+    var selectedProjectTaskIds by rememberSaveable { mutableStateOf(setOf<String>()) }
+    var backlogTaskSelectMode by rememberSaveable { mutableStateOf(false) }
+    var backlogProjectSelectMode by rememberSaveable { mutableStateOf(false) }
+    var projectTaskSelectMode by rememberSaveable { mutableStateOf(false) }
+    var showProjectTitleDialog by rememberSaveable { mutableStateOf(false) }
+    var showBacklogTaskUnsavedDialog by rememberSaveable { mutableStateOf(false) }
     var showRoutineSheet by rememberSaveable { mutableStateOf(false) }
     var showReminderSheet by rememberSaveable { mutableStateOf(false) }
     var showScheduleSheet by rememberSaveable { mutableStateOf(false) }
     var showExerciseSheet by rememberSaveable { mutableStateOf(false) }
     var showDatePicker by rememberSaveable { mutableStateOf(false) }
-    var backlogView by rememberSaveable { mutableStateOf(BacklogView.PROJECTS) }
+    var backlogView by rememberSaveable { mutableStateOf(BacklogView.TASKS) }
     var backlogSort by rememberSaveable { mutableStateOf(BacklogSort.DEFAULT) }
     var backlogSearchOpen by rememberSaveable { mutableStateOf(false) }
     var calendarMode by rememberSaveable { mutableStateOf(CalendarMode.MONTH) }
+    val taskSelectMode = backlogTaskSelectMode
+    val projectSelectMode = backlogProjectSelectMode
+
+    LaunchedEffect(backlogViewPreference) {
+        backlogView = if (backlogViewPreference == "projects") BacklogView.PROJECTS else BacklogView.TASKS
+    }
+
+    LaunchedEffect(backlogSortPreference) {
+        backlogSort = when (backlogSortPreference) {
+            "alphabetical" -> BacklogSort.TITLE_ASC
+            "alphabetical_desc" -> BacklogSort.TITLE_DESC
+            "assigned" -> BacklogSort.DATE_ASC
+            else -> BacklogSort.DEFAULT
+        }
+    }
 
     LaunchedEffect(route, settingsDetail, selectedProject) {
         undoRedoMode = false
         undoRedoMessage = null
+        showBacklogBulkMenu = false
+        showBacklogProjectAssignPopup = false
+        showProjectRenamePopup = false
+        showProjectDeleteChoicePopup = false
+        showProjectMoveDestinationPopup = false
+        showProjectTaskAssignPopup = false
     }
 
     LaunchedEffect(undoRedoMessage) {
@@ -233,6 +285,44 @@ fun HumanProgramApp(
         )
     }
 
+        if (showBacklogBulkDatePicker) {
+            val pickerState = rememberDatePickerState()
+            DatePickerDialog(
+                onDismissRequest = { showBacklogBulkDatePicker = false },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val millis = pickerState.selectedDateMillis
+                            if (millis != null) {
+                                val date = Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate().toString()
+                                selectedBacklogTaskIds.forEach { id ->
+                                    viewModel.activeBacklogItems.firstOrNull { it.id == id }?.let { item ->
+                                        viewModel.updateBacklogItemDetails(
+                                            itemId = id,
+                                            title = item.title,
+                                            notes = item.notes,
+                                            project = item.projectBucket,
+                                            assignedDateInput = date
+                                        )
+                                    }
+                                }
+                            }
+                            showBacklogBulkDatePicker = false
+                        }
+                    ) {
+                        Text("Save")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showBacklogBulkDatePicker = false }) {
+                        Text("Cancel")
+                    }
+                }
+            ) {
+                DatePicker(state = pickerState)
+            }
+        }
+
         if (showTaskSheet) {
         TaskFormSheet(
             viewModel = viewModel,
@@ -244,30 +334,41 @@ fun HumanProgramApp(
         )
     }
 
-        if (showBacklogSheet) {
-        BacklogFormSheet(
-            viewModel = viewModel,
-            onDismiss = { showBacklogSheet = false },
-            onCreateItem = {
-                val project = viewModel.newBacklogProject.trim()
-                viewModel.addBacklogItem()
-                if (project.isNotEmpty()) {
-                    backlogView = BacklogView.PROJECTS
-                    selectedProject = project
+        if (showProjectTitleDialog) {
+            AlertDialog(
+                onDismissRequest = { showProjectTitleDialog = false },
+                title = { Text("Enter project title") },
+                text = {
+                    HpFormTextField("Title", viewModel.newBacklogProject, viewModel::updateNewBacklogProject)
+                },
+                confirmButton = {
+                    TextButton(
+                        enabled = viewModel.newBacklogProject.trim().isNotEmpty(),
+                        onClick = {
+                            val project = viewModel.newBacklogProject.trim()
+                            viewModel.addProjectBucket()
+                            if (project.isNotEmpty()) {
+                                backlogView = BacklogView.PROJECTS
+                                selectedProject = project
+                            }
+                            showProjectTitleDialog = false
+                        }
+                    ) {
+                        Text("Save")
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            viewModel.updateNewBacklogProject("")
+                            showProjectTitleDialog = false
+                        }
+                    ) {
+                        Text("Discard")
+                    }
                 }
-                showBacklogSheet = false
-            },
-            onCreateProject = {
-                val project = viewModel.newBacklogProject.trim()
-                viewModel.addProjectBucket()
-                if (project.isNotEmpty()) {
-                    backlogView = BacklogView.PROJECTS
-                    selectedProject = project
-                }
-                showBacklogSheet = false
-            }
-        )
-    }
+            )
+        }
 
         if (showRoutineSheet) {
         SingleFieldSheet(
@@ -333,6 +434,8 @@ fun HumanProgramApp(
         HpRoute.IMPORT_EXPORT -> "Import / Export"
         HpRoute.SEARCH -> "Search"
         HpRoute.SETTINGS -> settingsDetail?.label ?: "Settings"
+        HpRoute.BACKLOG_TASK_FORM -> ""
+        HpRoute.BACKLOG_TASK_EDIT -> ""
         HpRoute.TASK_DETAIL -> ""
         HpRoute.HIDDEN_GATE -> ""
     }
@@ -348,10 +451,9 @@ fun HumanProgramApp(
         val addAction: (() -> Unit)? = when (route) {
             HpRoute.TODAY -> null
             HpRoute.PROGRAM -> null
-            HpRoute.BACKLOG -> ({ showBacklogSheet = true })
+            HpRoute.BACKLOG -> ({ showBacklogAddPopup = true })
             HpRoute.PROJECT -> ({
-                viewModel.updateNewBacklogProject(selectedProject.takeUnless { it == "Unorganized" }.orEmpty())
-                showBacklogSheet = true
+                showBacklogAddPopup = true
             })
             HpRoute.ROUTINES -> ({ showRoutineSheet = true })
             HpRoute.REMINDERS -> ({ showReminderSheet = true })
@@ -379,10 +481,66 @@ fun HumanProgramApp(
             else -> null
         }
         val openProgram: () -> Unit = { route = HpRoute.PROGRAM }
+        fun openBacklogTaskForm(project: String = "", returnProject: String? = null) {
+            viewModel.updateNewBacklogTitle("")
+            viewModel.updateNewBacklogProject(project)
+            viewModel.updateNewBacklogNotes("")
+            viewModel.updateNewBacklogAssignedDate("")
+            backlogTaskFormReturnProject = returnProject ?: project.ifBlank { null }
+            showBacklogAddPopup = false
+            route = HpRoute.BACKLOG_TASK_FORM
+            mode = HpMode.READ
+        }
+        fun leaveBacklogTaskForm() {
+            val hasDraft = viewModel.newBacklogTitle.isNotBlank() ||
+                viewModel.newBacklogProject.isNotBlank() ||
+                viewModel.newBacklogNotes.isNotBlank()
+            if (hasDraft) {
+                showBacklogTaskUnsavedDialog = true
+            } else {
+                route = if (backlogTaskFormReturnProject != null) HpRoute.PROJECT else HpRoute.BACKLOG
+            }
+        }
+        fun openBacklogTaskEdit(item: BacklogItem) {
+            selectedBacklogItemId = item.id
+            backlogEditTitleDraft = item.title
+            backlogEditProjectDraft = item.projectBucket
+            backlogEditNotesDraft = item.notes
+            backlogEditAssignedDateDraft = item.assignedDate?.toString().orEmpty()
+            route = HpRoute.BACKLOG_TASK_EDIT
+            mode = HpMode.READ
+        }
+        fun saveBacklogTaskEdit() {
+            val itemId = selectedBacklogItemId ?: return
+            viewModel.updateBacklogItemDetails(
+                itemId = itemId,
+                title = backlogEditTitleDraft,
+                notes = backlogEditNotesDraft,
+                project = backlogEditProjectDraft,
+                assignedDateInput = backlogEditAssignedDateDraft
+            )
+            route = HpRoute.BACKLOG
+        }
+        BackHandler(enabled = route == HpRoute.BACKLOG_TASK_FORM) {
+            leaveBacklogTaskForm()
+        }
+        BackHandler(enabled = route == HpRoute.BACKLOG_TASK_EDIT) {
+            selectedBacklogItemId = null
+            route = HpRoute.BACKLOG
+        }
         val goBack: () -> Unit = {
             when {
-                route == HpRoute.PROJECT -> route = HpRoute.BACKLOG
+                route == HpRoute.PROJECT -> {
+                    projectTaskSelectMode = false
+                    selectedProjectTaskIds = emptySet()
+                    route = HpRoute.BACKLOG
+                }
                 route == HpRoute.SETTINGS && settingsDetail != null -> settingsDetail = null
+                route == HpRoute.BACKLOG_TASK_FORM -> leaveBacklogTaskForm()
+                route == HpRoute.BACKLOG_TASK_EDIT -> {
+                    selectedBacklogItemId = null
+                    route = HpRoute.BACKLOG
+                }
                 route == HpRoute.TASK_DETAIL -> {
                     route = HpRoute.TODAY
                     selectedTaskId = null
@@ -410,28 +568,169 @@ fun HumanProgramApp(
                 },
                 HpCommandAction(Icons.Outlined.CalendarMonth, "Choose date") { showDatePicker = true }
             )
-            HpRoute.BACKLOG -> listOf(
-                menuSlot,
-                HpCommandAction(Icons.Outlined.Add, "Add backlog item or project") { showBacklogSheet = true },
-                HpCommandAction(Icons.Outlined.Tune, "Toggle backlog view") {
-                    backlogView = if (backlogView == BacklogView.PROJECTS) BacklogView.TASKS else BacklogView.PROJECTS
-                },
-                HpCommandAction(Icons.AutoMirrored.Outlined.FormatListBulleted, "Sort backlog") {
-                    backlogSort = BacklogSort.entries[(backlogSort.ordinal + 1) % BacklogSort.entries.size]
-                },
-                HpCommandAction(Icons.Outlined.Search, "Search backlog") {
-                    backlogSearchOpen = !backlogSearchOpen
-                }
-            )
-            HpRoute.PROJECT -> listOf(
+            HpRoute.BACKLOG -> when {
+                taskSelectMode -> listOf(
+                    HpCommandAction(Icons.Outlined.Close, "Exit select mode") {
+                        selectedBacklogTaskIds = emptySet()
+                        backlogTaskSelectMode = false
+                        showBacklogBulkMenu = false
+                        showBacklogProjectAssignPopup = false
+                    },
+                    null,
+                    null,
+                    null,
+                    HpCommandAction(Icons.Outlined.Delete, "Delete selected tasks") {
+                        selectedBacklogTaskIds.toList().forEach(viewModel::deleteBacklogItem)
+                        selectedBacklogTaskIds = emptySet()
+                    },
+                    HpCommandAction(Icons.Outlined.MoreHoriz, "Selected task actions") {
+                        showBacklogBulkMenu = true
+                        showBacklogProjectAssignPopup = false
+                    }
+                )
+                projectSelectMode -> listOf(
+                    HpCommandAction(Icons.Outlined.Close, "Exit select mode") {
+                        selectedBacklogProjects = emptySet()
+                        backlogProjectSelectMode = false
+                        showProjectRenamePopup = false
+                    },
+                    null,
+                    null,
+                    null,
+                    HpCommandAction(
+                        icon = Icons.AutoMirrored.Outlined.ArrowForward,
+                        contentDescription = "Transfer tasks to project",
+                        enabled = selectedBacklogProjects.isNotEmpty(),
+                        onClick = {
+                            deleteProjectsAfterMove = false
+                            showProjectMoveDestinationPopup = true
+                        }
+                    ),
+                    HpCommandAction(
+                        icon = Icons.Outlined.Delete,
+                        contentDescription = "Delete selected projects",
+                        enabled = selectedBacklogProjects.isNotEmpty() && "Unorganized" !in selectedBacklogProjects,
+                        onClick = {
+                        val deletable = selectedBacklogProjects.filterNot { it == "Unorganized" }
+                        val hasTasks = deletable.any { project ->
+                            viewModel.activeBacklogByProject[project].orEmpty().isNotEmpty()
+                        }
+                        if (hasTasks) {
+                            showProjectDeleteChoicePopup = true
+                        } else {
+                            deletable.forEach(viewModel::deleteProjectLabel)
+                            selectedBacklogProjects = emptySet()
+                        }
+                        }
+                    )
+                )
+                else -> listOf(
+                    menuSlot,
+                    HpCommandAction(Icons.Outlined.Add, "Add task or project") {
+                        showBacklogAddPopup = true
+                        showBacklogViewPopup = false
+                        showBacklogSortPopup = false
+                    },
+                    HpCommandAction(Icons.Outlined.Visibility, "Toggle backlog view") {
+                        showBacklogViewPopup = true
+                        showBacklogAddPopup = false
+                        showBacklogSortPopup = false
+                    },
+                    HpCommandAction(Icons.AutoMirrored.Outlined.Sort, "Sort backlog") {
+                        showBacklogSortPopup = true
+                        showBacklogAddPopup = false
+                        showBacklogViewPopup = false
+                    },
+                    HpCommandAction(Icons.Outlined.Search, "Search backlog") {
+                        backlogSearchOpen = !backlogSearchOpen
+                    }
+                )
+            }
+            HpRoute.PROJECT -> if (projectTaskSelectMode) {
+                listOf(
+                    HpCommandAction(Icons.Outlined.Close, "Exit select mode") {
+                        selectedProjectTaskIds = emptySet()
+                        projectTaskSelectMode = false
+                        showProjectTaskAssignPopup = false
+                    },
+                    null,
+                    null,
+                    null,
+                    HpCommandAction(
+                        icon = Icons.AutoMirrored.Outlined.ArrowForward,
+                        contentDescription = "Transfer selected tasks",
+                        enabled = selectedProjectTaskIds.isNotEmpty(),
+                        onClick = { showProjectTaskAssignPopup = true }
+                    ),
+                    HpCommandAction(
+                        icon = Icons.Outlined.Delete,
+                        contentDescription = "Delete selected tasks",
+                        enabled = selectedProjectTaskIds.isNotEmpty(),
+                        onClick = {
+                            selectedProjectTaskIds.toList().forEach(viewModel::deleteBacklogItem)
+                            selectedProjectTaskIds = emptySet()
+                        }
+                    )
+                )
+            } else {
+                listOf(
+                    backSlot,
+                    HpCommandAction(Icons.Outlined.Add, "Add task") {
+                        openBacklogTaskForm(
+                            project = if (selectedProject == "Unorganized") "" else selectedProject,
+                            returnProject = selectedProject
+                        )
+                    },
+                    null,
+                    null,
+                    HpCommandAction(
+                        icon = Icons.Outlined.Edit,
+                        contentDescription = "Rename project",
+                        enabled = selectedProject != "Unorganized",
+                        onClick = {
+                            selectedBacklogProjects = setOf(selectedProject)
+                            showProjectRenamePopup = true
+                        }
+                    ),
+                    HpCommandAction(Icons.Outlined.MoreHoriz, "Undo and redo") {
+                        undoRedoMode = true
+                    }
+                )
+            }
+            HpRoute.BACKLOG_TASK_FORM -> listOf(
                 backSlot,
-                HpCommandAction(Icons.Outlined.Add, "Add backlog item to project") {
-                    viewModel.updateNewBacklogProject(selectedProject.takeUnless { it == "Unorganized" }.orEmpty())
-                    showBacklogSheet = true
-                },
                 null,
                 null,
-                null
+                null,
+                null,
+                HpCommandAction(
+                    icon = Icons.Outlined.Check,
+                    contentDescription = "Save task",
+                    enabled = viewModel.newBacklogTitle.trim().isNotEmpty(),
+                    onClick = {
+                        val project = viewModel.newBacklogProject.trim()
+                        viewModel.addBacklogItem()
+                        if (project.isNotEmpty()) {
+                            backlogView = BacklogView.PROJECTS
+                            selectedProject = project
+                        }
+                        route = if (backlogTaskFormReturnProject != null) HpRoute.PROJECT else HpRoute.BACKLOG
+                        backlogTaskFormReturnProject = null
+                    }
+                )
+            )
+            HpRoute.BACKLOG_TASK_EDIT -> listOf(
+                backSlot,
+                null,
+                null,
+                null,
+                null,
+                HpCommandAction(
+                    icon = Icons.Outlined.Check,
+                    contentDescription = "Save task",
+                    enabled = backlogEditTitleDraft.trim().isNotEmpty() && selectedBacklogItemId != null,
+                    onClick = { saveBacklogTaskEdit() }
+                )
             )
             HpRoute.CALENDAR -> listOf(
                 menuSlot,
@@ -520,6 +819,7 @@ fun HumanProgramApp(
             undoRedoMessage = viewModel.redoLastUserEdit()
         }
     ) {
+        Box(modifier = Modifier.fillMaxSize()) {
         when (route) {
             HpRoute.TODAY -> TodayScreen(
                 viewModel = viewModel,
@@ -562,16 +862,88 @@ fun HumanProgramApp(
                 view = backlogView,
                 sort = backlogSort,
                 searchOpen = backlogSearchOpen,
-                onChangeView = { backlogView = it },
+                selectedTaskIds = selectedBacklogTaskIds,
+                selectedProjects = selectedBacklogProjects,
+                taskSelectMode = taskSelectMode,
+                projectSelectMode = projectSelectMode,
+                onToggleTaskSelection = { id ->
+                    selectedBacklogTaskIds = if (id in selectedBacklogTaskIds) {
+                        selectedBacklogTaskIds - id
+                    } else {
+                        selectedBacklogTaskIds + id
+                    }
+                },
+                onOpenTask = { id ->
+                    viewModel.activeBacklogItems.firstOrNull { it.id == id }?.let(::openBacklogTaskEdit)
+                },
+                onStartTaskSelection = { id ->
+                    selectedBacklogProjects = emptySet()
+                    backlogProjectSelectMode = false
+                    backlogTaskSelectMode = true
+                    selectedBacklogTaskIds = selectedBacklogTaskIds + id
+                    backlogView = BacklogView.TASKS
+                    onBacklogViewPreferenceChanged("tasks")
+                },
+                onToggleProjectSelection = { project ->
+                    selectedBacklogProjects = if (project in selectedBacklogProjects) {
+                        selectedBacklogProjects - project
+                    } else {
+                        selectedBacklogProjects + project
+                    }
+                },
+                onStartProjectSelection = { project ->
+                    selectedBacklogTaskIds = emptySet()
+                    backlogTaskSelectMode = false
+                    backlogProjectSelectMode = true
+                    selectedBacklogProjects = selectedBacklogProjects + project
+                    backlogView = BacklogView.PROJECTS
+                    onBacklogViewPreferenceChanged("projects")
+                },
                 onOpenProject = {
                     selectedProject = it
                     route = HpRoute.PROJECT
                 }
             )
+            HpRoute.BACKLOG_TASK_FORM -> BacklogTaskFormPage(viewModel = viewModel)
+            HpRoute.BACKLOG_TASK_EDIT -> {
+                val item = viewModel.activeBacklogItems.firstOrNull { it.id == selectedBacklogItemId }
+                if (item == null) {
+                    selectedBacklogItemId = null
+                    route = HpRoute.BACKLOG
+                } else {
+                    BacklogTaskEditPage(
+                        title = backlogEditTitleDraft,
+                        project = backlogEditProjectDraft,
+                        assignedDate = backlogEditAssignedDateDraft,
+                        notes = backlogEditNotesDraft,
+                        projects = viewModel.projectBuckets.toList(),
+                        onTitleChange = { backlogEditTitleDraft = it },
+                        onProjectChange = { backlogEditProjectDraft = it },
+                        onAssignedDateChange = { backlogEditAssignedDateDraft = it.take(10) },
+                        onNotesChange = { backlogEditNotesDraft = it }
+                    )
+                }
+            }
             HpRoute.PROJECT -> ProjectDetailScreen(
                 viewModel = viewModel,
                 projectName = selectedProject,
                 mode = mode,
+                selectedTaskIds = selectedProjectTaskIds,
+                taskSelectMode = projectTaskSelectMode,
+                onToggleTaskSelection = { id ->
+                    selectedProjectTaskIds = if (id in selectedProjectTaskIds) {
+                        selectedProjectTaskIds - id
+                    } else {
+                        selectedProjectTaskIds + id
+                    }
+                },
+                onStartTaskSelection = { id ->
+                    selectedProjectTaskIds = selectedProjectTaskIds + id
+                    projectTaskSelectMode = true
+                },
+                onOpenTask = { id ->
+                    viewModel.activeBacklogItems.firstOrNull { it.id == id }?.let(::openBacklogTaskEdit)
+                },
                 onProjectRenamed = { selectedProject = it }
             )
             HpRoute.CALENDAR -> CalendarScreen(
@@ -671,6 +1043,214 @@ fun HumanProgramApp(
                 }
             )
             HpRoute.HIDDEN_GATE -> Unit
+        }
+            if (showBacklogAddPopup && (route == HpRoute.BACKLOG || route == HpRoute.PROJECT)) {
+                BacklogAddChoicePopup(
+                    onDismiss = { showBacklogAddPopup = false },
+                    onTask = { openBacklogTaskForm() },
+                    onProject = {
+                        viewModel.updateNewBacklogProject("")
+                        showBacklogAddPopup = false
+                        showProjectTitleDialog = true
+                    }
+                )
+            }
+            if (showBacklogViewPopup && route == HpRoute.BACKLOG) {
+                BacklogViewChoicePopup(
+                    currentView = backlogView,
+                    onDismiss = { showBacklogViewPopup = false },
+                    onTasks = {
+                        backlogView = BacklogView.TASKS
+                        onBacklogViewPreferenceChanged("tasks")
+                        selectedBacklogProjects = emptySet()
+                        backlogProjectSelectMode = false
+                        showBacklogViewPopup = false
+                    },
+                    onProjects = {
+                        backlogView = BacklogView.PROJECTS
+                        onBacklogViewPreferenceChanged("projects")
+                        if (backlogSort != BacklogSort.TITLE_DESC) {
+                            backlogSort = BacklogSort.TITLE_ASC
+                            onBacklogSortPreferenceChanged("alphabetical")
+                        }
+                        selectedBacklogTaskIds = emptySet()
+                        backlogTaskSelectMode = false
+                        showBacklogViewPopup = false
+                    }
+                )
+            }
+            if (showBacklogSortPopup && route == HpRoute.BACKLOG) {
+                BacklogSortChoicePopup(
+                    currentSort = backlogSort,
+                    currentView = backlogView,
+                    onDismiss = { showBacklogSortPopup = false },
+                    onAlphabeticalAsc = {
+                        backlogSort = BacklogSort.TITLE_ASC
+                        onBacklogSortPreferenceChanged("alphabetical")
+                        showBacklogSortPopup = false
+                    },
+                    onAlphabeticalDesc = {
+                        backlogSort = BacklogSort.TITLE_DESC
+                        onBacklogSortPreferenceChanged("alphabetical_desc")
+                        showBacklogSortPopup = false
+                    },
+                    onCreationDate = {
+                        backlogSort = BacklogSort.DEFAULT
+                        onBacklogSortPreferenceChanged("creation")
+                        showBacklogSortPopup = false
+                    },
+                    onAssignedDate = {
+                        backlogSort = BacklogSort.DATE_ASC
+                        onBacklogSortPreferenceChanged("assigned")
+                        showBacklogSortPopup = false
+                    }
+                )
+            }
+            if (showBacklogBulkMenu && route == HpRoute.BACKLOG && taskSelectMode) {
+                BacklogBulkActionPopup(
+                    onDismiss = { showBacklogBulkMenu = false },
+                    onAssignProject = {
+                        showBacklogBulkMenu = false
+                        showBacklogProjectAssignPopup = true
+                    },
+                    onAssignDate = {
+                        showBacklogBulkMenu = false
+                        showBacklogBulkDatePicker = true
+                    }
+                )
+            }
+            if (showBacklogProjectAssignPopup && route == HpRoute.BACKLOG && taskSelectMode) {
+                val selectedTaskProjects = selectedBacklogTaskIds.mapNotNull { id ->
+                    viewModel.activeBacklogItems.firstOrNull { it.id == id }?.projectBucket
+                }.toSet()
+                BacklogProjectAssignPopup(
+                    projects = viewModel.projectBuckets.toList(),
+                    currentProject = selectedTaskProjects.singleOrNull(),
+                    onDismiss = { showBacklogProjectAssignPopup = false },
+                    onSelectProject = { project ->
+                        selectedBacklogTaskIds.forEach { id ->
+                            viewModel.activeBacklogItems.firstOrNull { it.id == id }?.let { item ->
+                                viewModel.updateBacklogItemDetails(
+                                    itemId = id,
+                                    title = item.title,
+                                    notes = item.notes,
+                                    project = project,
+                                    assignedDateInput = item.assignedDate?.toString().orEmpty()
+                                )
+                            }
+                        }
+                        showBacklogProjectAssignPopup = false
+                    }
+                )
+            }
+            if (showProjectRenamePopup && (route == HpRoute.BACKLOG || route == HpRoute.PROJECT)) {
+                val project = if (route == HpRoute.PROJECT) selectedProject else selectedBacklogProjects.singleOrNull().orEmpty()
+                if (project.isNotBlank() && project != "Unorganized") {
+                    RenameProjectPopup(
+                        initialTitle = project,
+                        topPadding = 156.dp + (viewModel.activeBacklogByProject.toSortedMap().keys.toList().indexOf(project).coerceAtLeast(0) * 58).dp,
+                        onDismiss = { showProjectRenamePopup = false },
+                        onSave = { renamed ->
+                            viewModel.renameProject(project, renamed)
+                            if (route == HpRoute.PROJECT && renamed.isNotBlank()) selectedProject = renamed
+                            selectedBacklogProjects = if (renamed.isNotBlank()) setOf(renamed) else emptySet()
+                            showProjectRenamePopup = false
+                        }
+                    )
+                }
+            }
+            if (showProjectDeleteChoicePopup && route == HpRoute.BACKLOG && projectSelectMode) {
+                ProjectDeleteChoicePopup(
+                    onDismiss = { showProjectDeleteChoicePopup = false },
+                    onDeleteItems = {
+                        selectedBacklogProjects
+                            .filterNot { it == "Unorganized" }
+                            .forEach(viewModel::deleteProjectAndItems)
+                        selectedBacklogProjects = emptySet()
+                        showProjectDeleteChoicePopup = false
+                    },
+                    onMoveItems = {
+                        deleteProjectsAfterMove = true
+                        showProjectDeleteChoicePopup = false
+                        showProjectMoveDestinationPopup = true
+                    }
+                )
+            }
+            if (showProjectMoveDestinationPopup && route == HpRoute.BACKLOG && projectSelectMode) {
+                val movingProjects = selectedBacklogProjects.toSet()
+                BacklogProjectAssignPopup(
+                    projects = viewModel.projectBuckets.toList(),
+                    currentProject = movingProjects.singleOrNull(),
+                    onDismiss = { showProjectMoveDestinationPopup = false },
+                    onSelectProject = { destination ->
+                        movingProjects.forEach { projectName ->
+                            if (projectName == destination || (projectName == "Unorganized" && destination.isBlank())) return@forEach
+                            viewModel.activeBacklogByProject[projectName].orEmpty().forEach { item ->
+                                viewModel.updateBacklogItemDetails(
+                                    itemId = item.id,
+                                    title = item.title,
+                                    notes = item.notes,
+                                    project = destination,
+                                    assignedDateInput = item.assignedDate?.toString().orEmpty()
+                                )
+                            }
+                            if (deleteProjectsAfterMove && projectName != "Unorganized") {
+                                viewModel.deleteProjectLabel(projectName)
+                            }
+                        }
+                        selectedBacklogProjects = emptySet()
+                        deleteProjectsAfterMove = false
+                        showProjectMoveDestinationPopup = false
+                    }
+                )
+            }
+            if (showProjectTaskAssignPopup && route == HpRoute.PROJECT && projectTaskSelectMode) {
+                BacklogProjectAssignPopup(
+                    projects = viewModel.projectBuckets.toList(),
+                    currentProject = selectedProject,
+                    onDismiss = { showProjectTaskAssignPopup = false },
+                    onSelectProject = { project ->
+                        selectedProjectTaskIds.forEach { id ->
+                            viewModel.activeBacklogItems.firstOrNull { it.id == id }?.let { item ->
+                                viewModel.updateBacklogItemDetails(
+                                    itemId = id,
+                                    title = item.title,
+                                    notes = item.notes,
+                                    project = project,
+                                    assignedDateInput = item.assignedDate?.toString().orEmpty()
+                                )
+                            }
+                        }
+                        selectedProjectTaskIds = emptySet()
+                        showProjectTaskAssignPopup = false
+                    }
+                )
+            }
+            if (showBacklogTaskUnsavedDialog) {
+                BacklogUnsavedChoicePopup(
+                    onDiscard = {
+                        viewModel.updateNewBacklogTitle("")
+                        viewModel.updateNewBacklogProject("")
+                        viewModel.updateNewBacklogNotes("")
+                        viewModel.updateNewBacklogAssignedDate("")
+                        showBacklogTaskUnsavedDialog = false
+                        route = if (backlogTaskFormReturnProject != null) HpRoute.PROJECT else HpRoute.BACKLOG
+                        backlogTaskFormReturnProject = null
+                    },
+                    onSave = {
+                        val project = viewModel.newBacklogProject.trim()
+                        viewModel.addBacklogItem()
+                        if (project.isNotEmpty()) {
+                            backlogView = BacklogView.PROJECTS
+                            selectedProject = project
+                        }
+                        showBacklogTaskUnsavedDialog = false
+                        route = if (backlogTaskFormReturnProject != null) HpRoute.PROJECT else HpRoute.BACKLOG
+                        backlogTaskFormReturnProject = null
+                    },
+                    saveEnabled = viewModel.newBacklogTitle.trim().isNotEmpty()
+                )
+            }
         }
     }
 

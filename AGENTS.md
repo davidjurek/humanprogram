@@ -19,7 +19,6 @@ The full product brief lives in `ADD.md`; treat that file as the source of truth
 
 - `ADD.md` is the product/build source of truth.
 - `UI_DEVELOPMENT_GUIDE.md` is the UI/UX source of truth.
-- `DAILYOS_REFERENCE.md` is the iPhone dailyOS functional reference.
 - `BUILD_STATUS.md` is the progress tracker and next-step source.
 - Read the relevant docs before changing related code.
 - Do not duplicate detailed product requirements in this file.
@@ -79,7 +78,7 @@ testing/
 - Before coding, check `git status --short` when practical.
 - Search with `rg` or `rg --files`.
 - For UI work, read `UI_DEVELOPMENT_GUIDE.md` first.
-- For dailyOS parity work, read `DAILYOS_REFERENCE.md` first.
+- For dailyOS parity work, use the folded lessons in `ADD.md` and `UI_DEVELOPMENT_GUIDE.md`.
 - For feature scope and product rules, read `ADD.md` first.
 - For current next steps, read `BUILD_STATUS.md` first.
 - Treat remaining work as a functional product audit, not a surface redesign.
@@ -127,6 +126,5 @@ Agents may update these files as needed while working:
 - `BUILD_STATUS.md`
 - `AGENTS.md`
 - `UI_DEVELOPMENT_GUIDE.md`
-- `DAILYOS_REFERENCE.md`
 
 Do not keep separate handoff documents as long-term source-of-truth files. Fold durable lessons into the maintained docs above.

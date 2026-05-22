@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -29,6 +30,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.lazy.LazyColumn
@@ -110,6 +112,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -119,6 +122,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.humanprogram.android.core.security.PinHash
 import app.humanprogram.android.planning.HumanProgramViewModel
@@ -746,7 +750,15 @@ internal fun BacklogScreen(
     view: BacklogView,
     sort: BacklogSort,
     searchOpen: Boolean,
-    onChangeView: (BacklogView) -> Unit,
+    selectedTaskIds: Set<String>,
+    selectedProjects: Set<String>,
+    taskSelectMode: Boolean,
+    projectSelectMode: Boolean,
+    onToggleTaskSelection: (String) -> Unit,
+    onOpenTask: (String) -> Unit,
+    onStartTaskSelection: (String) -> Unit,
+    onToggleProjectSelection: (String) -> Unit,
+    onStartProjectSelection: (String) -> Unit,
     onOpenProject: (String) -> Unit
 ) {
     var searchQuery by rememberSaveable { mutableStateOf("") }
@@ -767,26 +779,36 @@ internal fun BacklogScreen(
             BacklogSort.TITLE_DESC -> items.sortedByDescending { it.title.lowercase() }
         }
     }
-    val filteredProjects = viewModel.activeBacklogByProject
+    val filteredProjectsBase = viewModel.activeBacklogByProject
         .filterKeys { normalizedQuery.isBlank() || it.contains(normalizedQuery, ignoreCase = true) }
-        .toSortedMap()
         .toList()
-    HpList {
+    val filteredProjects = when (sort) {
+        BacklogSort.TITLE_DESC -> filteredProjectsBase.sortedByDescending { it.first.lowercase() }
+        else -> filteredProjectsBase.sortedBy { it.first.lowercase() }
+    }
+    HpList(itemSpacing = 0.dp) {
         if (searchOpen) {
             item {
                 HpFormTextField("Search", searchQuery, { searchQuery = it })
             }
         }
         if (view == BacklogView.PROJECTS) {
-            item { HpSectionHeader("Projects", null) }
             if (filteredProjects.isEmpty()) {
                 item { HpEmptyState("No active projects.", null, null) }
             }
             items(filteredProjects, key = { it.first }) { (project, items) ->
-                HpProjectRow(project, "${items.size} active", onClick = { onOpenProject(project) })
+                HpProjectRow(
+                    title = project,
+                    count = items.size,
+                    selected = project in selectedProjects,
+                    selectMode = projectSelectMode,
+                    onClick = {
+                        if (projectSelectMode) onToggleProjectSelection(project) else onOpenProject(project)
+                    },
+                    onLongClick = { onStartProjectSelection(project) }
+                )
             }
         } else {
-            item { HpSectionHeader("Active Tasks", null) }
             if (filteredBacklogItems.isEmpty()) {
                 item { HpEmptyState("No active backlog tasks.", null, null) }
             }
@@ -794,11 +816,16 @@ internal fun BacklogScreen(
                 BacklogTaskRow(
                     item = item,
                     mode = mode,
+                    selected = item.id in selectedTaskIds,
+                    selectMode = taskSelectMode,
                     onTitleChange = { viewModel.renameBacklogItem(item.id, it) },
                     onSaveDetails = { title, notes, project, assignedDate ->
                         viewModel.updateBacklogItemDetails(item.id, title, notes, project, assignedDate)
                     },
-                    onAssignToday = { viewModel.assignBacklogItemToToday(item.id) },
+                    onClick = {
+                        if (taskSelectMode) onToggleTaskSelection(item.id) else onOpenTask(item.id)
+                    },
+                    onLongClick = { onStartTaskSelection(item.id) },
                     onDelete = { viewModel.deleteBacklogItem(item.id) }
                 )
             }
@@ -811,11 +838,29 @@ internal fun ProjectDetailScreen(
     viewModel: HumanProgramViewModel,
     projectName: String,
     mode: HpMode,
+    selectedTaskIds: Set<String>,
+    taskSelectMode: Boolean,
+    onToggleTaskSelection: (String) -> Unit,
+    onStartTaskSelection: (String) -> Unit,
+    onOpenTask: (String) -> Unit,
     onProjectRenamed: (String) -> Unit
 ) {
     val items = viewModel.activeBacklogByProject[projectName].orEmpty()
     var projectNameDraft by rememberSaveable(projectName) { mutableStateOf(projectName) }
-    HpList {
+    HpList(itemSpacing = 0.dp) {
+        item {
+            Text(
+                text = projectName,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp, bottom = 14.dp),
+                color = HpColors.ink,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
         if (mode == HpMode.EDIT && viewModel.canDeleteSelectedProject(projectName)) {
             item {
                 HpSoftPanel {
@@ -846,13 +891,622 @@ internal fun ProjectDetailScreen(
             BacklogTaskRow(
                 item = item,
                 mode = mode,
+                selected = item.id in selectedTaskIds,
+                selectMode = taskSelectMode,
                 onTitleChange = { viewModel.renameBacklogItem(item.id, it) },
                 onSaveDetails = { title, notes, project, assignedDate ->
                     viewModel.updateBacklogItemDetails(item.id, title, notes, project, assignedDate)
                 },
-                onAssignToday = { viewModel.assignBacklogItemToToday(item.id) },
+                onClick = {
+                    if (taskSelectMode) onToggleTaskSelection(item.id) else onOpenTask(item.id)
+                },
+                onLongClick = { onStartTaskSelection(item.id) },
                 onDelete = { viewModel.deleteBacklogItem(item.id) }
             )
+        }
+    }
+}
+
+@Composable
+internal fun BacklogAddChoicePopup(
+    onDismiss: () -> Unit,
+    onTask: () -> Unit,
+    onProject: () -> Unit
+) {
+    HpCapsuleAnchoredMenu(slotIndex = 1, minWidth = 82.dp, onDismiss = onDismiss) {
+        PopupTextOption("Task", onClick = onTask)
+        PopupTextOption("Project", onClick = onProject)
+    }
+}
+
+@Composable
+internal fun BacklogViewChoicePopup(
+    currentView: BacklogView,
+    onDismiss: () -> Unit,
+    onTasks: () -> Unit,
+    onProjects: () -> Unit
+) {
+    HpCapsuleAnchoredMenu(slotIndex = 2, onDismiss = onDismiss) {
+        PopupTextOption("Task View", selected = currentView == BacklogView.TASKS, onClick = onTasks)
+        PopupTextOption("Project View", selected = currentView == BacklogView.PROJECTS, onClick = onProjects)
+    }
+}
+
+@Composable
+internal fun BacklogSortChoicePopup(
+    currentSort: BacklogSort,
+    currentView: BacklogView,
+    onDismiss: () -> Unit,
+    onAlphabeticalAsc: () -> Unit,
+    onAlphabeticalDesc: () -> Unit,
+    onCreationDate: () -> Unit,
+    onAssignedDate: () -> Unit
+) {
+    HpCapsuleAnchoredMenu(slotIndex = 3, minWidth = 82.dp, onDismiss = onDismiss) {
+        PopupTextOption(
+            "A-Z",
+            selected = currentSort == BacklogSort.TITLE_ASC || (currentView == BacklogView.PROJECTS && currentSort != BacklogSort.TITLE_DESC),
+            onClick = onAlphabeticalAsc
+        )
+        PopupTextOption("Z-A", selected = currentSort == BacklogSort.TITLE_DESC, onClick = onAlphabeticalDesc)
+        if (currentView == BacklogView.TASKS) {
+            PopupTextOption("Creation Date", selected = currentSort == BacklogSort.DEFAULT, onClick = onCreationDate)
+            PopupTextOption("Assigned Date", selected = currentSort == BacklogSort.DATE_ASC, onClick = onAssignedDate)
+        }
+    }
+}
+
+@Composable
+internal fun BacklogBulkActionPopup(
+    onDismiss: () -> Unit,
+    onAssignProject: () -> Unit,
+    onAssignDate: () -> Unit
+) {
+    HpCapsuleAnchoredMenu(slotIndex = 5, minWidth = 196.dp, onDismiss = onDismiss) {
+        PopupTextOption("Assign to project", onClick = onAssignProject)
+        PopupTextOption("Assign date", onClick = onAssignDate)
+    }
+}
+
+@Composable
+internal fun ProjectDeleteChoicePopup(
+    onDismiss: () -> Unit,
+    onDeleteItems: () -> Unit,
+    onMoveItems: () -> Unit
+) {
+    HpCapsuleAnchoredMenu(slotIndex = 4, minWidth = 190.dp, onDismiss = onDismiss) {
+        PopupTextOption("Delete items", onClick = onDeleteItems)
+        PopupTextOption("Move items", onClick = onMoveItems)
+    }
+}
+
+@Composable
+internal fun BacklogProjectAssignPopup(
+    projects: List<String>,
+    currentProject: String? = null,
+    onDismiss: () -> Unit,
+    onSelectProject: (String) -> Unit
+) {
+    val currentProjectLabel = currentProject.orEmpty().ifBlank { "Unorganized" }
+    val projectOptions = (
+        projects
+            .filter { it.isNotBlank() && it != "Unorganized" } +
+            listOfNotNull(currentProject?.takeIf { it.isNotBlank() && it != "Unorganized" })
+    )
+        .distinct()
+        .sortedBy { it.lowercase() }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clickable(onClick = onDismiss),
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            modifier = Modifier
+                .width(IntrinsicSize.Min)
+                .widthIn(min = 190.dp, max = 300.dp)
+                .clickable(onClick = {}),
+            shape = RoundedCornerShape(20.dp),
+            color = HpColors.surface,
+            tonalElevation = 6.dp,
+            shadowElevation = 8.dp
+        ) {
+            Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                PopupTextOption(
+                    "Unorganized",
+                    selected = currentProjectLabel == "Unorganized",
+                    onClick = { onSelectProject("") }
+                )
+                projectOptions.forEach { project ->
+                    PopupTextOption(
+                        project,
+                        selected = project == currentProjectLabel,
+                        onClick = { onSelectProject(project) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun RenameProjectPopup(
+    initialTitle: String,
+    topPadding: Dp,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit
+) {
+    var draft by rememberSaveable(initialTitle) { mutableStateOf(initialTitle) }
+    fun saveAndClose() {
+        val clean = draft.trim()
+        if (clean.isNotEmpty()) onSave(clean) else onDismiss()
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clickable(onClick = { saveAndClose() }),
+        contentAlignment = Alignment.TopCenter
+    ) {
+        Surface(
+            modifier = Modifier
+                .padding(top = topPadding)
+                .padding(horizontal = 36.dp)
+                .clickable(onClick = {}),
+            shape = RoundedCornerShape(26.dp),
+            color = HpColors.surface,
+            tonalElevation = 6.dp,
+            shadowElevation = 8.dp
+        ) {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                OutlinedTextField(
+                    modifier = Modifier.fillMaxWidth(),
+                    value = draft,
+                    onValueChange = { draft = it },
+                    placeholder = { Text("Project title") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(22.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun BacklogTaskEditPopup(
+    item: BacklogItem,
+    projects: List<String>,
+    onDismiss: () -> Unit,
+    onSave: (String, String, String, String) -> Unit
+) {
+    var title by rememberSaveable(item.id) { mutableStateOf(item.title) }
+    var notes by rememberSaveable(item.id) { mutableStateOf(item.notes) }
+    var project by rememberSaveable(item.id) { mutableStateOf(item.projectBucket) }
+    var assignedDate by rememberSaveable(item.id) { mutableStateOf(item.assignedDate?.toString().orEmpty()) }
+    var projectMenuOpen by rememberSaveable { mutableStateOf(false) }
+    fun saveAndClose() {
+        if (title.trim().isNotEmpty()) {
+            onSave(title, notes, project, assignedDate)
+        } else {
+            onDismiss()
+        }
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clickable(onClick = { saveAndClose() }),
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            modifier = Modifier
+                .padding(horizontal = 30.dp)
+                .clickable(onClick = {}),
+            shape = RoundedCornerShape(28.dp),
+            color = HpColors.surface,
+            tonalElevation = 6.dp,
+            shadowElevation = 10.dp
+        ) {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                OutlinedTextField(
+                    modifier = Modifier.fillMaxWidth(),
+                    value = title,
+                    onValueChange = { title = it },
+                    placeholder = { Text("Title") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(22.dp)
+                )
+                BoxWithConstraints {
+                    OutlinedButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { projectMenuOpen = true },
+                        shape = RoundedCornerShape(22.dp)
+                    ) {
+                        Text(project.ifBlank { "No project" }, modifier = Modifier.weight(1f), textAlign = TextAlign.Start)
+                        Icon(Icons.Outlined.KeyboardArrowDown, contentDescription = null)
+                    }
+                    DropdownMenu(
+                        expanded = projectMenuOpen,
+                        onDismissRequest = { projectMenuOpen = false },
+                        modifier = Modifier.width(maxWidth),
+                        shape = RoundedCornerShape(22.dp),
+                        containerColor = Color.White
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("No project") },
+                            onClick = {
+                                project = ""
+                                projectMenuOpen = false
+                            }
+                        )
+                        projects.forEach { existing ->
+                            DropdownMenuItem(
+                                text = { Text(existing) },
+                                onClick = {
+                                    project = existing
+                                    projectMenuOpen = false
+                                }
+                            )
+                        }
+                    }
+                }
+                OutlinedTextField(
+                    modifier = Modifier.fillMaxWidth(),
+                    value = assignedDate,
+                    onValueChange = { assignedDate = it.take(10) },
+                    placeholder = { Text("No date assigned") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(22.dp)
+                )
+                OutlinedTextField(
+                    modifier = Modifier.fillMaxWidth(),
+                    value = notes,
+                    onValueChange = { notes = it },
+                    placeholder = { Text("Note") },
+                    minLines = 4,
+                    shape = RoundedCornerShape(22.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PopupTextOption(
+    label: String,
+    selected: Boolean = false,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .widthIn(min = 82.dp)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.weight(1f, fill = false),
+            color = HpColors.ink,
+            style = MaterialTheme.typography.bodyLarge.copy(fontSize = 20.sp),
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Clip
+        )
+        if (selected) {
+            Icon(
+                imageVector = Icons.Outlined.Check,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = HpColors.ink
+            )
+        }
+    }
+}
+
+@Composable
+internal fun BacklogUnsavedChoicePopup(
+    onDiscard: () -> Unit,
+    onSave: () -> Unit,
+    saveEnabled: Boolean
+) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            shape = RoundedCornerShape(30.dp),
+            color = HpColors.surface,
+            tonalElevation = 6.dp,
+            shadowElevation = 10.dp
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 38.dp, vertical = 28.dp),
+                horizontalArrangement = Arrangement.spacedBy(46.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Discard",
+                    modifier = Modifier.clickable(onClick = onDiscard),
+                    color = Color(0xFFB3261E),
+                    fontFamily = FontFamily.Serif,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = "Save",
+                    modifier = if (saveEnabled) Modifier.clickable(onClick = onSave) else Modifier,
+                    color = if (saveEnabled) HpColors.ink else HpColors.muted.copy(alpha = 0.45f),
+                    fontFamily = FontFamily.Serif,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun BacklogTaskFormPage(
+    viewModel: HumanProgramViewModel
+) {
+    var projectMenuOpen by rememberSaveable { mutableStateOf(false) }
+    var showAssignedDatePicker by rememberSaveable { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
+    if (showAssignedDatePicker) {
+        val pickerState = rememberDatePickerState()
+        DatePickerDialog(
+            onDismissRequest = { showAssignedDatePicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val millis = pickerState.selectedDateMillis
+                        if (millis != null) {
+                            val date = Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate()
+                            viewModel.updateNewBacklogAssignedDate(date.toString())
+                        }
+                        showAssignedDatePicker = false
+                    }
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.updateNewBacklogAssignedDate("")
+                        showAssignedDatePicker = false
+                    }
+                ) {
+                    Text("No date")
+                }
+            }
+        ) {
+            DatePicker(state = pickerState)
+        }
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                detectTapGestures(onTap = { focusManager.clearFocus() })
+            }
+    ) {
+        HpList {
+            item {
+                OutlinedTextField(
+                    modifier = Modifier.fillMaxWidth(),
+                    value = viewModel.newBacklogTitle,
+                    onValueChange = viewModel::updateNewBacklogTitle,
+                    placeholder = { Text("Title") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(28.dp)
+                )
+            }
+            item {
+                BoxWithConstraints {
+                    OutlinedButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { projectMenuOpen = true },
+                        shape = RoundedCornerShape(28.dp)
+                    ) {
+                        Text(
+                            text = viewModel.newBacklogProject.ifBlank { "No project" },
+                            modifier = Modifier.weight(1f),
+                            textAlign = TextAlign.Start
+                        )
+                        Icon(Icons.Outlined.KeyboardArrowDown, contentDescription = null)
+                    }
+                    DropdownMenu(
+                        expanded = projectMenuOpen,
+                        onDismissRequest = { projectMenuOpen = false },
+                        modifier = Modifier.width(maxWidth),
+                        shape = RoundedCornerShape(28.dp),
+                        containerColor = Color.White
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("No project") },
+                            onClick = {
+                                viewModel.updateNewBacklogProject("")
+                                projectMenuOpen = false
+                            }
+                        )
+                        viewModel.projectBuckets.forEach { project ->
+                            DropdownMenuItem(
+                                text = { Text(project) },
+                                onClick = {
+                                    viewModel.updateNewBacklogProject(project)
+                                    projectMenuOpen = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+            item {
+                OutlinedButton(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { showAssignedDatePicker = true },
+                    shape = RoundedCornerShape(28.dp)
+                ) {
+                    Text(
+                        text = viewModel.newBacklogAssignedDate.ifBlank { "No date assigned" },
+                        modifier = Modifier.weight(1f),
+                        textAlign = TextAlign.Start
+                    )
+                    Icon(Icons.Outlined.CalendarMonth, contentDescription = null)
+                }
+            }
+            item {
+                OutlinedTextField(
+                    modifier = Modifier.fillMaxWidth(),
+                    value = viewModel.newBacklogNotes,
+                    onValueChange = viewModel::updateNewBacklogNotes,
+                    placeholder = { Text("Note") },
+                    minLines = 6,
+                    shape = RoundedCornerShape(28.dp)
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun BacklogTaskEditPage(
+    title: String,
+    project: String,
+    assignedDate: String,
+    notes: String,
+    projects: List<String>,
+    onTitleChange: (String) -> Unit,
+    onProjectChange: (String) -> Unit,
+    onAssignedDateChange: (String) -> Unit,
+    onNotesChange: (String) -> Unit
+) {
+    var projectMenuOpen by rememberSaveable { mutableStateOf(false) }
+    var showAssignedDatePicker by rememberSaveable { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
+    if (showAssignedDatePicker) {
+        val pickerState = rememberDatePickerState()
+        DatePickerDialog(
+            onDismissRequest = { showAssignedDatePicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val millis = pickerState.selectedDateMillis
+                        if (millis != null) {
+                            val date = Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate()
+                            onAssignedDateChange(date.toString())
+                        }
+                        showAssignedDatePicker = false
+                    }
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        onAssignedDateChange("")
+                        showAssignedDatePicker = false
+                    }
+                ) {
+                    Text("No date")
+                }
+            }
+        ) {
+            DatePicker(state = pickerState)
+        }
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                detectTapGestures(onTap = { focusManager.clearFocus() })
+            }
+    ) {
+        HpList {
+            item {
+                OutlinedTextField(
+                    modifier = Modifier.fillMaxWidth(),
+                    value = title,
+                    onValueChange = onTitleChange,
+                    placeholder = { Text("Title") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(28.dp)
+                )
+            }
+            item {
+                BoxWithConstraints {
+                    OutlinedButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { projectMenuOpen = true },
+                        shape = RoundedCornerShape(28.dp)
+                    ) {
+                        Text(
+                            text = project.ifBlank { "No project" },
+                            modifier = Modifier.weight(1f),
+                            textAlign = TextAlign.Start
+                        )
+                        Icon(Icons.Outlined.KeyboardArrowDown, contentDescription = null)
+                    }
+                    DropdownMenu(
+                        expanded = projectMenuOpen,
+                        onDismissRequest = { projectMenuOpen = false },
+                        modifier = Modifier.width(maxWidth),
+                        shape = RoundedCornerShape(28.dp),
+                        containerColor = Color.White
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("No project") },
+                            onClick = {
+                                onProjectChange("")
+                                projectMenuOpen = false
+                            }
+                        )
+                        projects.forEach { existing ->
+                            DropdownMenuItem(
+                                text = { Text(existing) },
+                                onClick = {
+                                    onProjectChange(existing)
+                                    projectMenuOpen = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+            item {
+                OutlinedButton(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { showAssignedDatePicker = true },
+                    shape = RoundedCornerShape(28.dp)
+                ) {
+                    Text(
+                        text = assignedDate.ifBlank { "No date assigned" },
+                        modifier = Modifier.weight(1f),
+                        textAlign = TextAlign.Start
+                    )
+                    Icon(Icons.Outlined.CalendarMonth, contentDescription = null)
+                }
+            }
+            item {
+                OutlinedTextField(
+                    modifier = Modifier.fillMaxWidth(),
+                    value = notes,
+                    onValueChange = onNotesChange,
+                    placeholder = { Text("Note") },
+                    minLines = 6,
+                    shape = RoundedCornerShape(28.dp)
+                )
+            }
         }
     }
 }

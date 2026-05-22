@@ -2,7 +2,10 @@ package app.humanprogram.android.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -42,6 +45,7 @@ import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Delete
@@ -91,6 +95,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -126,6 +131,7 @@ import java.time.ZoneOffset
 @Composable
 internal fun HpList(
     topInset: Boolean = false,
+    itemSpacing: Dp = HpTheme.spacing.lg,
     content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit
 ) {
     LazyColumn(
@@ -136,7 +142,7 @@ internal fun HpList(
             top = if (topInset) 62.dp else HpTheme.spacing.sm,
             bottom = HpTheme.spacing.xxxl
         ),
-        verticalArrangement = Arrangement.spacedBy(HpTheme.spacing.lg),
+        verticalArrangement = Arrangement.spacedBy(itemSpacing),
         content = content
     )
 }
@@ -199,24 +205,57 @@ internal fun HpEmptyState(message: String, actionLabel: String?, onAction: (() -
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun HpProjectRow(title: String, subtitle: String, onClick: () -> Unit) {
-    HpSoftPanel(contentPadding = 0.dp) {
+internal fun HpProjectRow(
+    title: String,
+    count: Int,
+    selected: Boolean = false,
+    selectMode: Boolean = false,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit = onClick
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    Column {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(onClick = onClick)
-                .padding(HpTheme.spacing.lg),
+                .combinedClickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = onClick,
+                    onLongClick = onLongClick
+                )
+                .padding(horizontal = HpTheme.spacing.lg, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(HpTheme.spacing.md)
         ) {
-            Icon(Icons.Outlined.Folder, contentDescription = null, tint = HpColors.accent)
-            Column(Modifier.weight(1f)) {
-                Text(title, color = HpColors.ink, fontWeight = FontWeight.SemiBold)
-                Text(subtitle, color = HpColors.muted, style = MaterialTheme.typography.bodySmall)
+            if (selectMode) {
+                Icon(
+                    if (selected) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
+                    contentDescription = null,
+                    tint = if (selected) HpColors.accent else HpColors.muted
+                )
+            } else {
+                Icon(Icons.Outlined.Folder, contentDescription = null, tint = HpColors.accent)
             }
-            Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null, tint = HpColors.muted)
+            Text(
+                text = count.coerceIn(0, 999).toString(),
+                modifier = Modifier.width(32.dp),
+                color = HpColors.muted,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.End
+            )
+            Text(
+                title,
+                modifier = Modifier.weight(1f),
+                color = HpColors.ink,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
+        HorizontalDivider(color = HpColors.divider)
     }
 }
 

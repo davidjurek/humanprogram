@@ -248,6 +248,17 @@ Use this file to track what has been built, what is next, and what decisions hav
 - Added the Van Gogh background asset to the Program page, made it center-crop across the full phone screen including status/navigation areas, removed Program tile borders, matched tile opacity to the search bar, kept the six tiles centered with larger row gaps, lowered the search bar below the camera area, and changed Program search reveal/hide to direct vertical drag gestures.
 - Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew lintDebug test assembleDebug` successfully after the Program background/search/tile fixes.
 - Updated `ADD.md` and `UI_DEVELOPMENT_GUIDE.md` with the current six-slot capsule rules, scoped undo/redo behavior, Program six-tile destination list, Van Gogh full-screen background, opaque glass tile/search treatment, and pull-down Program search behavior.
+- Replaced the Backlog add bottom sheet with a small Task/Project popup under the capsule add button, moved Task creation to a full page with back/blank/checkmark capsule slots, added Save/Discard handling for unsaved task drafts, and kept Project creation as a small title dialog.
+- Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew lintDebug test assembleDebug` successfully after the Backlog add flow change.
+- Reworked Backlog root into Task View and Project View menus with persistent selected choices, capsule-anchored dropdowns, A-Z/Z-A sorting, Task View creation/assigned-date sorting, and Project View A-Z/Z-A-only sorting.
+- Added full-page Backlog task creation/editing with title, project, assigned date, and note fields; tapping task rows opens the task page, tapping outside text fields dismisses the keyboard, and project/date dropdowns use full-width rounded menus where appropriate.
+- Rebuilt Backlog rows as clean separator-list rows instead of white cards; removed Active Tasks/Projects headings, removed Add to Today buttons and task list icons, moved project counts to the left of project titles, removed project chevrons, and added single-line ellipsis behavior.
+- Added Backlog task select mode with left selection circles, X exit, trash, Assign to project, and Assign date actions; actions stay in select mode after changes.
+- Added Project View select mode with selection circles replacing folder icons without shifting row content, selectable-but-not-deletable Unorganized behavior, transfer/reassign selected projects' tasks, and delete choices for projects with tasks.
+- Added Project detail page capsule behavior with project name left-aligned under the capsule, task-only add, rename, undo/redo overflow, and task select mode with transfer/delete actions.
+- Added reusable capsule dropdown anchoring in `ui/shell/Shell.kt`: menus align their left edge to the separator before the triggering capsule slot, size to content, and use 20sp semibold option labels.
+- Expanded undo/redo coverage through current Backlog task/project changes including creating tasks/projects, deleting tasks, renaming projects, moving tasks between projects, and editing task content.
+- Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew lintDebug test assembleDebug` successfully after the Backlog select-mode, project-detail, dropdown-anchor, and popup typography changes.
 
 ## In Progress
 
@@ -272,7 +283,7 @@ Use this file to track what has been built, what is next, and what decisions hav
 1. Start the complete UI/function sweep from `UI_DEVELOPMENT_GUIDE.md`: open every route, tile, page, setting, dropdown, menu, sheet, picker, form, permission state, empty state, locked state, button, toggle, chip, destructive action, undo/redo action, import/export action, and hidden path.
 2. For every UI element, decide whether it has a purpose in `ADD.md` or `UI_DEVELOPMENT_GUIDE.md`; implement and persist it if yes, remove it if no.
 3. Capture or manually inspect screenshots for all routes, Settings details, sheets, dropdowns, permission states, empty states, locked/unlocked states, keyboard-open forms, light mode, dark mode, match-system mode, Pixel cutout, and compact phone size.
-4. Continue the owner correction/product-completion backlog now captured in `ADD.md`, with next implementation focus on About cleanup, hidden gate fade/game bridge, remaining Settings detail depth, universal search decision/implementation, direct Room/DataStore UI replacement, complete visual QA, and any remaining no-purpose UI found by the sweep.
+4. Continue the owner correction/product-completion backlog now captured in `ADD.md`, with next implementation focus on visual QA for the rebuilt Backlog/capsule menus, About cleanup, hidden gate fade/game bridge, remaining Settings detail depth, direct Room/DataStore UI replacement, complete visual QA, and any remaining no-purpose UI found by the sweep.
 5. Continue direct Room/DataStore UI replacement once behavior is verified.
 6. Add real game save discovery/export after the game container exists.
 

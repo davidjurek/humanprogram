@@ -1053,9 +1053,13 @@ Backlog is a task inbox and project/folder system.
 
 ### Top Command Bar
 
-- left: menu/back
-- title/context: `Backlog` or project name only when needed
-- right: search, add, view/filter/sort, overflow
+- Use the shared six-slot capsule.
+- Root Backlog slots are Program/menu, add, view, sort, search, and undo/redo overflow.
+- Project detail slots are back, add task, blank, blank, rename, and undo/redo overflow.
+- Capsule dropdowns must use the shared capsule anchoring helper, not screen-specific magic numbers.
+- Dropdown box left edges align to the separator immediately before the triggering slot. This follows the same mental model as a macOS menu opening from its menu title.
+- Dropdowns size to content. Do not pad the right edge just to make menus uniform.
+- Dropdown item labels use 20sp semibold text for comfortable tapping.
 
 No giant segmented control inside content.
 
@@ -1063,21 +1067,24 @@ No giant segmented control inside content.
 
 Recommended:
 
-1. Search/filter field as collapsible/activated control, not always expanded.
-2. Inbox/Unorganized summary.
-3. Projects section.
-4. Recent/unassigned tasks or all active tasks depending active view.
+1. Compact Task View or Project View content below the capsule.
+2. Search field appears only when activated from the capsule.
+3. Task View lists active tasks with separator lines, not white card blocks.
+4. Project View lists project rows with separator lines, not white card blocks.
+5. Avoid section titles such as `Active Tasks` and `Projects` in this view.
 
 ### Project Rows
 
 Rows should look like folders:
 
 ```text
-[folder icon] Buy a car
-              4 active tasks        [chevron/menu]
+[folder icon]   004   Buy a car
 ```
 
 Tapping opens Project Detail.
+Long project names remain one line and end with ellipsis. There is no right chevron in Project View.
+In select mode, replace the folder icon with the empty/checked selection circle without shifting the count or title.
+The gray count sits to the left of the project title and reserves enough width for three digits.
 
 ### Project Detail
 
@@ -1092,9 +1099,10 @@ Shows:
 Actions:
 
 - rename project
-- remove project label from tasks
-- complete selected items
-- delete/remove label with undo
+- transfer selected tasks to another project
+- delete selected tasks
+
+Project detail displays the project name left-aligned under the capsule. The add action creates tasks only; project creation is not allowed inside project detail.
 
 ### Backlog Task Rows
 
@@ -1114,16 +1122,61 @@ Edit/select:
 - complete
 - delete
 
+Task View select mode capsule:
+
+- slot 1: X exits select mode
+- slots 2-4: blank
+- slot 5: trash
+- slot 6: three-dot menu with Assign to project and Assign date
+
+Project View select mode capsule:
+
+- slot 1: X exits select mode
+- slots 2-4: blank
+- slot 5: transfer/reassign selected projects' tasks
+- slot 6: trash
+
+Project detail select mode uses the same project-task selection pattern: X, blank, blank, blank, transfer/reassign tasks, trash. Actions do not automatically leave select mode.
+
 ### Add Backlog Item
 
-Use dedicated sheet:
+Use a dedicated page, not a sheet:
 
 - title
-- project picker/create project
-- optional assign date
-- optional notes later
+- project dropdown with existing projects and No project
+- assigned date, defaulting to no date assigned
+- note
+
+Do not offer project creation from the task page. The Backlog capsule `+` opens a small anchored popup with Task and Project choices. Task opens this page. Project opens a small `Enter project title` dialog.
+
+The task creation page capsule uses back in slot 1, blank slots 2-5, and a checkmark in slot 6. The checkmark is disabled until Title is filled. Leaving with unsaved input shows only Save and Discard.
 
 Do not show permanent `New backlog item` and `Project` fields on root.
+
+### Backlog View And Sort Menus
+
+View menu options:
+
+- Task View
+- Project View
+
+Sort menu options:
+
+- Task View: A-Z, Z-A, Creation Date, Assigned Date
+- Project View: A-Z, Z-A
+
+Selected view and sort choices show a right-side checkmark and persist across app restarts.
+
+### Project Reassignment Menus
+
+Project reassignment menus:
+
+- include `Unorganized`
+- pin `Unorganized` to the first position
+- list real projects alphabetically
+- include the current project
+- show a right-side checkmark on the current project
+- move the checkmark to the newly selected project after selection
 
 ## 10.3 Calendar
 
@@ -1850,7 +1903,7 @@ Data model lessons to preserve or expose:
 ### Backlog Acceptance Rules
 
 - Remove the current blue hero/header treatment.
-- Add action offers two choices: Backlog Item or Project.
+- Add action offers two choices, Task or Project, in a small popup under the capsule `+`; tapping outside dismisses it.
 - Search belongs in the top-right page chrome.
 - Project View is folder-like, with Unorganized as the virtual default bucket.
 - Creating a project should switch/reveal Project View.
@@ -2038,7 +2091,7 @@ Audit all of these current UI elements and either complete their function or rem
 - Program: Today tile, Backlog tile, Calendar tile, Routines tile, Stats tile, Settings tile, hidden-by-default search bar, active search state, keyboard-open search state, downward-swipe reveal, upward-swipe hide.
 - Shell: shared six-slot capsule, menu, back, blank slots, page-specific slots, overflow/close toggle, disabled undo, disabled redo, enabled undo, enabled redo, undo/redo feedback popup.
 - Today: previous day, next day, Today, calendar picker, past unlock, manual task add, task create sheet, task checkbox, task title edit, task delete, schedule boxes, calendar boxes, exercise section.
-- Backlog: view dropdown, Projects option, Tasks option, search toggle, search field, add sheet, Backlog Item option, Project option, Add to Today, delete, project detail, Delete Project Label, Complete All.
+- Backlog: view dropdown, Project View option, Task View option, sort dropdown, A-Z, Z-A, Creation Date, Assigned Date, search toggle, search field, anchored Task/Project add popup, full-page task creation, project title dialog, task tap-to-open, task select mode, project select mode, transfer/reassign popup, assigned-date popup, delete, project detail, project-detail select mode, project rename, Delete items, Move items.
 - Calendar: date picker, mode dropdown, Month, Week, Day, Agenda, Refresh, Sources, source toggles, event rows, event detail/local override behavior.
 - Routines: root, add sheet, routine rows, empty state.
 - Reminders: root, add sheet, enable switch, delete, permission button, recurrence/time controls.
@@ -2061,7 +2114,7 @@ Audit all of these current UI elements and either complete their function or rem
 ### Screen-Specific Completion Notes
 
 - Today needs real task detail/edit behavior, true schedule/event positioning, overlap handling, local calendar controls, and visual QA in dense states.
-- Backlog needs deeper project lifecycle, sorting/filtering, project delete choices, notes/details, assigned date editing, and project picker/create behavior.
+- Backlog needs continued undo/redo hardening across project/task lifecycle operations, plus full visual QA of capsule dropdown anchoring, select-mode behavior, project delete choices, notes/details, assigned date editing, and project picker behavior.
 - Calendar needs real Month/Week/Day/Agenda depth, event detail/local override UI, and calendar sync/status tools.
 - Schedule needs real schedule templates, enabled state, weekday/custom-date assignment, conflict handling, Sleep locking, duration picking, and unsaved-change protection.
 - Exercise needs seven weekday templates, title editing, item editing, deletion, reordering, blank-line handling, and today/future propagation.
