@@ -62,11 +62,11 @@ These decisions override older or more generic language elsewhere in this file.
 - Leaving the Backlog task creation page with unsaved input asks only Save or Discard.
 - Choosing Project from the Backlog add popup opens a small project-title dialog, not a full page.
 - Backlog root supports Task View and Project View from the capsule view menu. The view menu and sort menu must be small capsule-anchored popups whose left edge aligns to the separator before the triggering capsule slot.
-- Capsule dropdown item labels use 20sp semibold text and the popup width should be only as large as the content requires; the left edge must remain fixed to the capsule separator and extra width should grow to the right.
+- Capsule dropdown item labels use 20sp semibold text and the popup width should be only as large as the content requires; the left edge must remain fixed to the capsule separator and extra width should grow to the right. Selected dropdown items use bold text only, never checkmarks, so the popup width stays stable.
 - Project View rows show a gray three-digit-width active-task count to the left of the project title, with single-line ellipsis for long project names and no right chevron. The virtual `Unorganized` bucket always exists.
 - Backlog rows use separator lines, not white card blocks, and row spacing should remain even in Task View and Project View.
 - Long-pressing backlog tasks or project folders enters select mode. Selection uses circles/check circles on the left. Select-mode actions stay in select mode after delete, move, assignment, or other edits unless the user explicitly exits with the X.
-- In Task View select mode, the capsule is X, blank, blank, blank, trash, and a three-dot menu for Assign to project and Assign date. Assign to project uses the actual project list, includes the current project, pins Unorganized first, sorts the rest alphabetically, and marks the current choice with a right-side checkmark.
+- In Task View select mode, the capsule is X, blank, blank, blank, trash, and a three-dot menu for Assign to project and Assign date. Assign to project uses the actual project list, includes the current project, pins Unorganized first, sorts the rest alphabetically, and marks the current choice with bold text only, with no checkmark.
 - In Project View select mode, the capsule is X, blank, blank, blank, transfer/reassign tasks, and trash. The select circle replaces the folder icon without shifting the rest of the row. Unorganized can be selected but cannot be deleted; trash is disabled whenever Unorganized is part of the selection.
 - Inside a Project page, show the project name left-aligned under the capsule. The normal Project page capsule is back, plus task-only, blank, blank, pencil rename, and three-dot undo/redo. Project-page select mode is X, blank, blank, blank, transfer/reassign tasks, and trash.
 - Schedule pages must default to read mode. Add Schedule Block must support clear duration selection.
@@ -1533,7 +1533,7 @@ Backlog main toolbar:
 
 - Shared six-slot capsule with page-specific actions.
 - Root Backlog slots: Program/menu, add Task/Project, view menu, sort menu, search, and undo/redo overflow.
-- The add, view, sort, and select-action menus are small capsule-anchored dropdowns. Their left edge aligns to the separator before the triggering capsule slot, and their width should fit content without extra right-side padding.
+- The add, view, sort, and select-action menus are small capsule-anchored dropdowns. Their left edge aligns to the separator before the triggering capsule slot, and their width should fit content without extra right-side padding. Selected dropdown items use bold text only, never checkmarks, so menu width does not change.
 - Do not use a giant segmented Item/Project control inside the content area.
 - Sort menu.
 - View mode menu.
@@ -1565,7 +1565,7 @@ Task View:
 - Tapping opens the task page for viewing/editing.
 - Long press enters select mode.
 - Select mode supports multi-select, delete, assign to project, and assign date.
-- Select-mode project assignment includes Unorganized first, then named projects alphabetically, and marks the current project with a right-side checkmark.
+- Select-mode project assignment includes Unorganized first, then named projects alphabetically, and marks the current project with bold text only, with no checkmark.
 
 Project View:
 
@@ -2359,7 +2359,7 @@ This section records the complete app-readiness sweep required before Human Prog
 - The shared capsule appears consistently across in-app routes. Blank slots preserve equal spacing.
 - Undo/redo is currently scoped to Today add/check/uncheck and Backlog create/assign actions until broader reversible editing is deliberately wired.
 - Capsule-anchored popups must use the shared capsule menu anchor logic. Their left edge aligns to the separator before the triggering slot, similar to a macOS menu opening from its menu title. Do not hand-tune one-off offsets.
-- Capsule dropdown item labels are 20sp semibold and menus should size to content, growing rightward from the fixed separator-aligned left edge.
+- Capsule dropdown item labels are 20sp semibold and menus should size to content, growing rightward from the fixed separator-aligned left edge. Selected items use bold text only and no checkmark.
 - Every top-right primary action must have a clear purpose.
 - Every overflow item and dropdown item must close correctly after selection.
 
@@ -2411,7 +2411,7 @@ This section records the complete app-readiness sweep required before Human Prog
 - Project View groups items into folder-like project buckets.
 - `Unorganized` is a virtual/default bucket and cannot be deleted.
 - `Unorganized` appears in Project View even when empty and participates in alphabetical sorting there.
-- Reassignment project pickers pin `Unorganized` first, then sort real projects alphabetically, include the current project, and show a checkmark on the currently selected destination.
+- Reassignment project pickers pin `Unorganized` first, then sort real projects alphabetically, include the current project, and show the currently selected destination in bold text only, with no checkmark.
 - Empty named projects remain visible.
 - Creating a project should switch to or reveal Project View.
 - Project detail shows the project name under the capsule and supports useful active-task management.

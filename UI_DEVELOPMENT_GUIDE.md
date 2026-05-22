@@ -907,7 +907,7 @@ data class ScreenChromeState(
 
 ### Layout Stability
 
-Read mode and edit mode must not move content. Switching modes may change icons, backgrounds, borders, and whether fields accept input, but the outer size, spacing, and text positions of the page must stay fixed. Use the same layout container for read and edit states, especially on task/detail pages, so titles, metadata rows, section labels, and note content do not jump when editing is toggled.
+Read mode and edit mode must not move content. Switching modes may change icons, backgrounds, borders, and whether fields accept input, but the outer size, spacing, and text positions of the page must stay fixed. Use the same layout container for read and edit states, especially on task/detail pages, so titles, metadata rows, section labels, and note content do not jump when editing is toggled. Owner preference: read/edit toggles should feel like controls appearing on the same page, not like the page reflowed into a different layout.
 
 ### Undo/Redo
 
@@ -1059,7 +1059,7 @@ Backlog is a task inbox and project/folder system.
 - Capsule dropdowns must use the shared capsule anchoring helper, not screen-specific magic numbers.
 - Dropdown box left edges align to the separator immediately before the triggering slot. This follows the same mental model as a macOS menu opening from its menu title.
 - Dropdowns size to content. Do not pad the right edge just to make menus uniform.
-- Dropdown item labels use 20sp semibold text for comfortable tapping.
+- Dropdown item labels use 20sp semibold text for comfortable tapping. Selected dropdown items use bold text only, never a checkmark, so the popup width does not change when selection changes. Keep a little vertical space between options.
 
 No giant segmented control inside content.
 
@@ -1165,7 +1165,7 @@ Sort menu options:
 - Task View: A-Z, Z-A, Creation Date, Assigned Date
 - Project View: A-Z, Z-A
 
-Selected view and sort choices show a right-side checkmark and persist across app restarts.
+Selected view and sort choices use bold text only, with no right-side checkmark, and persist across app restarts.
 
 ### Project Reassignment Menus
 
@@ -1175,8 +1175,8 @@ Project reassignment menus:
 - pin `Unorganized` to the first position
 - list real projects alphabetically
 - include the current project
-- show a right-side checkmark on the current project
-- move the checkmark to the newly selected project after selection
+- show the current project in bold, with no checkmark
+- move the bold selected state to the newly selected project after selection
 
 ## 10.3 Calendar
 

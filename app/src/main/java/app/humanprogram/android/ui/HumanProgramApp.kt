@@ -169,6 +169,11 @@ fun HumanProgramApp(
     var backlogEditAssignedDateDraft by rememberSaveable { mutableStateOf("") }
     var backlogTaskEditing by rememberSaveable { mutableStateOf(false) }
     var backlogTaskFormReturnProject by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedRecurringTemplateId by rememberSaveable { mutableStateOf<String?>(null) }
+    var recurringTitleDraft by rememberSaveable { mutableStateOf("") }
+    var recurringWeekdaysDraft by rememberSaveable { mutableStateOf(setOf<Int>()) }
+    var recurringActiveDraft by rememberSaveable { mutableStateOf(true) }
+    var recurringTaskEditing by rememberSaveable { mutableStateOf(false) }
     var taskDetailEditing by rememberSaveable { mutableStateOf(false) }
     var taskDetailTitleDraft by rememberSaveable { mutableStateOf("") }
     var taskDetailNotesDraft by rememberSaveable { mutableStateOf("") }
@@ -197,6 +202,7 @@ fun HumanProgramApp(
     var showProjectTitleDialog by rememberSaveable { mutableStateOf(false) }
     var showBacklogTaskUnsavedDialog by rememberSaveable { mutableStateOf(false) }
     var showBacklogTaskEditUnsavedDialog by rememberSaveable { mutableStateOf(false) }
+    var showRecurringTaskUnsavedDialog by rememberSaveable { mutableStateOf(false) }
     var showRoutineSheet by rememberSaveable { mutableStateOf(false) }
     var showReminderSheet by rememberSaveable { mutableStateOf(false) }
     var showScheduleSheet by rememberSaveable { mutableStateOf(false) }
@@ -438,6 +444,8 @@ fun HumanProgramApp(
         HpRoute.SETTINGS -> settingsDetail?.label ?: "Settings"
         HpRoute.BACKLOG_TASK_FORM -> ""
         HpRoute.BACKLOG_TASK_EDIT -> ""
+        HpRoute.RECURRING_TASK_FORM -> ""
+        HpRoute.RECURRING_TASK_EDIT -> ""
         HpRoute.TASK_DETAIL -> ""
         HpRoute.HIDDEN_GATE -> ""
     }
@@ -543,11 +551,91 @@ fun HumanProgramApp(
             )
             backlogTaskEditing = false
         }
+        fun selectedRecurringTemplate(): RecurringTaskTemplate? {
+            return viewModel.recurringTemplates.firstOrNull { it.id == selectedRecurringTemplateId }
+        }
+        fun openRecurringTaskForm() {
+            selectedRecurringTemplateId = null
+            recurringTitleDraft = ""
+            recurringWeekdaysDraft = setOf(1, 2, 3, 4, 5, 6, 7)
+            recurringActiveDraft = true
+            recurringTaskEditing = true
+            showRecurringTaskUnsavedDialog = false
+            route = HpRoute.RECURRING_TASK_FORM
+            mode = HpMode.READ
+        }
+        fun openRecurringTaskEdit(templateId: String) {
+            val template = viewModel.recurringTemplates.firstOrNull { it.id == templateId } ?: return
+            selectedRecurringTemplateId = template.id
+            recurringTitleDraft = template.title
+            recurringWeekdaysDraft = template.applicableWeekdays
+            recurringActiveDraft = template.active
+            recurringTaskEditing = false
+            showRecurringTaskUnsavedDialog = false
+            route = HpRoute.RECURRING_TASK_EDIT
+            mode = HpMode.READ
+        }
+        fun hasRecurringTaskChanges(): Boolean {
+            val template = selectedRecurringTemplate()
+            return if (route == HpRoute.RECURRING_TASK_FORM) {
+                recurringTitleDraft.isNotBlank() ||
+                    recurringWeekdaysDraft != setOf(1, 2, 3, 4, 5, 6, 7) ||
+                    !recurringActiveDraft
+            } else {
+                template != null && (
+                    recurringTitleDraft != template.title ||
+                        recurringWeekdaysDraft != template.applicableWeekdays ||
+                        recurringActiveDraft != template.active
+                )
+            }
+        }
+        fun leaveRecurringTaskPage() {
+            if (recurringTaskEditing && hasRecurringTaskChanges()) {
+                showRecurringTaskUnsavedDialog = true
+                return
+            }
+            selectedRecurringTemplateId = null
+            recurringTaskEditing = false
+            route = HpRoute.SETTINGS
+            settingsDetail = SettingsDetail.RECURRING
+        }
+        fun discardRecurringTaskPage() {
+            showRecurringTaskUnsavedDialog = false
+            selectedRecurringTemplateId = null
+            recurringTaskEditing = false
+            route = HpRoute.SETTINGS
+            settingsDetail = SettingsDetail.RECURRING
+        }
+        fun saveRecurringTaskPage() {
+            val cleanTitle = recurringTitleDraft.trim()
+            if (cleanTitle.isBlank()) return
+            if (route == HpRoute.RECURRING_TASK_FORM) {
+                viewModel.addRecurringTask(
+                    title = cleanTitle,
+                    applicableWeekdays = recurringWeekdaysDraft,
+                    active = recurringActiveDraft
+                )
+                selectedRecurringTemplateId = viewModel.recurringTemplates.lastOrNull { it.title == cleanTitle }?.id
+                route = HpRoute.RECURRING_TASK_EDIT
+            } else {
+                val templateId = selectedRecurringTemplateId ?: return
+                viewModel.updateRecurringTaskDetails(
+                    templateId = templateId,
+                    title = cleanTitle,
+                    applicableWeekdays = recurringWeekdaysDraft,
+                    active = recurringActiveDraft
+                )
+            }
+            recurringTaskEditing = false
+        }
         BackHandler(enabled = route == HpRoute.BACKLOG_TASK_FORM) {
             leaveBacklogTaskForm()
         }
         BackHandler(enabled = route == HpRoute.BACKLOG_TASK_EDIT) {
             leaveBacklogTaskEdit()
+        }
+        BackHandler(enabled = route == HpRoute.RECURRING_TASK_FORM || route == HpRoute.RECURRING_TASK_EDIT) {
+            leaveRecurringTaskPage()
         }
         val goBack: () -> Unit = {
             when {
@@ -559,6 +647,7 @@ fun HumanProgramApp(
                 route == HpRoute.SETTINGS && settingsDetail != null -> settingsDetail = null
                 route == HpRoute.BACKLOG_TASK_FORM -> leaveBacklogTaskForm()
                 route == HpRoute.BACKLOG_TASK_EDIT -> leaveBacklogTaskEdit()
+                route == HpRoute.RECURRING_TASK_FORM || route == HpRoute.RECURRING_TASK_EDIT -> leaveRecurringTaskPage()
                 route == HpRoute.TASK_DETAIL -> {
                     route = HpRoute.TODAY
                     selectedTaskId = null
@@ -776,7 +865,41 @@ fun HumanProgramApp(
                 null,
                 null,
                 null,
-                null
+                if (settingsDetail == SettingsDetail.RECURRING) {
+                    HpCommandAction(Icons.Outlined.Add, "Add recurring task") { openRecurringTaskForm() }
+                } else {
+                    null
+                },
+                if (settingsDetail == SettingsDetail.RECURRING) {
+                    HpCommandAction(Icons.Outlined.MoreHoriz, "Undo and redo") {
+                        undoRedoMode = true
+                    }
+                } else {
+                    null
+                }
+            )
+            HpRoute.RECURRING_TASK_FORM,
+            HpRoute.RECURRING_TASK_EDIT -> listOf(
+                backSlot,
+                null,
+                null,
+                null,
+                null,
+                if (recurringTaskEditing) {
+                    HpCommandAction(
+                        icon = Icons.Outlined.Save,
+                        contentDescription = "Save recurring task",
+                        enabled = recurringTitleDraft.trim().isNotEmpty(),
+                        onClick = { saveRecurringTaskPage() }
+                    )
+                } else {
+                    HpCommandAction(
+                        icon = Icons.Outlined.Edit,
+                        contentDescription = "Edit recurring task",
+                        enabled = route == HpRoute.RECURRING_TASK_EDIT && selectedRecurringTemplateId != null,
+                        onClick = { recurringTaskEditing = true }
+                    )
+                }
             )
             HpRoute.TASK_DETAIL -> {
                 val task = viewModel.todayTasks.firstOrNull { it.id == selectedTaskId }
@@ -952,6 +1075,25 @@ fun HumanProgramApp(
                     )
                 }
             }
+            HpRoute.RECURRING_TASK_FORM,
+            HpRoute.RECURRING_TASK_EDIT -> {
+                if (route == HpRoute.RECURRING_TASK_EDIT && selectedRecurringTemplate() == null) {
+                    selectedRecurringTemplateId = null
+                    recurringTaskEditing = false
+                    route = HpRoute.SETTINGS
+                    settingsDetail = SettingsDetail.RECURRING
+                } else {
+                    RecurringTaskPage(
+                        title = recurringTitleDraft,
+                        weekdays = recurringWeekdaysDraft,
+                        active = recurringActiveDraft,
+                        editing = recurringTaskEditing,
+                        onTitleChange = { recurringTitleDraft = it },
+                        onWeekdaysChange = { recurringWeekdaysDraft = it },
+                        onActiveChange = { recurringActiveDraft = it }
+                    )
+                }
+            }
             HpRoute.PROJECT -> ProjectDetailScreen(
                 viewModel = viewModel,
                 projectName = selectedProject,
@@ -1050,6 +1192,7 @@ fun HumanProgramApp(
                 detail = settingsDetail,
                 appearance = appearance,
                 onDetail = { settingsDetail = it },
+                onOpenRecurringTask = { openRecurringTaskEdit(it) },
                 notificationPermissionGranted = notificationPermissionGranted,
                 onRequestNotificationPermission = onRequestNotificationPermission,
                 calendarPermissionGranted = calendarPermissionGranted,
@@ -1290,6 +1433,14 @@ fun HumanProgramApp(
                     onSave = {
                         showBacklogTaskEditUnsavedDialog = false
                     },
+                    saveEnabled = true,
+                    saveLabel = "Cancel"
+                )
+            }
+            if (showRecurringTaskUnsavedDialog) {
+                BacklogUnsavedChoicePopup(
+                    onDiscard = { discardRecurringTaskPage() },
+                    onSave = { showRecurringTaskUnsavedDialog = false },
                     saveEnabled = true,
                     saveLabel = "Cancel"
                 )

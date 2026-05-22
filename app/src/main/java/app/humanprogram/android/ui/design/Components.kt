@@ -292,7 +292,9 @@ internal fun SettingsRow(icon: ImageVector, title: String, subtitle: String, onC
         Icon(icon, contentDescription = null, tint = HpColors.accent)
         Column(Modifier.weight(1f)) {
             Text(title, color = HpColors.ink, fontWeight = FontWeight.Medium)
-            Text(subtitle, color = HpColors.muted, style = MaterialTheme.typography.bodySmall)
+            if (subtitle.isNotBlank()) {
+                Text(subtitle, color = HpColors.muted, style = MaterialTheme.typography.bodySmall)
+            }
         }
         Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null, tint = HpColors.muted)
     }

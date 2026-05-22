@@ -196,8 +196,8 @@ internal fun TodayScreen(
     }
     var draggedTaskId by remember { mutableStateOf<String?>(null) }
     var dragStartIndex by remember { mutableIntStateOf(-1) }
-    var dragOffset by remember { mutableStateOf(0f) }
-    var dropIndex by remember { mutableIntStateOf(-1) }
+    var draggedTaskCenterY by remember { mutableStateOf(0f) }
+    var dragMovedTask by remember { mutableStateOf(false) }
     var taskListTop by remember { mutableStateOf(0f) }
     var taskListBottom by remember { mutableStateOf(0f) }
     var taskRowHeight by remember { mutableStateOf(56f) }
@@ -207,7 +207,7 @@ internal fun TodayScreen(
     val taskRowLefts = remember { mutableStateMapOf<String, Float>() }
     val taskRowWidths = remember { mutableStateMapOf<String, Int>() }
     val draggedTask = draggedTaskId?.let { id -> viewModel.todayTasks.firstOrNull { it.id == id } }
-    val draggedTaskTop = draggedTaskId?.let { taskRowTops[it] } ?: 0f
+    val draggedTaskTop = if (draggedTask != null) draggedTaskCenterY - (taskRowHeight / 2f) else 0f
     val draggedTaskLeft = draggedTaskId?.let { taskRowLefts[it] } ?: 0f
     val draggedTaskWidth = draggedTaskId?.let { taskRowWidths[it] } ?: 0
     val density = LocalDensity.current
@@ -269,7 +269,8 @@ internal fun TodayScreen(
                 } else {
                     Column(
                         modifier = Modifier.onGloballyPositioned { coordinates ->
-                            val top = coordinates.positionInRoot().y - overlayRootTop
+                            val position = coordinates.positionInRoot()
+                            val top = position.y - overlayRootTop
                             taskListTop = top
                             taskListBottom = top + coordinates.size.height
                         }
@@ -277,8 +278,6 @@ internal fun TodayScreen(
                         viewModel.todayTasks.forEachIndexed { index, task ->
                             key(task.id) {
                                 val isDragging = draggedTaskId == task.id
-                                val showDropLineBefore = dropIndex != -1 && dropIndex == index && dropIndex <= dragStartIndex
-                                val showDropLineAfter = dropIndex != -1 && dropIndex == index && dropIndex > dragStartIndex
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -297,8 +296,6 @@ internal fun TodayScreen(
                                         },
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    if (showDropLineBefore) ReorderDropLine(Modifier.align(Alignment.TopCenter))
-                                    if (showDropLineAfter) ReorderDropLine(Modifier.align(Alignment.BottomCenter))
                                     TaskRow(
                                         task = task,
                                         mode = mode,
@@ -314,38 +311,43 @@ internal fun TodayScreen(
                                                     onDragStart = {
                                                         draggedTaskId = task.id
                                                         dragStartIndex = viewModel.todayTasks.indexOfFirst { it.id == task.id }
-                                                        dropIndex = dragStartIndex
-                                                        dragOffset = 0f
+                                                        draggedTaskCenterY = (taskRowTops[task.id] ?: 0f) + (taskRowHeight / 2f)
+                                                        dragMovedTask = false
                                                     },
                                                     onDragCancel = {
-                                                        draggedTaskId = null
-                                                        dragStartIndex = -1
-                                                        dropIndex = -1
-                                                        dragOffset = 0f
-                                                    },
-                                                    onDragEnd = {
-                                                        val fromIndex = dragStartIndex
-                                                        val toIndex = dropIndex
-                                                        if (fromIndex != -1 && toIndex != -1 && fromIndex != toIndex) {
-                                                            viewModel.moveTodayTask(fromIndex, toIndex)
+                                                        if (dragMovedTask) {
+                                                            viewModel.restoreTodayTaskDragOrder(task.id, dragStartIndex)
                                                         }
                                                         draggedTaskId = null
                                                         dragStartIndex = -1
-                                                        dropIndex = -1
-                                                        dragOffset = 0f
+                                                        draggedTaskCenterY = 0f
+                                                        dragMovedTask = false
+                                                    },
+                                                    onDragEnd = {
+                                                        if (dragMovedTask) {
+                                                            viewModel.saveTodayTaskOrderAfterDrag()
+                                                        }
+                                                        draggedTaskId = null
+                                                        dragStartIndex = -1
+                                                        draggedTaskCenterY = 0f
+                                                        dragMovedTask = false
                                                     },
                                                     onDrag = { change, dragAmount ->
                                                         change.consume()
                                                         if (draggedTaskId != task.id || dragStartIndex == -1) return@detectDragGesturesAfterLongPress
 
-                                                        dragOffset += dragAmount.y
-                                                        val draggedCenter = draggedTaskTop + (taskRowHeight / 2f) + dragOffset
-                                                        dropIndex = if (draggedCenter in taskListTop..taskListBottom) {
-                                                            ((draggedCenter - taskListTop) / taskRowHeight)
-                                                                .roundToInt()
-                                                                .coerceIn(0, viewModel.todayTasks.lastIndex)
-                                                        } else {
-                                                            -1
+                                                        draggedTaskCenterY += dragAmount.y
+                                                        if (viewModel.todayTasks.isEmpty()) return@detectDragGesturesAfterLongPress
+
+                                                        val currentIndex = viewModel.todayTasks.indexOfFirst { it.id == task.id }
+                                                        if (currentIndex == -1) return@detectDragGesturesAfterLongPress
+
+                                                        val targetIndex = ((draggedTaskCenterY - taskListTop) / taskRowHeight)
+                                                            .roundToInt()
+                                                            .coerceIn(0, viewModel.todayTasks.lastIndex)
+                                                        if (targetIndex != currentIndex) {
+                                                            viewModel.moveTodayTaskDuringDrag(currentIndex, targetIndex)
+                                                            dragMovedTask = true
                                                         }
                                                     }
                                                 )
@@ -393,7 +395,7 @@ internal fun TodayScreen(
                 mode = mode,
                 enabled = viewModel.canEditSelectedDate,
                 modifier = Modifier
-                    .offset { IntOffset(draggedTaskLeft.roundToInt(), (draggedTaskTop + dragOffset).roundToInt()) }
+                    .offset { IntOffset(draggedTaskLeft.roundToInt(), draggedTaskTop.roundToInt()) }
                     .width(with(density) { draggedTaskWidth.toDp() })
                     .zIndex(100f)
                     .graphicsLayer {
@@ -409,18 +411,6 @@ internal fun TodayScreen(
             )
         }
     }
-}
-
-@Composable
-private fun ReorderDropLine(
-    modifier: Modifier = Modifier
-) {
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(3.dp)
-            .background(Color(0xFF1A73E8))
-    )
 }
 
 @Composable
@@ -1292,16 +1282,18 @@ internal fun BacklogTaskEditPopup(
                         shape = RoundedCornerShape(22.dp),
                         containerColor = Color.White
                     ) {
-                        DropdownMenuItem(
-                            text = { Text("No project") },
+                        ProjectDropdownOption(
+                            label = "No project",
+                            selected = project.isBlank(),
                             onClick = {
                                 project = ""
                                 projectMenuOpen = false
                             }
                         )
                         projects.forEach { existing ->
-                            DropdownMenuItem(
-                                text = { Text(existing) },
+                            ProjectDropdownOption(
+                                label = existing,
+                                selected = project == existing,
                                 onClick = {
                                     project = existing
                                     projectMenuOpen = false
@@ -1341,7 +1333,7 @@ private fun PopupTextOption(
         modifier = Modifier
             .widthIn(min = 82.dp)
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 7.dp),
+            .padding(horizontal = 14.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
@@ -1350,19 +1342,29 @@ private fun PopupTextOption(
             modifier = Modifier.weight(1f, fill = false),
             color = HpColors.ink,
             style = MaterialTheme.typography.bodyLarge.copy(fontSize = 20.sp),
-            fontWeight = FontWeight.SemiBold,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Clip
         )
-        if (selected) {
-            Icon(
-                imageVector = Icons.Outlined.Check,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp),
-                tint = HpColors.ink
-            )
-        }
     }
+}
+
+@Composable
+private fun ProjectDropdownOption(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    DropdownMenuItem(
+        text = {
+            Text(
+                text = label,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+            )
+        },
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+        onClick = onClick
+    )
 }
 
 @Composable
@@ -1487,16 +1489,18 @@ internal fun BacklogTaskFormPage(
                         shape = RoundedCornerShape(28.dp),
                         containerColor = Color.White
                     ) {
-                        DropdownMenuItem(
-                            text = { Text("No project") },
+                        ProjectDropdownOption(
+                            label = "No project",
+                            selected = viewModel.newBacklogProject.isBlank(),
                             onClick = {
                                 viewModel.updateNewBacklogProject("")
                                 projectMenuOpen = false
                             }
                         )
                         viewModel.projectBuckets.forEach { project ->
-                            DropdownMenuItem(
-                                text = { Text(project) },
+                            ProjectDropdownOption(
+                                label = project,
+                                selected = viewModel.newBacklogProject == project,
                                 onClick = {
                                     viewModel.updateNewBacklogProject(project)
                                     projectMenuOpen = false
@@ -1617,16 +1621,18 @@ internal fun BacklogTaskEditPage(
                         shape = RoundedCornerShape(28.dp),
                         containerColor = Color.White
                     ) {
-                        DropdownMenuItem(
-                            text = { Text("No project") },
+                        ProjectDropdownOption(
+                            label = "No project",
+                            selected = project.isBlank(),
                             onClick = {
                                 onProjectChange("")
                                 projectMenuOpen = false
                             }
                         )
                         projects.forEach { existing ->
-                            DropdownMenuItem(
-                                text = { Text(existing) },
+                            ProjectDropdownOption(
+                                label = existing,
+                                selected = project == existing,
                                 onClick = {
                                     onProjectChange(existing)
                                     projectMenuOpen = false

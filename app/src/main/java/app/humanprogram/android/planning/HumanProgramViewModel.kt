@@ -618,9 +618,43 @@ class HumanProgramViewModel(
         if (fromIndex == toIndex) return
         if (fromIndex !in todayTasks.indices || toIndex !in todayTasks.indices) return
 
+        moveTodayTaskInMemory(fromIndex, toIndex)
+        saveSnapshot()
+    }
+
+    fun moveTodayTaskDuringDrag(
+        fromIndex: Int,
+        toIndex: Int
+    ) {
+        if (!canEditSelectedDate) return
+        if (fromIndex == toIndex) return
+        if (fromIndex !in todayTasks.indices || toIndex !in todayTasks.indices) return
+
+        moveTodayTaskInMemory(fromIndex, toIndex)
+    }
+
+    fun restoreTodayTaskDragOrder(
+        taskId: String,
+        originalIndex: Int
+    ) {
+        if (!canEditSelectedDate) return
+        val currentIndex = todayTasks.indexOfFirst { it.id == taskId }
+        if (currentIndex == -1 || currentIndex == originalIndex) return
+
+        moveTodayTaskInMemory(currentIndex, originalIndex.coerceIn(0, todayTasks.lastIndex))
+    }
+
+    fun saveTodayTaskOrderAfterDrag() {
+        if (!canEditSelectedDate) return
+        saveSnapshot()
+    }
+
+    private fun moveTodayTaskInMemory(
+        fromIndex: Int,
+        toIndex: Int
+    ) {
         val task = todayTasks.removeAt(fromIndex)
         todayTasks.add(toIndex, task)
-        saveSnapshot()
     }
 
     fun toggleTask(taskId: String) {
@@ -930,18 +964,35 @@ class HumanProgramViewModel(
 
     fun addRecurringTask() {
         val cleanTitle = newRecurringTitle.trim()
+        addRecurringTask(
+            title = cleanTitle,
+            applicableWeekdays = setOf(1, 2, 3, 4, 5, 6, 7),
+            active = true
+        )
+        if (cleanTitle.isNotEmpty()) {
+            newRecurringTitle = ""
+        }
+    }
+
+    fun addRecurringTask(
+        title: String,
+        applicableWeekdays: Set<Int>,
+        active: Boolean
+    ) {
+        val cleanTitle = title.trim()
         if (cleanTitle.isEmpty()) return
 
         val previousTemplates = recurringTemplates.toList()
         val previousTasks = todayTasks.toList()
         val template = RecurringTaskTemplate(
             title = cleanTitle,
-            applicableWeekdays = setOf(1, 2, 3, 4, 5, 6, 7)
+            applicableWeekdays = applicableWeekdays.filter { it in 1..7 }.toSet(),
+            active = active
         )
         recurringTemplates.add(
             template
         )
-        todayTasks.add(
+        if (template.active && today.toHumanProgramWeekday() in template.applicableWeekdays) todayTasks.add(
             DailyTask(
                 title = cleanTitle,
                 sourceType = DailyTaskSourceType.RECURRING,
@@ -956,7 +1007,47 @@ class HumanProgramViewModel(
                 updatedTasks = todayTasks.toList()
             )
         )
-        newRecurringTitle = ""
+        saveSnapshot()
+    }
+
+    fun updateRecurringTaskDetails(
+        templateId: String,
+        title: String,
+        applicableWeekdays: Set<Int>,
+        active: Boolean
+    ) {
+        val index = recurringTemplates.indexOfFirst { it.id == templateId }
+        if (index == -1) return
+        val cleanTitle = title.trim()
+        if (cleanTitle.isBlank()) return
+
+        val previousTemplates = recurringTemplates.toList()
+        val previousTasks = todayTasks.toList()
+        val previous = recurringTemplates[index]
+        val updated = previous.copy(
+            title = cleanTitle,
+            applicableWeekdays = applicableWeekdays.filter { it in 1..7 }.toSet(),
+            active = active
+        )
+        if (previous == updated) return
+
+        recurringTemplates[index] = updated
+        todayTasks.replaceAll { task ->
+            if (task.sourceType == DailyTaskSourceType.RECURRING && (task.sourceId == templateId || task.title == previous.title)) {
+                task.copy(title = cleanTitle, sourceId = task.sourceId ?: templateId)
+            } else {
+                task
+            }
+        }
+        refreshSelectedGeneratedTasks()
+        recordEdit(
+            PlannerEdit.ReplaceRecurringTemplates(
+                previous = previousTemplates,
+                previousTasks = previousTasks,
+                updated = recurringTemplates.toList(),
+                updatedTasks = todayTasks.toList()
+            )
+        )
         saveSnapshot()
     }
 
@@ -1011,8 +1102,6 @@ class HumanProgramViewModel(
         } else {
             template.applicableWeekdays + weekday
         }
-        if (updatedWeekdays.isEmpty()) return
-
         val previous = recurringTemplates.toList()
         recurringTemplates[index] = template.copy(applicableWeekdays = updatedWeekdays)
         recordEdit(PlannerEdit.ReplaceRecurringTemplates(previous, todayTasks.toList(), recurringTemplates.toList(), todayTasks.toList()))
@@ -2053,6 +2142,18 @@ class HumanProgramViewModel(
         val clean = raw.trim()
         if (clean.isBlank()) return null
         return runCatching { LocalDate.parse(clean) }.getOrNull()
+    }
+
+    private fun LocalDate.toHumanProgramWeekday(): Int {
+        return when (dayOfWeek) {
+            java.time.DayOfWeek.SUNDAY -> 1
+            java.time.DayOfWeek.MONDAY -> 2
+            java.time.DayOfWeek.TUESDAY -> 3
+            java.time.DayOfWeek.WEDNESDAY -> 4
+            java.time.DayOfWeek.THURSDAY -> 5
+            java.time.DayOfWeek.FRIDAY -> 6
+            java.time.DayOfWeek.SATURDAY -> 7
+        }
     }
 
     private fun removeCompletedBacklogTasks() {

@@ -131,6 +131,7 @@ internal fun SettingsScreen(
     detail: SettingsDetail?,
     appearance: String,
     onDetail: (SettingsDetail) -> Unit,
+    onOpenRecurringTask: (String) -> Unit,
     notificationPermissionGranted: Boolean,
     onRequestNotificationPermission: () -> Unit,
     calendarPermissionGranted: Boolean,
@@ -160,7 +161,7 @@ internal fun SettingsScreen(
         )
         SettingsDetail.TODAY_DISPLAY -> TodayDisplaySettings()
         SettingsDetail.BACKLOG -> BacklogSettings(viewModel)
-        SettingsDetail.RECURRING -> RecurringSettings(viewModel)
+        SettingsDetail.RECURRING -> RecurringSettings(viewModel, onOpenRecurringTask)
         SettingsDetail.SCHEDULE -> ScheduleSettings(viewModel)
         SettingsDetail.EXERCISE -> ExerciseSettings(viewModel)
         SettingsDetail.NOTIFICATIONS -> RemindersScreen(
@@ -200,18 +201,7 @@ internal fun SettingsRoot(
         settingsGroups.forEach { group ->
             item { HpSectionHeader(group.label, null) }
             items(group.items) { detail ->
-                val status = when (detail) {
-                    SettingsDetail.APPEARANCE -> "System, light, dark"
-                    SettingsDetail.RECURRING -> "${viewModel.recurringTemplates.size} templates"
-                    SettingsDetail.SCHEDULE -> "${viewModel.scheduleBlocks.size} blocks"
-                    SettingsDetail.EXERCISE -> "${viewModel.exerciseRoutine.items.size} items"
-                    SettingsDetail.CALENDAR -> "${viewModel.selectedCalendarSourceIds.size} sources selected"
-                    SettingsDetail.IMPORT_EXPORT -> "Backups and previews"
-                    SettingsDetail.STATS -> "${viewModel.completionRatePercent}% completion"
-                    SettingsDetail.SECURITY -> if (viewModel.appLockEnabled) "App lock on" else "Not set"
-                    else -> detail.subtitle
-                }
-                SettingsRow(detail.icon, detail.label, status) { onDetail(detail) }
+                SettingsRow(detail.icon, detail.label, "") { onDetail(detail) }
             }
         }
     }
@@ -354,86 +344,144 @@ internal fun CalendarSettings(
 }
 
 @Composable
-internal fun RecurringSettings(viewModel: HumanProgramViewModel) {
-    var selectedTemplateId by rememberSaveable { mutableStateOf<String?>(null) }
-    var editing by rememberSaveable { mutableStateOf(false) }
-    val selectedTemplate = viewModel.recurringTemplates.firstOrNull { it.id == selectedTemplateId }
-    if (selectedTemplate != null) {
-        RecurringTemplateDetailPage(
-            template = selectedTemplate,
-            editing = editing,
-            onEdit = { editing = true },
-            onDone = { editing = false },
-            onBack = {
-                selectedTemplateId = null
-                editing = false
-            },
-            onToggleActive = { viewModel.toggleRecurringTaskActive(selectedTemplate.id) },
-            onTitleChange = { viewModel.renameRecurringTask(selectedTemplate.id, it) },
-            onWeekdayToggle = { viewModel.toggleRecurringTaskWeekday(selectedTemplate.id, it) },
-            onDelete = {
-                viewModel.deleteRecurringTask(selectedTemplate.id)
-                selectedTemplateId = null
-                editing = false
-            }
-        )
-        return
-    }
+internal fun RecurringSettings(
+    viewModel: HumanProgramViewModel,
+    onOpenRecurringTask: (String) -> Unit
+) {
     HpList {
-        item { HpSectionHeader("Recurring Tasks", null) }
-        item {
-            HpSoftPanel {
-                Column {
-                    viewModel.recurringTemplates.forEachIndexed { index, template ->
-                        SettingsRow(Icons.Outlined.Repeat, template.title, "Days: ${template.applicableWeekdays.size}") { selectedTemplateId = template.id }
-                        if (index != viewModel.recurringTemplates.lastIndex) HorizontalDivider(color = HpColors.divider)
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    HpFormTextField("New recurring task", viewModel.newRecurringTitle, viewModel::updateNewRecurringTitle)
-                    HpPrimaryButton("Add Recurring Task", viewModel::addRecurringTask)
-                }
+        items(viewModel.recurringTemplates, key = { it.id }) { template ->
+            SettingsRow(
+                icon = Icons.Outlined.Repeat,
+                title = template.title,
+                subtitle = "Days: ${template.applicableWeekdays.size}"
+            ) {
+                onOpenRecurringTask(template.id)
             }
         }
     }
 }
 
 @Composable
-private fun RecurringTemplateDetailPage(
-    template: RecurringTaskTemplate,
+internal fun RecurringTaskPage(
+    title: String,
+    weekdays: Set<Int>,
+    active: Boolean,
     editing: Boolean,
-    onEdit: () -> Unit,
-    onDone: () -> Unit,
-    onBack: () -> Unit,
-    onToggleActive: () -> Unit,
     onTitleChange: (String) -> Unit,
-    onWeekdayToggle: (Int) -> Unit,
-    onDelete: () -> Unit
+    onWeekdaysChange: (Set<Int>) -> Unit,
+    onActiveChange: (Boolean) -> Unit
 ) {
+    val dayOptions = listOf(
+        1 to "Sunday",
+        2 to "Monday",
+        3 to "Tuesday",
+        4 to "Wednesday",
+        5 to "Thursday",
+        6 to "Friday",
+        7 to "Saturday"
+    )
     HpList {
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                HpTinyIconButton(Icons.AutoMirrored.Outlined.ArrowBack, "Back", onBack)
-                Text(template.title, modifier = Modifier.weight(1f), color = HpColors.ink, fontWeight = FontWeight.SemiBold)
-                HpSecondaryButton(if (editing) "Done" else "Edit") { if (editing) onDone() else onEdit() }
-            }
+            RecurringTaskTextField(
+                value = title,
+                onValueChange = onTitleChange,
+                editing = editing
+            )
         }
         item {
-            if (editing) {
-                RecurringTemplateRow(
-                    template = template,
-                    editing = true,
-                    onToggleActive = onToggleActive,
-                    onTitleChange = onTitleChange,
-                    onWeekdayToggle = onWeekdayToggle,
-                    onDelete = onDelete
-                )
-            } else {
-                HpSoftPanel {
-                    HpPlainRow(Icons.Outlined.Repeat, template.title, if (template.active) "Active" else "Inactive")
-                    Text("Days: ${template.applicableWeekdays.sorted().joinToString()}", color = HpColors.muted)
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                dayOptions.forEach { (weekday, label) ->
+                    RecurringDayRow(
+                        label = label,
+                        selected = weekday in weekdays,
+                        editing = editing,
+                        onClick = {
+                            val updated = if (weekday in weekdays) weekdays - weekday else weekdays + weekday
+                            onWeekdaysChange(updated)
+                        }
+                    )
                 }
             }
         }
+        item {
+            HpSecondaryButton(
+                if (weekdays.size == 7) "Unselect all days" else "Select all days"
+            ) {
+                if (editing) onWeekdaysChange(if (weekdays.size == 7) emptySet() else setOf(1, 2, 3, 4, 5, 6, 7))
+            }
+        }
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = if (active) "Active" else "Inactive",
+                    modifier = Modifier.weight(1f),
+                    color = HpColors.ink,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Switch(
+                    checked = active,
+                    enabled = editing,
+                    onCheckedChange = onActiveChange
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecurringTaskTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    editing: Boolean
+) {
+    OutlinedTextField(
+        modifier = Modifier.fillMaxWidth(),
+        value = value,
+        onValueChange = onValueChange,
+        enabled = editing,
+        singleLine = true,
+        placeholder = { Text("Task name") },
+        shape = RoundedCornerShape(28.dp),
+        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+            disabledTextColor = HpColors.ink,
+            disabledBorderColor = Color.Transparent,
+            disabledContainerColor = Color.Transparent,
+            disabledPlaceholderColor = HpColors.ink
+        ),
+        textStyle = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+    )
+}
+
+@Composable
+private fun RecurringDayRow(
+    label: String,
+    selected: Boolean,
+    editing: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .clickable(enabled = editing, onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Checkbox(
+            checked = selected,
+            enabled = editing,
+            onCheckedChange = { onClick() }
+        )
+        Text(
+            text = label,
+            color = HpColors.ink,
+            fontWeight = FontWeight.SemiBold
+        )
     }
 }
 
