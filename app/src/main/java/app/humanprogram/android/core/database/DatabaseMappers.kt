@@ -69,7 +69,7 @@ fun RecurringTaskTemplate.toEntity(now: Instant = Instant.now()): RecurringTaskT
     return RecurringTaskTemplateEntity(
         id = id,
         title = title,
-        notes = "",
+        notes = notes,
         applicableWeekdaysCsv = applicableWeekdays.sorted().joinToString(","),
         active = active,
         createdAt = timestamp,
@@ -81,6 +81,7 @@ fun RecurringTaskTemplateEntity.toModel(): RecurringTaskTemplate {
     return RecurringTaskTemplate(
         id = id,
         title = title,
+        notes = notes,
         applicableWeekdays = applicableWeekdaysCsv
             .split(",")
             .filter { it.isNotBlank() }

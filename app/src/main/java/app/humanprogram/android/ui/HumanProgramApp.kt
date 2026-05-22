@@ -170,10 +170,19 @@ fun HumanProgramApp(
     var backlogTaskEditing by rememberSaveable { mutableStateOf(false) }
     var backlogTaskFormReturnProject by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedRecurringTemplateId by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedRecurringTemplateIds by rememberSaveable { mutableStateOf(setOf<String>()) }
+    var recurringTaskSelectMode by rememberSaveable { mutableStateOf(false) }
     var recurringTitleDraft by rememberSaveable { mutableStateOf("") }
+    var recurringNotesDraft by rememberSaveable { mutableStateOf("") }
     var recurringWeekdaysDraft by rememberSaveable { mutableStateOf(setOf<Int>()) }
     var recurringActiveDraft by rememberSaveable { mutableStateOf(true) }
     var recurringTaskEditing by rememberSaveable { mutableStateOf(false) }
+    var selectedScheduleTemplateId by rememberSaveable { mutableStateOf<String?>(null) }
+    var scheduleTemplateCreating by rememberSaveable { mutableStateOf(false) }
+    var scheduleTemplateEditing by rememberSaveable { mutableStateOf(false) }
+    var scheduleEditorSaveRequest by rememberSaveable { mutableIntStateOf(0) }
+    var scheduleEditorDeleteRequest by rememberSaveable { mutableIntStateOf(0) }
+    var scheduleEditorCloseRequest by rememberSaveable { mutableIntStateOf(0) }
     var taskDetailEditing by rememberSaveable { mutableStateOf(false) }
     var taskDetailTitleDraft by rememberSaveable { mutableStateOf("") }
     var taskDetailNotesDraft by rememberSaveable { mutableStateOf("") }
@@ -203,6 +212,7 @@ fun HumanProgramApp(
     var showBacklogTaskUnsavedDialog by rememberSaveable { mutableStateOf(false) }
     var showBacklogTaskEditUnsavedDialog by rememberSaveable { mutableStateOf(false) }
     var showRecurringTaskUnsavedDialog by rememberSaveable { mutableStateOf(false) }
+    var recurringTaskDeleteConfirmationIds by rememberSaveable { mutableStateOf(setOf<String>()) }
     var showRoutineSheet by rememberSaveable { mutableStateOf(false) }
     var showReminderSheet by rememberSaveable { mutableStateOf(false) }
     var showScheduleSheet by rememberSaveable { mutableStateOf(false) }
@@ -237,6 +247,12 @@ fun HumanProgramApp(
         showProjectDeleteChoicePopup = false
         showProjectMoveDestinationPopup = false
         showProjectTaskAssignPopup = false
+        recurringTaskDeleteConfirmationIds = emptySet()
+        if (settingsDetail != SettingsDetail.SCHEDULE) {
+            selectedScheduleTemplateId = null
+            scheduleTemplateCreating = false
+            scheduleTemplateEditing = false
+        }
     }
 
     LaunchedEffect(undoRedoMessage) {
@@ -468,7 +484,6 @@ fun HumanProgramApp(
             HpRoute.ROUTINES -> ({ showRoutineSheet = true })
             HpRoute.REMINDERS -> ({ showReminderSheet = true })
             HpRoute.SETTINGS -> when (settingsDetail) {
-                SettingsDetail.SCHEDULE -> ({ showScheduleSheet = true })
                 SettingsDetail.EXERCISE -> ({ showExerciseSheet = true })
                 SettingsDetail.NOTIFICATIONS -> ({ showReminderSheet = true })
                 else -> null
@@ -555,9 +570,12 @@ fun HumanProgramApp(
             return viewModel.recurringTemplates.firstOrNull { it.id == selectedRecurringTemplateId }
         }
         fun openRecurringTaskForm() {
+            recurringTaskSelectMode = false
+            selectedRecurringTemplateIds = emptySet()
             selectedRecurringTemplateId = null
             recurringTitleDraft = ""
-            recurringWeekdaysDraft = setOf(1, 2, 3, 4, 5, 6, 7)
+            recurringNotesDraft = ""
+            recurringWeekdaysDraft = emptySet()
             recurringActiveDraft = true
             recurringTaskEditing = true
             showRecurringTaskUnsavedDialog = false
@@ -566,8 +584,11 @@ fun HumanProgramApp(
         }
         fun openRecurringTaskEdit(templateId: String) {
             val template = viewModel.recurringTemplates.firstOrNull { it.id == templateId } ?: return
+            recurringTaskSelectMode = false
+            selectedRecurringTemplateIds = emptySet()
             selectedRecurringTemplateId = template.id
             recurringTitleDraft = template.title
+            recurringNotesDraft = template.notes
             recurringWeekdaysDraft = template.applicableWeekdays
             recurringActiveDraft = template.active
             recurringTaskEditing = false
@@ -579,11 +600,13 @@ fun HumanProgramApp(
             val template = selectedRecurringTemplate()
             return if (route == HpRoute.RECURRING_TASK_FORM) {
                 recurringTitleDraft.isNotBlank() ||
-                    recurringWeekdaysDraft != setOf(1, 2, 3, 4, 5, 6, 7) ||
+                    recurringNotesDraft.isNotBlank() ||
+                    recurringWeekdaysDraft.isNotEmpty() ||
                     !recurringActiveDraft
             } else {
                 template != null && (
                     recurringTitleDraft != template.title ||
+                        recurringNotesDraft != template.notes ||
                         recurringWeekdaysDraft != template.applicableWeekdays ||
                         recurringActiveDraft != template.active
                 )
@@ -612,6 +635,7 @@ fun HumanProgramApp(
             if (route == HpRoute.RECURRING_TASK_FORM) {
                 viewModel.addRecurringTask(
                     title = cleanTitle,
+                    notes = recurringNotesDraft,
                     applicableWeekdays = recurringWeekdaysDraft,
                     active = recurringActiveDraft
                 )
@@ -622,11 +646,36 @@ fun HumanProgramApp(
                 viewModel.updateRecurringTaskDetails(
                     templateId = templateId,
                     title = cleanTitle,
+                    notes = recurringNotesDraft,
                     applicableWeekdays = recurringWeekdaysDraft,
                     active = recurringActiveDraft
                 )
             }
             recurringTaskEditing = false
+        }
+        fun requestDeleteSelectedRecurringTask() {
+            recurringTaskDeleteConfirmationIds = selectedRecurringTemplateId?.let { setOf(it) }.orEmpty()
+        }
+        fun requestDeleteSelectedRecurringTemplates() {
+            recurringTaskDeleteConfirmationIds = selectedRecurringTemplateIds
+        }
+        fun confirmRecurringTaskDeletion() {
+            val templateIds = recurringTaskDeleteConfirmationIds
+            if (templateIds.isEmpty()) return
+            viewModel.deleteRecurringTasks(templateIds)
+            selectedRecurringTemplateId = null
+            selectedRecurringTemplateIds = emptySet()
+            recurringTaskEditing = false
+            recurringTaskDeleteConfirmationIds = emptySet()
+            if (route == HpRoute.RECURRING_TASK_FORM || route == HpRoute.RECURRING_TASK_EDIT) {
+                route = HpRoute.SETTINGS
+                settingsDetail = SettingsDetail.RECURRING
+            }
+        }
+        fun closeScheduleEditor() {
+            selectedScheduleTemplateId = null
+            scheduleTemplateCreating = false
+            scheduleTemplateEditing = false
         }
         BackHandler(enabled = route == HpRoute.BACKLOG_TASK_FORM) {
             leaveBacklogTaskForm()
@@ -637,12 +686,19 @@ fun HumanProgramApp(
         BackHandler(enabled = route == HpRoute.RECURRING_TASK_FORM || route == HpRoute.RECURRING_TASK_EDIT) {
             leaveRecurringTaskPage()
         }
+        BackHandler(enabled = route == HpRoute.SETTINGS && settingsDetail == SettingsDetail.RECURRING && recurringTaskSelectMode) {
+            recurringTaskSelectMode = false
+            selectedRecurringTemplateIds = emptySet()
+        }
         val goBack: () -> Unit = {
             when {
                 route == HpRoute.PROJECT -> {
                     projectTaskSelectMode = false
                     selectedProjectTaskIds = emptySet()
                     route = HpRoute.BACKLOG
+                }
+                route == HpRoute.SETTINGS && settingsDetail == SettingsDetail.SCHEDULE && (scheduleTemplateCreating || selectedScheduleTemplateId != null) -> {
+                    scheduleEditorCloseRequest += 1
                 }
                 route == HpRoute.SETTINGS && settingsDetail != null -> settingsDetail = null
                 route == HpRoute.BACKLOG_TASK_FORM -> leaveBacklogTaskForm()
@@ -861,16 +917,56 @@ fun HumanProgramApp(
                 HpCommandAction(Icons.Outlined.RestartAlt, "Refresh calendar", onClick = onRefreshCalendarEvents)
             )
             HpRoute.SETTINGS -> listOf(
-                if (settingsDetail == null) menuSlot else backSlot,
+                if (settingsDetail == SettingsDetail.SCHEDULE && (scheduleTemplateCreating || selectedScheduleTemplateId != null)) {
+                    HpCommandAction(Icons.AutoMirrored.Outlined.ArrowBack, "Back") {
+                        scheduleEditorCloseRequest += 1
+                    }
+                } else if (settingsDetail == SettingsDetail.RECURRING && recurringTaskSelectMode) {
+                    HpCommandAction(Icons.Outlined.Close, "Exit selection") {
+                        recurringTaskSelectMode = false
+                        selectedRecurringTemplateIds = emptySet()
+                    }
+                } else if (settingsDetail == null) {
+                    menuSlot
+                } else {
+                    backSlot
+                },
                 null,
                 null,
                 null,
-                if (settingsDetail == SettingsDetail.RECURRING) {
+                if (settingsDetail == SettingsDetail.RECURRING && recurringTaskSelectMode) {
+                    HpCommandAction(
+                        icon = Icons.Outlined.Delete,
+                        contentDescription = "Delete selected recurring tasks",
+                        enabled = selectedRecurringTemplateIds.isNotEmpty(),
+                        onClick = { requestDeleteSelectedRecurringTemplates() }
+                    )
+                } else if (settingsDetail == SettingsDetail.SCHEDULE && selectedScheduleTemplateId != null) {
+                    HpCommandAction(Icons.Outlined.Delete, "Delete schedule") {
+                        scheduleEditorDeleteRequest += 1
+                    }
+                } else if (settingsDetail == SettingsDetail.SCHEDULE && !scheduleTemplateCreating && selectedScheduleTemplateId == null) {
+                    HpCommandAction(Icons.Outlined.Add, "Add schedule") {
+                        scheduleTemplateCreating = true
+                        selectedScheduleTemplateId = null
+                        scheduleTemplateEditing = true
+                    }
+                } else if (settingsDetail == SettingsDetail.RECURRING) {
                     HpCommandAction(Icons.Outlined.Add, "Add recurring task") { openRecurringTaskForm() }
                 } else {
                     null
                 },
-                if (settingsDetail == SettingsDetail.RECURRING) {
+                if (settingsDetail == SettingsDetail.SCHEDULE && (scheduleTemplateCreating || selectedScheduleTemplateId != null)) {
+                    if (scheduleTemplateEditing) {
+                        HpCommandAction(Icons.Outlined.Save, "Save schedule") {
+                            scheduleEditorSaveRequest += 1
+                        }
+                    } else {
+                        HpCommandAction(Icons.Outlined.Edit, "Edit schedule") {
+                            scheduleTemplateEditing = true
+                        }
+                    }
+                } else if (settingsDetail == SettingsDetail.RECURRING || settingsDetail == SettingsDetail.SCHEDULE) {
                     HpCommandAction(Icons.Outlined.MoreHoriz, "Undo and redo") {
                         undoRedoMode = true
                     }
@@ -884,7 +980,11 @@ fun HumanProgramApp(
                 null,
                 null,
                 null,
-                null,
+                if (route == HpRoute.RECURRING_TASK_EDIT && selectedRecurringTemplateId != null) {
+                    HpCommandAction(Icons.Outlined.Delete, "Delete recurring task") { requestDeleteSelectedRecurringTask() }
+                } else {
+                    null
+                },
                 if (recurringTaskEditing) {
                     HpCommandAction(
                         icon = Icons.Outlined.Save,
@@ -1085,10 +1185,12 @@ fun HumanProgramApp(
                 } else {
                     RecurringTaskPage(
                         title = recurringTitleDraft,
+                        notes = recurringNotesDraft,
                         weekdays = recurringWeekdaysDraft,
                         active = recurringActiveDraft,
                         editing = recurringTaskEditing,
                         onTitleChange = { recurringTitleDraft = it },
+                        onNotesChange = { recurringNotesDraft = it },
                         onWeekdaysChange = { recurringWeekdaysDraft = it },
                         onActiveChange = { recurringActiveDraft = it }
                     )
@@ -1193,6 +1295,50 @@ fun HumanProgramApp(
                 appearance = appearance,
                 onDetail = { settingsDetail = it },
                 onOpenRecurringTask = { openRecurringTaskEdit(it) },
+                scheduleEditorTemplateId = selectedScheduleTemplateId,
+                scheduleEditorCreating = scheduleTemplateCreating,
+                onCreateSchedule = {
+                    scheduleTemplateCreating = true
+                    selectedScheduleTemplateId = null
+                    scheduleTemplateEditing = true
+                },
+                onOpenSchedule = {
+                    selectedScheduleTemplateId = it
+                    scheduleTemplateCreating = false
+                    scheduleTemplateEditing = false
+                },
+                onCloseScheduleEditor = { closeScheduleEditor() },
+                onScheduleEditorSaved = {
+                    if (scheduleTemplateCreating) {
+                        closeScheduleEditor()
+                    } else {
+                        scheduleTemplateEditing = false
+                    }
+                },
+                onScheduleEditorExitEdit = {
+                    if (scheduleTemplateCreating) {
+                        closeScheduleEditor()
+                    } else {
+                        scheduleTemplateEditing = false
+                    }
+                },
+                scheduleEditorEditing = scheduleTemplateEditing,
+                saveRequest = scheduleEditorSaveRequest,
+                deleteRequest = scheduleEditorDeleteRequest,
+                closeRequest = scheduleEditorCloseRequest,
+                recurringTaskSelectMode = recurringTaskSelectMode,
+                selectedRecurringTemplateIds = selectedRecurringTemplateIds,
+                onRecurringTaskLongPress = {
+                    recurringTaskSelectMode = true
+                    selectedRecurringTemplateIds = selectedRecurringTemplateIds + it
+                },
+                onToggleRecurringTaskSelection = {
+                    selectedRecurringTemplateIds = if (it in selectedRecurringTemplateIds) {
+                        selectedRecurringTemplateIds - it
+                    } else {
+                        selectedRecurringTemplateIds + it
+                    }
+                },
                 notificationPermissionGranted = notificationPermissionGranted,
                 onRequestNotificationPermission = onRequestNotificationPermission,
                 calendarPermissionGranted = calendarPermissionGranted,
@@ -1399,15 +1545,6 @@ fun HumanProgramApp(
             }
             if (showBacklogTaskUnsavedDialog) {
                 BacklogUnsavedChoicePopup(
-                    onDiscard = {
-                        viewModel.updateNewBacklogTitle("")
-                        viewModel.updateNewBacklogProject("")
-                        viewModel.updateNewBacklogNotes("")
-                        viewModel.updateNewBacklogAssignedDate("")
-                        showBacklogTaskUnsavedDialog = false
-                        route = if (backlogTaskFormReturnProject != null) HpRoute.PROJECT else HpRoute.BACKLOG
-                        backlogTaskFormReturnProject = null
-                    },
                     onSave = {
                         val project = viewModel.newBacklogProject.trim()
                         viewModel.addBacklogItem()
@@ -1419,30 +1556,76 @@ fun HumanProgramApp(
                         route = if (backlogTaskFormReturnProject != null) HpRoute.PROJECT else HpRoute.BACKLOG
                         backlogTaskFormReturnProject = null
                     },
+                    onDiscard = {
+                        viewModel.updateNewBacklogTitle("")
+                        viewModel.updateNewBacklogProject("")
+                        viewModel.updateNewBacklogNotes("")
+                        viewModel.updateNewBacklogAssignedDate("")
+                        showBacklogTaskUnsavedDialog = false
+                        route = if (backlogTaskFormReturnProject != null) HpRoute.PROJECT else HpRoute.BACKLOG
+                        backlogTaskFormReturnProject = null
+                    },
+                    onCancel = { showBacklogTaskUnsavedDialog = false },
                     saveEnabled = viewModel.newBacklogTitle.trim().isNotEmpty()
                 )
             }
             if (showBacklogTaskEditUnsavedDialog) {
                 BacklogUnsavedChoicePopup(
+                    onSave = {
+                        saveBacklogTaskEdit()
+                        showBacklogTaskEditUnsavedDialog = false
+                        selectedBacklogItemId = null
+                        route = HpRoute.BACKLOG
+                    },
                     onDiscard = {
                         showBacklogTaskEditUnsavedDialog = false
                         selectedBacklogItemId = null
                         backlogTaskEditing = false
                         route = HpRoute.BACKLOG
                     },
-                    onSave = {
-                        showBacklogTaskEditUnsavedDialog = false
-                    },
-                    saveEnabled = true,
-                    saveLabel = "Cancel"
+                    onCancel = { showBacklogTaskEditUnsavedDialog = false },
+                    saveEnabled = backlogEditTitleDraft.trim().isNotEmpty()
                 )
             }
             if (showRecurringTaskUnsavedDialog) {
                 BacklogUnsavedChoicePopup(
+                    onSave = {
+                        saveRecurringTaskPage()
+                        showRecurringTaskUnsavedDialog = false
+                        selectedRecurringTemplateId = null
+                        recurringTaskEditing = false
+                        route = HpRoute.SETTINGS
+                        settingsDetail = SettingsDetail.RECURRING
+                    },
                     onDiscard = { discardRecurringTaskPage() },
-                    onSave = { showRecurringTaskUnsavedDialog = false },
-                    saveEnabled = true,
-                    saveLabel = "Cancel"
+                    onCancel = { showRecurringTaskUnsavedDialog = false },
+                    saveEnabled = recurringTitleDraft.trim().isNotEmpty()
+                )
+            }
+            if (recurringTaskDeleteConfirmationIds.isNotEmpty()) {
+                val deleteCount = recurringTaskDeleteConfirmationIds.size
+                AlertDialog(
+                    onDismissRequest = { recurringTaskDeleteConfirmationIds = emptySet() },
+                    title = { Text(if (deleteCount == 1) "Delete recurring task?" else "Delete recurring tasks?") },
+                    text = {
+                        Text(
+                            if (deleteCount == 1) {
+                                "This recurring task will be removed from recurring tasks and today's page. You can undo it from the undo menu."
+                            } else {
+                                "$deleteCount recurring tasks will be removed from recurring tasks and today's page. You can undo this from the undo menu."
+                            }
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { confirmRecurringTaskDeletion() }) {
+                            Text("Delete")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { recurringTaskDeleteConfirmationIds = emptySet() }) {
+                            Text("Cancel")
+                        }
+                    }
                 )
             }
         }

@@ -369,11 +369,17 @@ internal fun TodayScreen(
             HpSectionHeader("Exercise", null)
             Spacer(Modifier.height(14.dp))
             HpSoftPanel {
-                val exerciseItems = viewModel.exerciseRoutine.items
+                val exerciseTemplate = viewModel.exerciseTemplateForDate(viewModel.selectedDate)
+                val exerciseItems = exerciseTemplate.items
+                    .map { it.text }
                     .filterNot { it.equals("No exercise items have been added for today.", ignoreCase = true) }
+                    .ifEmpty {
+                        viewModel.exerciseRoutine.items
+                            .filterNot { it.equals("No exercise items have been added for today.", ignoreCase = true) }
+                    }
                 if (exerciseItems.isEmpty()) {
                     Text(
-                        text = "Nothing for today.",
+                        text = "There is no exercise routine for ${weekdayName(viewModel.selectedDate.dayOfWeek.value % 7 + 1)}.",
                         modifier = Modifier.fillMaxWidth(),
                         textAlign = TextAlign.Center,
                         color = HpColors.ink,
@@ -381,6 +387,8 @@ internal fun TodayScreen(
                     )
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        val title = exerciseTemplate.title.ifBlank { weekdayName(exerciseTemplate.weekday) }
+                        Text(title, color = HpColors.ink, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         exerciseItems.forEach { item ->
                             Text(item, color = HpColors.ink, style = MaterialTheme.typography.bodyMedium)
                         }
@@ -1369,8 +1377,9 @@ private fun ProjectDropdownOption(
 
 @Composable
 internal fun BacklogUnsavedChoicePopup(
-    onDiscard: () -> Unit,
     onSave: () -> Unit,
+    onDiscard: () -> Unit,
+    onCancel: () -> Unit,
     saveEnabled: Boolean,
     saveLabel: String = "Save"
 ) {
@@ -1384,29 +1393,54 @@ internal fun BacklogUnsavedChoicePopup(
             tonalElevation = 6.dp,
             shadowElevation = 10.dp
         ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 38.dp, vertical = 28.dp),
-                horizontalArrangement = Arrangement.spacedBy(46.dp),
-                verticalAlignment = Alignment.CenterVertically
+            Column(
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text(
-                    text = "Discard",
-                    modifier = Modifier.clickable(onClick = onDiscard),
-                    color = Color(0xFFB3261E),
-                    fontFamily = FontFamily.Serif,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    text = saveLabel,
-                    modifier = if (saveEnabled) Modifier.clickable(onClick = onSave) else Modifier,
+                UnsavedChoiceButton(
+                    label = saveLabel,
                     color = if (saveEnabled) HpColors.ink else HpColors.muted.copy(alpha = 0.45f),
-                    fontFamily = FontFamily.Serif,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold
+                    enabled = saveEnabled,
+                    onClick = onSave
+                )
+                UnsavedChoiceButton(
+                    label = "Discard",
+                    color = Color(0xFFFF3B30),
+                    onClick = onDiscard
+                )
+                UnsavedChoiceButton(
+                    label = "Cancel",
+                    color = HpColors.ink,
+                    onClick = onCancel
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun UnsavedChoiceButton(
+    label: String,
+    color: Color,
+    enabled: Boolean = true,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .width(260.dp)
+            .height(58.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .background(Color(0xFFD6D6D6))
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            color = color,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold
+        )
     }
 }
 
@@ -2396,4 +2430,9 @@ private fun BackupPackagePage(
             item { Text(viewModel.hprgmMessage, color = HpColors.muted) }
         }
     }
+}
+
+private fun weekdayName(weekday: Int): String {
+    return listOf("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
+        .getOrElse(weekday - 1) { "Day $weekday" }
 }

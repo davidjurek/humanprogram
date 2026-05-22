@@ -34,6 +34,7 @@ data class DailyTask(
 data class RecurringTaskTemplate(
     val id: String = UUID.randomUUID().toString(),
     val title: String,
+    val notes: String = "",
     val applicableWeekdays: Set<Int>,
     val active: Boolean = true
 )
@@ -58,10 +59,39 @@ data class ScheduleBlock(
     val timeRange: String
 )
 
+data class ScheduleTemplate(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String,
+    val active: Boolean = true,
+    val assignedWeekdays: Set<Int> = emptySet(),
+    val customDateStart: LocalDate? = null,
+    val customDateEnd: LocalDate? = null,
+    val blocks: List<ScheduleBlock> = emptyList()
+) {
+    val usesCustomDateRange: Boolean
+        get() = customDateStart != null && customDateEnd != null
+}
+
 data class ExerciseRoutine(
     val title: String,
-    val items: List<String>
+    val items: List<String>,
+    val templates: List<ExerciseDayRoutine> = defaultExerciseDayRoutines()
 )
+
+data class ExerciseDayRoutine(
+    val weekday: Int,
+    val title: String = "",
+    val items: List<ExerciseRoutineItem> = emptyList()
+)
+
+data class ExerciseRoutineItem(
+    val id: String = UUID.randomUUID().toString(),
+    val text: String
+)
+
+fun defaultExerciseDayRoutines(): List<ExerciseDayRoutine> {
+    return (1..7).map { weekday -> ExerciseDayRoutine(weekday = weekday) }
+}
 
 data class NotificationReminder(
     val id: String = UUID.randomUUID().toString(),

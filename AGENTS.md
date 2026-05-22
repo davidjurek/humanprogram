@@ -78,6 +78,7 @@ testing/
 - Before coding, check `git status --short` when practical.
 - Search with `rg` or `rg --files`.
 - For UI work, read `UI_DEVELOPMENT_GUIDE.md` first.
+- Read and edit modes for the same screen must share identical UI positioning and styling unless the owner explicitly asks for a difference.
 - For dailyOS parity work, use the folded lessons in `ADD.md` and `UI_DEVELOPMENT_GUIDE.md`.
 - For feature scope and product rules, read `ADD.md` first.
 - For current next steps, read `BUILD_STATUS.md` first.

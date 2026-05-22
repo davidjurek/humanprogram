@@ -6,10 +6,13 @@ import app.humanprogram.android.planning.calendar.CalendarLocalState
 import app.humanprogram.android.planning.model.DailyTask
 import app.humanprogram.android.planning.model.DailyTaskSourceType
 import app.humanprogram.android.planning.model.ExerciseRoutine
+import app.humanprogram.android.planning.model.ExerciseDayRoutine
+import app.humanprogram.android.planning.model.ExerciseRoutineItem
 import app.humanprogram.android.planning.model.NotificationReminder
 import app.humanprogram.android.planning.model.RecurringTaskTemplate
 import app.humanprogram.android.planning.model.ReminderRecurrence
 import app.humanprogram.android.planning.model.ScheduleBlock
+import app.humanprogram.android.planning.model.ScheduleTemplate
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.LocalDate
@@ -22,6 +25,7 @@ object PlannerSnapshotJson {
             .put("backlogItems", snapshot.backlogItems.toBacklogItemsJson())
             .put("recurringTemplates", snapshot.recurringTemplates.toRecurringTemplatesJson())
             .put("scheduleBlocks", snapshot.scheduleBlocks.toScheduleBlocksJson())
+            .put("scheduleTemplates", snapshot.scheduleTemplates.toScheduleTemplatesJson())
             .put("exerciseRoutine", snapshot.exerciseRoutine.toJson())
             .put("reminders", snapshot.reminders.toRemindersJson())
             .put("routines", JSONArray(snapshot.routines))
@@ -35,6 +39,7 @@ object PlannerSnapshotJson {
             backlogItems = json.getJSONArray("backlogItems").toBacklogItems(),
             recurringTemplates = json.optJSONArray("recurringTemplates")?.toRecurringTemplates().orEmpty(),
             scheduleBlocks = json.optJSONArray("scheduleBlocks")?.toScheduleBlocks().orEmpty(),
+            scheduleTemplates = json.optJSONArray("scheduleTemplates")?.toScheduleTemplates().orEmpty(),
             exerciseRoutine = json.optJSONObject("exerciseRoutine")?.toExerciseRoutine()
                 ?: ExerciseRoutine(title = "Today routine", items = emptyList()),
             reminders = json.optJSONArray("reminders")?.toReminders().orEmpty(),
@@ -77,8 +82,26 @@ private fun List<RecurringTaskTemplate>.toRecurringTemplatesJson(): JSONArray {
             JSONObject()
                 .put("id", template.id)
                 .put("title", template.title)
+                .put("notes", template.notes)
                 .put("applicableWeekdays", JSONArray(template.applicableWeekdays.sorted()))
                 .put("active", template.active)
+        )
+    }
+    return array
+}
+
+private fun List<ScheduleTemplate>.toScheduleTemplatesJson(): JSONArray {
+    val array = JSONArray()
+    forEach { template ->
+        array.put(
+            JSONObject()
+                .put("id", template.id)
+                .put("name", template.name)
+                .put("active", template.active)
+                .put("assignedWeekdays", JSONArray(template.assignedWeekdays.sorted()))
+                .put("customDateStart", template.customDateStart?.toString())
+                .put("customDateEnd", template.customDateEnd?.toString())
+                .put("blocks", template.blocks.toScheduleBlocksJson())
         )
     }
     return array
@@ -96,10 +119,51 @@ private fun List<ScheduleBlock>.toScheduleBlocksJson(): JSONArray {
     return array
 }
 
+private fun JSONArray.toScheduleTemplates(): List<ScheduleTemplate> {
+    return (0 until length()).map { index ->
+        val item = getJSONObject(index)
+        ScheduleTemplate(
+            id = item.optString("id").takeIf { it.isNotBlank() } ?: java.util.UUID.randomUUID().toString(),
+            name = item.optString("name", "Untitled Schedule"),
+            active = item.optBoolean("active", true),
+            assignedWeekdays = item.optJSONArray("assignedWeekdays")?.toIntSet().orEmpty(),
+            customDateStart = item.optString("customDateStart").takeIf { it.isNotBlank() && it != "null" }?.let(LocalDate::parse),
+            customDateEnd = item.optString("customDateEnd").takeIf { it.isNotBlank() && it != "null" }?.let(LocalDate::parse),
+            blocks = item.optJSONArray("blocks")?.toScheduleBlocks().orEmpty()
+        )
+    }
+}
+
 private fun ExerciseRoutine.toJson(): JSONObject {
     return JSONObject()
         .put("title", title)
         .put("items", JSONArray(items))
+        .put("templates", templates.toExerciseTemplatesJson())
+}
+
+private fun List<ExerciseDayRoutine>.toExerciseTemplatesJson(): JSONArray {
+    val array = JSONArray()
+    forEach { template ->
+        array.put(
+            JSONObject()
+                .put("weekday", template.weekday)
+                .put("title", template.title)
+                .put("items", template.items.toExerciseItemsJson())
+        )
+    }
+    return array
+}
+
+private fun List<ExerciseRoutineItem>.toExerciseItemsJson(): JSONArray {
+    val array = JSONArray()
+    forEach { item ->
+        array.put(
+            JSONObject()
+                .put("id", item.id)
+                .put("text", item.text)
+        )
+    }
+    return array
 }
 
 private fun List<DailyTask>.toDailyTasksJson(): JSONArray {
@@ -157,6 +221,7 @@ private fun JSONArray.toRecurringTemplates(): List<RecurringTaskTemplate> {
         RecurringTaskTemplate(
             id = item.getString("id"),
             title = item.getString("title"),
+            notes = item.optString("notes"),
             applicableWeekdays = item.getJSONArray("applicableWeekdays").toIntSet(),
             active = item.getBoolean("active")
         )
@@ -176,8 +241,30 @@ private fun JSONArray.toScheduleBlocks(): List<ScheduleBlock> {
 private fun JSONObject.toExerciseRoutine(): ExerciseRoutine {
     return ExerciseRoutine(
         title = optString("title"),
-        items = optJSONArray("items")?.toStringList().orEmpty()
+        items = optJSONArray("items")?.toStringList().orEmpty(),
+        templates = optJSONArray("templates")?.toExerciseTemplates().orEmpty()
     )
+}
+
+private fun JSONArray.toExerciseTemplates(): List<ExerciseDayRoutine> {
+    return (0 until length()).map { index ->
+        val item = getJSONObject(index)
+        ExerciseDayRoutine(
+            weekday = item.optInt("weekday"),
+            title = item.optString("title"),
+            items = item.optJSONArray("items")?.toExerciseItems().orEmpty()
+        )
+    }.filter { it.weekday in 1..7 }
+}
+
+private fun JSONArray.toExerciseItems(): List<ExerciseRoutineItem> {
+    return (0 until length()).map { index ->
+        val item = getJSONObject(index)
+        ExerciseRoutineItem(
+            id = item.optString("id").takeIf { it.isNotBlank() } ?: java.util.UUID.randomUUID().toString(),
+            text = item.optString("text")
+        )
+    }
 }
 
 private fun JSONArray.toReminders(): List<NotificationReminder> {

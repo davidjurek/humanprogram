@@ -10,6 +10,7 @@ import app.humanprogram.android.planning.model.ExerciseRoutine
 import app.humanprogram.android.planning.model.NotificationReminder
 import app.humanprogram.android.planning.model.RecurringTaskTemplate
 import app.humanprogram.android.planning.model.ScheduleBlock
+import app.humanprogram.android.planning.model.ScheduleTemplate
 import org.json.JSONObject
 import java.io.File
 import java.security.KeyStore
@@ -26,6 +27,7 @@ data class PlannerSnapshot(
     val backlogItems: List<BacklogItem>,
     val recurringTemplates: List<RecurringTaskTemplate>,
     val scheduleBlocks: List<ScheduleBlock>,
+    val scheduleTemplates: List<ScheduleTemplate> = emptyList(),
     val exerciseRoutine: ExerciseRoutine,
     val reminders: List<NotificationReminder>,
     val routines: List<String>,

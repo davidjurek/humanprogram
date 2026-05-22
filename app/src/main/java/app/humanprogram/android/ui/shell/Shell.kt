@@ -250,7 +250,7 @@ private fun HpCommandCapsule(
     val finalSlot = if (undoRedoMode) {
         HpCommandAction(Icons.Outlined.Close, "Close undo and redo", onClick = onCloseUndoRedoMode)
     } else {
-        slots.getOrNull(5) ?: HpCommandAction(Icons.Outlined.MoreHoriz, "Undo and redo", onClick = onUndoRedoMode)
+        slots.getOrNull(5) ?: if (slots.size > 5) null else HpCommandAction(Icons.Outlined.MoreHoriz, "Undo and redo", onClick = onUndoRedoMode)
     }
 
     Row(

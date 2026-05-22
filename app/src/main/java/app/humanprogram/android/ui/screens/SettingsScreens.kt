@@ -1,7 +1,12 @@
 package app.humanprogram.android.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.rememberScrollState
@@ -20,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -29,8 +35,13 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.FormatListBulleted
@@ -100,15 +111,23 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.humanprogram.android.core.security.PinHash
 import app.humanprogram.android.planning.HumanProgramViewModel
@@ -117,13 +136,19 @@ import app.humanprogram.android.planning.model.BacklogItem
 import app.humanprogram.android.planning.model.BacklogStatus
 import app.humanprogram.android.planning.model.DailyTask
 import app.humanprogram.android.planning.model.DailyTaskSourceType
+import app.humanprogram.android.planning.model.ExerciseRoutineItem
 import app.humanprogram.android.planning.model.NotificationReminder
 import app.humanprogram.android.planning.model.RecurringTaskTemplate
 import app.humanprogram.android.planning.model.ReminderRecurrence
 import app.humanprogram.android.planning.model.ScheduleBlock
+import app.humanprogram.android.planning.model.ScheduleTemplate
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import java.util.UUID
+import kotlin.math.roundToInt
 
 @Composable
 internal fun SettingsScreen(
@@ -132,6 +157,21 @@ internal fun SettingsScreen(
     appearance: String,
     onDetail: (SettingsDetail) -> Unit,
     onOpenRecurringTask: (String) -> Unit,
+    scheduleEditorTemplateId: String?,
+    scheduleEditorCreating: Boolean,
+    onCreateSchedule: () -> Unit,
+    onOpenSchedule: (String) -> Unit,
+    onCloseScheduleEditor: () -> Unit,
+    onScheduleEditorSaved: () -> Unit,
+    onScheduleEditorExitEdit: () -> Unit,
+    scheduleEditorEditing: Boolean,
+    saveRequest: Int,
+    deleteRequest: Int,
+    closeRequest: Int,
+    recurringTaskSelectMode: Boolean,
+    selectedRecurringTemplateIds: Set<String>,
+    onRecurringTaskLongPress: (String) -> Unit,
+    onToggleRecurringTaskSelection: (String) -> Unit,
     notificationPermissionGranted: Boolean,
     onRequestNotificationPermission: () -> Unit,
     calendarPermissionGranted: Boolean,
@@ -161,8 +201,28 @@ internal fun SettingsScreen(
         )
         SettingsDetail.TODAY_DISPLAY -> TodayDisplaySettings()
         SettingsDetail.BACKLOG -> BacklogSettings(viewModel)
-        SettingsDetail.RECURRING -> RecurringSettings(viewModel, onOpenRecurringTask)
-        SettingsDetail.SCHEDULE -> ScheduleSettings(viewModel)
+        SettingsDetail.RECURRING -> RecurringSettings(
+            viewModel = viewModel,
+            onOpenRecurringTask = onOpenRecurringTask,
+            selectMode = recurringTaskSelectMode,
+            selectedTemplateIds = selectedRecurringTemplateIds,
+            onLongPress = onRecurringTaskLongPress,
+            onToggleSelection = onToggleRecurringTaskSelection
+        )
+        SettingsDetail.SCHEDULE -> ScheduleSettings(
+            viewModel = viewModel,
+            editingTemplateId = scheduleEditorTemplateId,
+            creating = scheduleEditorCreating,
+            onCreate = onCreateSchedule,
+            onOpen = onOpenSchedule,
+            onCloseEditor = onCloseScheduleEditor,
+            onSaved = onScheduleEditorSaved,
+            onExitEdit = onScheduleEditorExitEdit,
+            editing = scheduleEditorEditing,
+            saveRequest = saveRequest,
+            deleteRequest = deleteRequest,
+            closeRequest = closeRequest
+        )
         SettingsDetail.EXERCISE -> ExerciseSettings(viewModel)
         SettingsDetail.NOTIFICATIONS -> RemindersScreen(
             viewModel = viewModel,
@@ -197,7 +257,7 @@ internal fun SettingsRoot(
     viewModel: HumanProgramViewModel,
     onDetail: (SettingsDetail) -> Unit
 ) {
-    HpList {
+    HpList(itemSpacing = HpTheme.spacing.xl) {
         settingsGroups.forEach { group ->
             item { HpSectionHeader(group.label, null) }
             items(group.items) { detail ->
@@ -212,7 +272,7 @@ internal fun AppearanceSettings(
     appearance: String,
     onAppearanceChanged: (String) -> Unit
 ) {
-    HpList {
+    HpList(itemSpacing = 12.dp) {
         item {
             HpSectionHeader("Appearance", "Persisted display mode")
             HpSoftPanel {
@@ -343,20 +403,112 @@ internal fun CalendarSettings(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun RecurringSettings(
     viewModel: HumanProgramViewModel,
-    onOpenRecurringTask: (String) -> Unit
+    onOpenRecurringTask: (String) -> Unit,
+    selectMode: Boolean,
+    selectedTemplateIds: Set<String>,
+    onLongPress: (String) -> Unit,
+    onToggleSelection: (String) -> Unit
 ) {
     HpList {
         items(viewModel.recurringTemplates, key = { it.id }) { template ->
-            SettingsRow(
-                icon = Icons.Outlined.Repeat,
-                title = template.title,
-                subtitle = "Days: ${template.applicableWeekdays.size}"
-            ) {
-                onOpenRecurringTask(template.id)
-            }
+            RecurringTemplateListRow(
+                template = template,
+                selected = template.id in selectedTemplateIds,
+                selectMode = selectMode,
+                onClick = {
+                    if (selectMode) onToggleSelection(template.id) else onOpenRecurringTask(template.id)
+                },
+                onLongClick = { onLongPress(template.id) }
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun RecurringTemplateListRow(
+    template: RecurringTaskTemplate,
+    selected: Boolean,
+    selectMode: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(if (selected) HpColors.glass else Color.Transparent)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            )
+            .padding(horizontal = 0.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        if (selectMode) {
+            RecurringSelectionCircle(selected = selected)
+        } else {
+            Icon(Icons.Outlined.Repeat, contentDescription = null, tint = HpColors.accent)
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Text(template.title, color = HpColors.ink, fontWeight = FontWeight.Medium)
+            RecurringTemplateWeekdaySummary(template.applicableWeekdays)
+        }
+        if (!selectMode) {
+            Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null, tint = HpColors.muted)
+        }
+    }
+}
+
+@Composable
+private fun RecurringSelectionCircle(
+    selected: Boolean
+) {
+    Box(
+        modifier = Modifier
+            .size(24.dp)
+            .clip(CircleShape)
+            .background(if (selected) HpColors.ink else Color.Transparent)
+            .border(2.dp, if (selected) HpColors.ink else HpColors.muted, CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        if (selected) {
+            Icon(
+                imageVector = Icons.Outlined.Check,
+                contentDescription = null,
+                tint = HpColors.surface,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecurringTemplateWeekdaySummary(
+    weekdays: Set<Int>
+) {
+    val labels = listOf(
+        1 to "S",
+        2 to "M",
+        3 to "T",
+        4 to "W",
+        5 to "T",
+        6 to "F",
+        7 to "S"
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        labels.forEach { (weekday, label) ->
+            Text(
+                text = label,
+                color = if (weekday in weekdays) HpColors.ink else HpColors.muted.copy(alpha = 0.45f),
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold
+            )
         }
     }
 }
@@ -364,10 +516,12 @@ internal fun RecurringSettings(
 @Composable
 internal fun RecurringTaskPage(
     title: String,
+    notes: String,
     weekdays: Set<Int>,
     active: Boolean,
     editing: Boolean,
     onTitleChange: (String) -> Unit,
+    onNotesChange: (String) -> Unit,
     onWeekdaysChange: (Set<Int>) -> Unit,
     onActiveChange: (Boolean) -> Unit
 ) {
@@ -389,30 +543,18 @@ internal fun RecurringTaskPage(
             )
         }
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                dayOptions.forEach { (weekday, label) ->
-                    RecurringDayRow(
-                        label = label,
-                        selected = weekday in weekdays,
-                        editing = editing,
-                        onClick = {
-                            val updated = if (weekday in weekdays) weekdays - weekday else weekdays + weekday
-                            onWeekdaysChange(updated)
-                        }
-                    )
-                }
-            }
-        }
-        item {
-            HpSecondaryButton(
-                if (weekdays.size == 7) "Unselect all days" else "Select all days"
-            ) {
-                if (editing) onWeekdaysChange(if (weekdays.size == 7) emptySet() else setOf(1, 2, 3, 4, 5, 6, 7))
-            }
+            RecurringWeekdaySelector(
+                dayOptions = dayOptions,
+                weekdays = weekdays,
+                editing = editing,
+                onWeekdaysChange = onWeekdaysChange
+            )
         }
         item {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -424,10 +566,16 @@ internal fun RecurringTaskPage(
                 )
                 Switch(
                     checked = active,
-                    enabled = editing,
-                    onCheckedChange = onActiveChange
+                    onCheckedChange = { if (editing) onActiveChange(it) }
                 )
             }
+        }
+        item {
+            RecurringTaskNotesField(
+                value = notes,
+                onValueChange = onNotesChange,
+                editing = editing
+            )
         }
     }
 }
@@ -450,134 +598,1520 @@ private fun RecurringTaskTextField(
             disabledTextColor = HpColors.ink,
             disabledBorderColor = Color.Transparent,
             disabledContainerColor = Color.Transparent,
-            disabledPlaceholderColor = HpColors.ink
+            disabledPlaceholderColor = HpColors.muted
         ),
-        textStyle = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+        textStyle = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Normal)
     )
 }
 
 @Composable
-private fun RecurringDayRow(
+private fun RecurringTaskNotesField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    editing: Boolean
+) {
+    OutlinedTextField(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(132.dp),
+        value = value,
+        onValueChange = onValueChange,
+        enabled = editing,
+        placeholder = { Text("Notes") },
+        shape = RoundedCornerShape(28.dp),
+        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+            disabledTextColor = HpColors.ink,
+            disabledBorderColor = Color.Transparent,
+            disabledContainerColor = Color.Transparent,
+            disabledPlaceholderColor = HpColors.muted
+        )
+    )
+}
+
+@Composable
+private fun RecurringWeekdaySelector(
+    dayOptions: List<Pair<Int, String>>,
+    weekdays: Set<Int>,
+    editing: Boolean,
+    onWeekdaysChange: (Set<Int>) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(28.dp))
+            .padding(horizontal = 18.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            dayOptions.forEach { (weekday, label) ->
+                RecurringWeekdayButton(
+                    label = label.first().toString(),
+                    selected = weekday in weekdays,
+                    onClick = {
+                        if (editing) {
+                            val updated = if (weekday in weekdays) weekdays - weekday else weekdays + weekday
+                            onWeekdaysChange(updated)
+                        }
+                    }
+                )
+            }
+        }
+        HorizontalDivider(color = if (editing) HpColors.divider else Color.Transparent)
+        Text(
+            text = "Every day",
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
+                .clickable(enabled = editing) {
+                    onWeekdaysChange(if (weekdays.size == 7) emptySet() else setOf(1, 2, 3, 4, 5, 6, 7))
+                }
+                .padding(vertical = 5.dp),
+            color = if (editing) HpColors.ink else Color.Transparent,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+@Composable
+private fun RecurringWeekdayButton(
     label: String,
     selected: Boolean,
-    editing: Boolean,
     onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(42.dp)
+            .clip(CircleShape)
+            .background(if (selected) HpColors.ink else Color.Transparent)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            color = if (selected) HpColors.surface else HpColors.ink,
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.bodyLarge
+        )
+    }
+}
+
+@Composable
+internal fun ScheduleSettings(
+    viewModel: HumanProgramViewModel,
+    editingTemplateId: String?,
+    creating: Boolean,
+    onCreate: () -> Unit,
+    onOpen: (String) -> Unit,
+    onCloseEditor: () -> Unit,
+    onSaved: () -> Unit,
+    onExitEdit: () -> Unit,
+    editing: Boolean,
+    saveRequest: Int,
+    deleteRequest: Int,
+    closeRequest: Int
+) {
+    var conflictMessage by rememberSaveable { mutableStateOf<String?>(null) }
+    val editingTemplate = editingTemplateId?.let { id -> viewModel.scheduleTemplates.firstOrNull { it.id == id } }
+
+    if (creating || editingTemplate != null) {
+        ScheduleTemplateEditor(
+            template = editingTemplate,
+            editing = editing,
+            saveRequest = saveRequest,
+            deleteRequest = deleteRequest,
+            closeRequest = closeRequest,
+            onBack = onCloseEditor,
+            onExitEdit = onExitEdit,
+            onSave = { id, name, active, weekdays, customStart, customEnd, blocks ->
+                val conflict = viewModel.scheduleConflictMessage(id, name, active, weekdays, customStart, customEnd)
+                if (conflict != null) {
+                    conflictMessage = conflict
+                    false
+                } else {
+                    viewModel.saveScheduleTemplate(id, name, active, weekdays, customStart, customEnd, blocks)
+                    onSaved()
+                    true
+                }
+            },
+            onDelete = { id ->
+                viewModel.deleteScheduleTemplate(id)
+                onCloseEditor()
+            }
+        )
+    } else {
+        HpList(itemSpacing = 0.dp) {
+            item {
+                ScheduleAssignmentSummary(
+                    assignedWeekdays = viewModel.scheduleTemplates
+                        .filter { it.active && !it.usesCustomDateRange }
+                        .flatMap { it.assignedWeekdays }
+                        .toSet()
+                )
+            }
+            item { HorizontalDivider(color = HpColors.divider) }
+            if (viewModel.scheduleTemplates.isEmpty()) {
+                item { HpEmptyState("No schedules yet.", null, null) }
+            }
+            items(viewModel.scheduleTemplates.sortedBy { it.name.lowercase() }, key = { it.id }) { schedule ->
+                ScheduleTemplateListRow(
+                    schedule = schedule,
+                    onClick = { onOpen(schedule.id) },
+                    onActiveChange = { active ->
+                        conflictMessage = viewModel.setScheduleTemplateActive(schedule.id, active)
+                    }
+                )
+            }
+        }
+    }
+
+    if (conflictMessage != null) {
+        AlertDialog(
+            onDismissRequest = { conflictMessage = null },
+            title = { Text("Schedule conflict") },
+            text = { Text(conflictMessage.orEmpty()) },
+            confirmButton = {
+                TextButton(onClick = { conflictMessage = null }) {
+                    Text("OK")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun ScheduleAssignmentSummary(
+    assignedWeekdays: Set<Int>
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .clickable(enabled = editing, onClick = onClick)
-            .padding(horizontal = 18.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+            .padding(vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Checkbox(
-            checked = selected,
-            enabled = editing,
-            onCheckedChange = { onClick() }
-        )
-        Text(
-            text = label,
-            color = HpColors.ink,
-            fontWeight = FontWeight.SemiBold
-        )
-    }
-}
-
-@Composable
-internal fun ScheduleSettings(viewModel: HumanProgramViewModel) {
-    var opened by rememberSaveable { mutableStateOf(false) }
-    var selectedBlock by rememberSaveable { mutableIntStateOf(-1) }
-    if (selectedBlock in viewModel.scheduleBlocks.indices) {
-        ScheduleBlockDetailPage(
-            block = viewModel.scheduleBlocks[selectedBlock],
-            onBack = { selectedBlock = -1 },
-            onTitleChange = { viewModel.renameScheduleBlock(selectedBlock, it) },
-            onTimeRangeChange = { viewModel.updateScheduleBlockTimeRange(selectedBlock, it) },
-            onDelete = {
-                viewModel.deleteScheduleBlock(selectedBlock)
-                selectedBlock = -1
-            }
-        )
-        return
-    }
-    if (opened) {
-        HpList {
-            item { HpTinyIconButton(Icons.AutoMirrored.Outlined.ArrowBack, "Back", onClick = { opened = false }) }
-            item { HpSectionHeader("Daily Schedule", null) }
-            itemsIndexed(viewModel.scheduleBlocks) { index, block ->
-                SettingsRow(Icons.Outlined.Event, block.title, block.timeRange) { selectedBlock = index }
+        (1..7).forEach { weekday ->
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(CircleShape)
+                    .background(if (weekday in assignedWeekdays) HpColors.ink else HpColors.glass),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = weekdayLetter(weekday),
+                    color = if (weekday in assignedWeekdays) HpColors.surface else HpColors.ink,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
-        return
-    }
-    HpList {
-        item { HpSectionHeader("Schedules", null) }
-        item { SettingsRow(Icons.Outlined.Event, "Daily Schedule", "${viewModel.scheduleBlocks.size} blocks") { opened = true } }
     }
 }
 
 @Composable
-private fun ScheduleBlockDetailPage(
-    block: ScheduleBlock,
-    onBack: () -> Unit,
-    onTitleChange: (String) -> Unit,
-    onTimeRangeChange: (String) -> Unit,
-    onDelete: () -> Unit
+private fun ScheduleTemplateListRow(
+    schedule: ScheduleTemplate,
+    onClick: () -> Unit,
+    onActiveChange: (Boolean) -> Unit
 ) {
-    HpList {
-        item { HpTinyIconButton(Icons.AutoMirrored.Outlined.ArrowBack, "Back", onBack) }
-        item {
-            ScheduleBlockRow(
-                block = block,
-                onTitleChange = onTitleChange,
-                onTimeRangeChange = onTimeRangeChange,
-                onDelete = onDelete
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .clickable(onClick = onClick)
+                .padding(vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Icon(Icons.Outlined.Event, contentDescription = null, tint = HpColors.accent)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(schedule.name, color = HpColors.ink, fontWeight = FontWeight.Medium)
+                if (schedule.usesCustomDateRange) {
+                    Text(
+                        "${schedule.customDateStart} - ${schedule.customDateEnd}",
+                        color = HpColors.muted,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                ScheduleWeekdayLetterSummary(schedule.assignedWeekdays)
+            }
+            Switch(checked = schedule.active, onCheckedChange = onActiveChange)
+            Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null, tint = HpColors.muted)
+        }
+        HorizontalDivider(color = HpColors.divider)
+    }
+}
+
+@Composable
+private fun ScheduleWeekdayLetterSummary(assignedWeekdays: Set<Int>) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        (1..7).forEach { weekday ->
+            Text(
+                weekdayLetter(weekday),
+                color = if (weekday in assignedWeekdays) HpColors.ink else HpColors.muted.copy(alpha = 0.45f),
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold
             )
         }
     }
 }
 
 @Composable
-internal fun ExerciseSettings(viewModel: HumanProgramViewModel) {
-    var selectedIndex by rememberSaveable { mutableIntStateOf(-1) }
-    if (selectedIndex in viewModel.exerciseRoutine.items.indices) {
-        ExerciseItemDetailPage(
-            item = viewModel.exerciseRoutine.items[selectedIndex],
-            canMoveUp = selectedIndex > 0,
-            canMoveDown = selectedIndex < viewModel.exerciseRoutine.items.lastIndex,
-            onBack = { selectedIndex = -1 },
-            onItemChange = { viewModel.renameExerciseItem(selectedIndex, it) },
-            onMoveUp = {
-                viewModel.moveExerciseItem(selectedIndex, selectedIndex - 1)
-                selectedIndex -= 1
+private fun ScheduleTemplateEditor(
+    template: ScheduleTemplate?,
+    editing: Boolean,
+    saveRequest: Int,
+    deleteRequest: Int,
+    closeRequest: Int,
+    onBack: () -> Unit,
+    onExitEdit: () -> Unit,
+    onSave: (String?, String, Boolean, Set<Int>, LocalDate?, LocalDate?, List<ScheduleBlock>) -> Boolean,
+    onDelete: (String) -> Unit
+) {
+    val focusManager = LocalFocusManager.current
+    var name by rememberSaveable(template?.id) { mutableStateOf(template?.name.orEmpty()) }
+    var active by rememberSaveable(template?.id) { mutableStateOf(template?.active ?: true) }
+    var usesCustomDates by rememberSaveable(template?.id) { mutableStateOf(template?.usesCustomDateRange ?: false) }
+    var weekdays by rememberSaveable(template?.id) { mutableStateOf(template?.assignedWeekdays ?: emptySet()) }
+    var customStart by rememberSaveable(template?.id) { mutableStateOf(template?.customDateStart?.toString().orEmpty()) }
+    var customEnd by rememberSaveable(template?.id) { mutableStateOf(template?.customDateEnd?.toString().orEmpty()) }
+    val initialBlocks = template?.blocks?.ifEmpty { defaultScheduleEditorBlocks() } ?: defaultScheduleEditorBlocks()
+    var blocks by rememberSaveable(template?.id) { mutableStateOf(normalizeEditorScheduleBlocks(initialBlocks)) }
+    var blockIds by rememberSaveable(template?.id) { mutableStateOf(initialBlocks.map { UUID.randomUUID().toString() }) }
+    var newBlockTitle by rememberSaveable(template?.id) { mutableStateOf("") }
+    var newBlockDurationMinutes by rememberSaveable(template?.id) { mutableIntStateOf(60) }
+    var durationPickerBlockIndex by rememberSaveable(template?.id) { mutableStateOf<Int?>(null) }
+    var customDatePickerTarget by rememberSaveable(template?.id) { mutableStateOf<String?>(null) }
+    var sleepTimePickerTarget by rememberSaveable(template?.id) { mutableStateOf<String?>(null) }
+    var draggedBlockIndex by remember { mutableIntStateOf(-1) }
+    var dragTargetIndex by remember { mutableIntStateOf(-1) }
+    var draggedBlockOffsetY by remember { mutableStateOf(0f) }
+    var dragMovedBlock by remember { mutableStateOf(false) }
+    var scheduleRowHeight by remember { mutableStateOf(70f) }
+    var editorRootTop by remember { mutableStateOf(0f) }
+    var showUnsavedDialog by rememberSaveable { mutableStateOf(false) }
+    var showDeleteDialog by rememberSaveable { mutableStateOf(false) }
+    var handledSaveRequest by rememberSaveable(template?.id) { mutableIntStateOf(saveRequest) }
+    var handledDeleteRequest by rememberSaveable(template?.id) { mutableIntStateOf(deleteRequest) }
+    var handledCloseRequest by rememberSaveable(template?.id) { mutableIntStateOf(closeRequest) }
+    val initialName = template?.name.orEmpty()
+    val initialActive = template?.active ?: true
+    val initialUsesCustomDates = template?.usesCustomDateRange ?: false
+    val initialWeekdays = template?.assignedWeekdays ?: emptySet()
+    val initialCustomStart = template?.customDateStart?.toString().orEmpty()
+    val initialCustomEnd = template?.customDateEnd?.toString().orEmpty()
+    val hasUnsavedChanges = name != initialName ||
+        active != initialActive ||
+        usesCustomDates != initialUsesCustomDates ||
+        weekdays != initialWeekdays ||
+        customStart != initialCustomStart ||
+        customEnd != initialCustomEnd ||
+        blocks != initialBlocks ||
+        newBlockTitle.isNotBlank()
+
+    fun save(): Boolean {
+        val parsedStart = if (usesCustomDates) customStart.toLocalDateOrNull() ?: LocalDate.now() else null
+        val parsedEnd = if (usesCustomDates) customEnd.toLocalDateOrNull() ?: parsedStart else null
+        val finalBlocks = if (newBlockTitle.isNotBlank()) {
+            normalizeEditorScheduleBlocks(blocks + ScheduleBlock(newBlockTitle.trim(), nextScheduleRange(blocks, newBlockDurationMinutes)))
+        } else {
+            blocks
+        }
+        return onSave(template?.id, name, active, weekdays, parsedStart, parsedEnd, finalBlocks)
+    }
+
+    LaunchedEffect(saveRequest) {
+        if (saveRequest != handledSaveRequest && editing) {
+            handledSaveRequest = saveRequest
+            focusManager.clearFocus()
+            save()
+        }
+    }
+    LaunchedEffect(deleteRequest) {
+        if (deleteRequest != handledDeleteRequest && template != null) {
+            handledDeleteRequest = deleteRequest
+            focusManager.clearFocus()
+            showDeleteDialog = true
+        }
+    }
+    LaunchedEffect(closeRequest) {
+        if (closeRequest != handledCloseRequest) {
+            handledCloseRequest = closeRequest
+            focusManager.clearFocus()
+            if (editing) {
+                if (hasUnsavedChanges) showUnsavedDialog = true else onExitEdit()
+            } else {
+                onBack()
+            }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .onGloballyPositioned { coordinates ->
+                editorRootTop = coordinates.positionInRoot().y
+            }
+            .pointerInput(Unit) {
+                detectTapGestures(onTap = { focusManager.clearFocus() })
+            }
+    ) {
+    HpList(itemSpacing = 6.dp) {
+        item {
+            ScheduleNameRow(
+                name = name,
+                editing = editing,
+                onNameChange = { name = it }
+            )
+        }
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Custom dates", modifier = Modifier.weight(1f), color = HpColors.ink, fontWeight = FontWeight.SemiBold)
+                Switch(
+                    checked = usesCustomDates,
+                    onCheckedChange = { enabled ->
+                        usesCustomDates = enabled
+                        if (enabled) {
+                            val today = LocalDate.now().toString()
+                            if (customStart.isBlank()) customStart = today
+                            if (customEnd.isBlank()) customEnd = customStart
+                        }
+                    },
+                    enabled = editing
+                )
+            }
+        }
+        if (usesCustomDates) {
+            item {
+                ScheduleCustomDateRows(
+                    start = customStart.toLocalDateOrNull(),
+                    end = customEnd.toLocalDateOrNull(),
+                    editing = editing,
+                    onPickStart = { customDatePickerTarget = "start" },
+                    onPickEnd = { customDatePickerTarget = "end" }
+                )
+            }
+        } else {
+            item {
+                RecurringWeekdaySelector(
+                    dayOptions = listOf(1 to "Sunday", 2 to "Monday", 3 to "Tuesday", 4 to "Wednesday", 5 to "Thursday", 6 to "Friday", 7 to "Saturday"),
+                    weekdays = weekdays,
+                    editing = editing,
+                    onWeekdaysChange = { weekdays = it }
+                )
+            }
+        }
+        item {
+            Text(
+                "Sleep",
+                modifier = Modifier.padding(start = 16.dp, top = 2.dp, bottom = 2.dp),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = HpColors.ink
+            )
+        }
+        item {
+            ScheduleSleepSettingsSection(
+                sleep = blocks.firstOrNull() ?: ScheduleBlock("Sleep", "21:30-05:30"),
+                editing = editing,
+                onSleepStartClick = { sleepTimePickerTarget = "start" },
+                onWakeClick = { sleepTimePickerTarget = "wake" }
+            )
+        }
+        item {
+            Text(
+                "Daily Schedule",
+                modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 2.dp),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = HpColors.ink
+            )
+        }
+        itemsIndexed(
+            items = blocks,
+            key = { index, _ -> blockIds.getOrNull(index) ?: index }
+        ) { index, block ->
+            ScheduleEditorBlockRow(
+                block = block,
+                editing = editing,
+                isDragging = draggedBlockIndex == index,
+                rowOffsetY = scheduleDragRowOffset(
+                    index = index,
+                    draggedIndex = draggedBlockIndex,
+                    targetIndex = dragTargetIndex,
+                    draggedOffsetY = draggedBlockOffsetY,
+                    rowHeight = scheduleRowHeight
+                ),
+                editorRootTop = editorRootTop,
+                onTitleChange = { title -> blocks = blocks.updateBlock(index, block.copy(title = title)) },
+                onDurationClick = { durationPickerBlockIndex = index },
+                onPositioned = { _, height ->
+                    if (height > 0) scheduleRowHeight = height
+                },
+                onDragStart = {
+                    draggedBlockIndex = index
+                    dragTargetIndex = index
+                    draggedBlockOffsetY = 0f
+                    dragMovedBlock = false
+                },
+                onDragCancel = {
+                    draggedBlockIndex = -1
+                    dragTargetIndex = -1
+                    draggedBlockOffsetY = 0f
+                    dragMovedBlock = false
+                },
+                onDragEnd = {
+                    if (draggedBlockIndex in blocks.indices && dragTargetIndex in blocks.indices && draggedBlockIndex != dragTargetIndex) {
+                        blocks = normalizeEditorScheduleBlocks(blocks.moveItem(draggedBlockIndex, dragTargetIndex))
+                        blockIds = blockIds.moveItem(draggedBlockIndex, dragTargetIndex)
+                    }
+                    draggedBlockIndex = -1
+                    dragTargetIndex = -1
+                    draggedBlockOffsetY = 0f
+                    dragMovedBlock = false
+                },
+                onDrag = { dragAmount ->
+                    if (draggedBlockIndex != -1 && blocks.isNotEmpty()) {
+                        draggedBlockOffsetY += dragAmount
+                        val targetIndex = ((draggedBlockIndex * scheduleRowHeight + scheduleRowHeight / 2f + draggedBlockOffsetY) / scheduleRowHeight)
+                            .roundToInt()
+                            .coerceIn(0, blocks.lastIndex)
+                        dragTargetIndex = targetIndex
+                        dragMovedBlock = targetIndex != draggedBlockIndex
+                    }
+                },
+                onDelete = {
+                    blocks = normalizeEditorScheduleBlocks(blocks.filterIndexed { blockIndex, _ -> blockIndex != index })
+                    blockIds = blockIds.filterIndexed { blockIndex, _ -> blockIndex != index }
+                }
+            )
+        }
+        if (editing) {
+            item {
+                Text(
+                    "Add Block",
+                    modifier = Modifier.padding(top = 14.dp, bottom = 2.dp),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = HpColors.ink
+                )
+            }
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = newBlockTitle,
+                        onValueChange = { newBlockTitle = it },
+                        singleLine = true,
+                        placeholder = { Text("New block title") },
+                        shape = RoundedCornerShape(28.dp),
+                        colors = scheduleTextFieldColors()
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        ScheduleDurationButton(
+                            modifier = Modifier.width(128.dp),
+                            enabled = true,
+                            minutes = newBlockDurationMinutes,
+                            onClick = { durationPickerBlockIndex = -1 }
+                        )
+                        HpSecondaryButton("Add", enabled = newBlockTitle.isNotBlank()) {
+                            if (newBlockTitle.isNotBlank()) {
+                                blocks = normalizeEditorScheduleBlocks(blocks + ScheduleBlock(newBlockTitle.trim(), nextScheduleRange(blocks, newBlockDurationMinutes)))
+                                blockIds = blockIds + UUID.randomUUID().toString()
+                                newBlockTitle = ""
+                                newBlockDurationMinutes = 60
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    }
+
+    if (showUnsavedDialog) {
+        BacklogUnsavedChoicePopup(
+            onSave = {
+                if (save()) showUnsavedDialog = false
             },
-            onMoveDown = {
-                viewModel.moveExerciseItem(selectedIndex, selectedIndex + 1)
-                selectedIndex += 1
+            onDiscard = {
+                showUnsavedDialog = false
+                if (editing) onExitEdit() else onBack()
             },
-            onDelete = {
-                viewModel.deleteExerciseItem(selectedIndex)
-                selectedIndex = -1
+            onCancel = { showUnsavedDialog = false },
+            saveEnabled = blocks.isNotEmpty()
+        )
+    }
+    if (showDeleteDialog && template != null) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Delete schedule?") },
+            text = { Text("Delete \"${template.name}\"?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeleteDialog = false
+                    onDelete(template.id)
+                }) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel") }
             }
         )
-        return
     }
-    HpList {
+    durationPickerBlockIndex?.let { blockIndex ->
+        val selectedMinutes = if (blockIndex == -1) {
+            newBlockDurationMinutes
+        } else {
+            blocks.getOrNull(blockIndex)?.timeRange?.let(::blockDurationMinutes) ?: 60
+        }
+        ScheduleDurationPickerSheet(
+            title = if (blockIndex == -1) "New Block Duration" else "Block Duration",
+            selectedMinutes = selectedMinutes,
+            onDismiss = { durationPickerBlockIndex = null },
+            onDurationSelected = { minutes ->
+                if (blockIndex == -1) {
+                    newBlockDurationMinutes = minutes
+                } else if (blockIndex in blocks.indices) {
+                    blocks = normalizeEditorScheduleBlocks(blocks.updateBlock(blockIndex, blocks[blockIndex].withDuration(minutes)))
+                }
+                durationPickerBlockIndex = null
+            }
+        )
+    }
+    customDatePickerTarget?.let { target ->
+        val fallback = LocalDate.now()
+        val initialDate = when (target) {
+            "start" -> customStart.toLocalDateOrNull()
+            else -> customEnd.toLocalDateOrNull() ?: customStart.toLocalDateOrNull()
+        } ?: fallback
+        ScheduleCustomDatePickerDialog(
+            initialDate = initialDate,
+            onDismiss = { customDatePickerTarget = null },
+            onSelect = { date ->
+                if (target == "start") {
+                    customStart = date.toString()
+                    val end = customEnd.toLocalDateOrNull()
+                    if (end == null || end.isBefore(date)) customEnd = date.toString()
+                } else {
+                    customEnd = date.toString()
+                }
+                customDatePickerTarget = null
+            }
+        )
+    }
+    sleepTimePickerTarget?.let { target ->
+        val sleep = blocks.firstOrNull() ?: ScheduleBlock("Sleep", "21:30-05:30")
+        val initialTime = if (target == "start") {
+            sleep.timeRange.substringBefore("-").trim()
+        } else {
+            sleep.timeRange.substringAfter("-").trim()
+        }
+        ScheduleSleepTimeInputDialog(
+            title = if (target == "start") "Sleep starts" else "Wake time",
+            initialTime = initialTime,
+            onDismiss = { sleepTimePickerTarget = null },
+            onSave = { time ->
+                val updatedSleep = if (target == "start") {
+                    sleep.withStartTime(time)
+                } else {
+                    sleep.withEndTime(time)
+                }
+                blocks = normalizeEditorScheduleBlocks(blocks.replaceFirstBlock(updatedSleep))
+                sleepTimePickerTarget = null
+            }
+        )
+    }
+}
+
+@Composable
+private fun ScheduleNameRow(
+    name: String,
+    editing: Boolean,
+    onNameChange: (String) -> Unit
+) {
+    val modifier = Modifier
+        .fillMaxWidth()
+        .height(56.dp)
+        .padding(horizontal = 16.dp)
+
+    if (editing) {
+        Box(modifier = modifier, contentAlignment = Alignment.CenterStart) {
+            BasicTextField(
+                value = name,
+                onValueChange = onNameChange,
+                singleLine = true,
+                textStyle = MaterialTheme.typography.titleLarge.copy(
+                    color = HpColors.ink,
+                    fontWeight = FontWeight.Medium
+                ),
+                decorationBox = { innerTextField ->
+                    if (name.isBlank()) {
+                        Text(
+                            "Schedule name",
+                            color = HpColors.muted,
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                    }
+                    innerTextField()
+                }
+            )
+        }
+    } else {
+        Box(modifier = modifier, contentAlignment = Alignment.CenterStart) {
+            Text(
+                name.ifBlank { "Untitled schedule" },
+                color = HpColors.ink,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
+@Composable
+private fun ScheduleEditorBlockRow(
+    block: ScheduleBlock,
+    editing: Boolean,
+    isDragging: Boolean,
+    rowOffsetY: Float,
+    editorRootTop: Float,
+    onTitleChange: (String) -> Unit,
+    onDurationClick: () -> Unit,
+    onPositioned: (Float, Float) -> Unit,
+    onDragStart: () -> Unit,
+    onDragCancel: () -> Unit,
+    onDragEnd: () -> Unit,
+    onDrag: (Float) -> Unit,
+    onDelete: () -> Unit
+) {
+    val animatedRowOffsetY by animateFloatAsState(
+        targetValue = rowOffsetY,
+        animationSpec = tween(durationMillis = 170),
+        label = "schedule-row-drag-offset"
+    )
+    val displayedOffsetY = if (isDragging) rowOffsetY else animatedRowOffsetY
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .zIndex(if (isDragging) 1f else 0f)
+                .offset { IntOffset(0, displayedOffsetY.roundToInt()) }
+                .background(
+                    color = if (isDragging) HpColors.divider.copy(alpha = 0.55f) else Color.Transparent,
+                    shape = RoundedCornerShape(12.dp)
+                )
+                .onGloballyPositioned { coordinates ->
+                    onPositioned(
+                        coordinates.positionInRoot().y - editorRootTop,
+                        coordinates.size.height.toFloat()
+                    )
+                }
+                .padding(vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(
+                modifier = Modifier
+                    .width(94.dp)
+                    .clickable(enabled = editing, onClick = onDurationClick),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    block.timeRange,
+                    color = HpColors.muted,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Text(
+                    blockDurationDisplay(block.timeRange),
+                    color = HpColors.muted,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+            if (editing) {
+                Box(
+                    modifier = Modifier
+                        .size(width = 32.dp, height = 44.dp)
+                        .pointerInput(Unit) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = { onDragStart() },
+                                onDragCancel = onDragCancel,
+                                onDragEnd = onDragEnd,
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    onDrag(dragAmount.y)
+                                }
+                            )
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    ScheduleDragHandle()
+                }
+                Spacer(Modifier.width(14.dp))
+                BasicTextField(
+                    value = block.title,
+                    onValueChange = onTitleChange,
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.titleMedium.copy(
+                        color = HpColors.ink,
+                        fontWeight = FontWeight.Medium
+                    )
+                )
+                IconButton(
+                    modifier = Modifier.size(38.dp),
+                    onClick = onDelete
+                ) {
+                    Icon(Icons.Outlined.Delete, contentDescription = "Delete block", tint = HpColors.ink)
+                }
+            } else {
+                Text(
+                    block.title,
+                    modifier = Modifier.weight(1f),
+                    color = HpColors.ink,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        HorizontalDivider(color = HpColors.divider)
+    }
+}
+
+@Composable
+private fun ScheduleSleepSettingsSection(
+    sleep: ScheduleBlock,
+    editing: Boolean,
+    onSleepStartClick: () -> Unit,
+    onWakeClick: () -> Unit
+) {
+    Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+        ScheduleSleepSettingRow(
+            label = "Sleep starts",
+            value = sleep.timeRange.substringBefore("-").trim(),
+            editing = editing,
+            onClick = onSleepStartClick
+        )
+        HorizontalDivider(color = HpColors.divider)
+        ScheduleSleepSettingRow(
+            label = "Wake time",
+            value = sleep.timeRange.substringAfter("-").trim(),
+            editing = editing,
+            onClick = onWakeClick
+        )
+    }
+}
+
+@Composable
+private fun ScheduleSleepSettingRow(
+    label: String,
+    value: String,
+    editing: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            label,
+            modifier = Modifier.weight(1f),
+            color = HpColors.ink,
+            style = MaterialTheme.typography.titleMedium
+        )
+        if (editing) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(HpColors.glass)
+                    .clickable(onClick = onClick)
+                    .padding(horizontal = 18.dp, vertical = 9.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    value,
+                    color = HpColors.ink,
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
+        } else {
+            Text(
+                value,
+                color = HpColors.muted,
+                style = MaterialTheme.typography.titleMedium
+            )
+        }
+    }
+}
+
+@Composable
+private fun ScheduleSleepTimeInputDialog(
+    title: String,
+    initialTime: String,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit
+) {
+    val cleanInitial = initialTime.filter { it.isDigit() }.padStart(4, '0').takeLast(4)
+    var input by rememberSaveable(title, initialTime) { mutableStateOf(cleanInitial) }
+    val parsedTime = normalizeTimeInput(input)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ScheduleTimeInputBox(
+                    value = input,
+                    onValueChange = { input = it.filter { char -> char.isDigit() }.take(4) }
+                )
+                if (parsedTime == null) {
+                    Text(
+                        "Invalid time",
+                        color = Color(0xFFB3261E),
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = parsedTime != null,
+                onClick = { parsedTime?.let(onSave) }
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+private fun ScheduleTimeInputBox(
+    value: String,
+    onValueChange: (String) -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(56.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(HpColors.glass)
+            .padding(horizontal = 16.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            textStyle = MaterialTheme.typography.titleLarge.copy(
+                color = HpColors.ink,
+                textAlign = TextAlign.Center
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+private fun ScheduleDragHandle() {
+    Column(
+        modifier = Modifier.width(20.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        repeat(3) {
+            Box(
+                modifier = Modifier
+                    .width(18.dp)
+                    .height(2.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(HpColors.muted)
+            )
+        }
+    }
+}
+
+@Composable
+private fun ScheduleCustomDateRows(
+    start: LocalDate?,
+    end: LocalDate?,
+    editing: Boolean,
+    onPickStart: () -> Unit,
+    onPickEnd: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        ScheduleCustomDateRow("From", start, editing, onPickStart)
+        ScheduleCustomDateRow("To", end, editing, onPickEnd)
+    }
+}
+
+@Composable
+private fun ScheduleCustomDateRow(
+    label: String,
+    date: LocalDate?,
+    editing: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            label,
+            modifier = Modifier.weight(1f),
+            color = HpColors.ink,
+            style = MaterialTheme.typography.titleMedium
+        )
+        if (editing) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(HpColors.glass)
+                    .clickable(onClick = onClick)
+                    .padding(horizontal = 18.dp, vertical = 9.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    date?.let(::scheduleCustomDateLabel) ?: "Choose date",
+                    color = HpColors.ink,
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
+        } else {
+            Text(
+                date?.let(::scheduleCustomDateLabel) ?: "Choose date",
+                color = HpColors.ink,
+                style = MaterialTheme.typography.titleMedium
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ScheduleCustomDatePickerDialog(
+    initialDate: LocalDate,
+    onDismiss: () -> Unit,
+    onSelect: (LocalDate) -> Unit
+) {
+    val initialMillis = initialDate.atStartOfDay().toInstant(ZoneOffset.UTC).toEpochMilli()
+    val pickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = {
+                val millis = pickerState.selectedDateMillis ?: initialMillis
+                onSelect(Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate())
+            }) {
+                Text("Select")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    ) {
+        DatePicker(state = pickerState)
+    }
+}
+
+@Composable
+private fun ScheduleDurationButton(
+    minutes: Int,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .height(56.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .border(1.dp, HpColors.muted, RoundedCornerShape(24.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 24.dp),
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Text(
+            durationCompactLabel(minutes),
+            color = HpColors.ink,
+            style = MaterialTheme.typography.bodyLarge
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ScheduleDurationPickerSheet(
+    title: String,
+    selectedMinutes: Int,
+    onDismiss: () -> Unit,
+    onDurationSelected: (Int) -> Unit
+) {
+    val options = remember { (5..720 step 5).toList() }
+    val selectedIndex = options.indexOf(selectedMinutes.coerceIn(5, 720)).coerceAtLeast(0)
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = (selectedIndex - 2).coerceAtLeast(0))
+
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = HpColors.canvas) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                title,
+                color = HpColors.ink,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(24.dp))
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(236.dp),
+                state = listState,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                items(options) { minutes ->
+                    val selected = minutes == selectedMinutes
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(42.dp)
+                            .background(if (selected) HpColors.divider else Color.Transparent)
+                            .clickable { onDurationSelected(minutes) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            durationPickerLabel(minutes),
+                            color = if (selected) HpColors.ink else HpColors.muted.copy(alpha = 0.55f),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun defaultScheduleEditorBlocks(): List<ScheduleBlock> {
+    return listOf(ScheduleBlock("Sleep", "21:30-05:30"))
+}
+
+private fun List<ScheduleBlock>.replaceFirstBlock(block: ScheduleBlock): List<ScheduleBlock> {
+    return if (isEmpty()) listOf(block) else mapIndexed { index, existing -> if (index == 0) block else existing }
+}
+
+private fun List<ScheduleBlock>.updateBlock(index: Int, block: ScheduleBlock): List<ScheduleBlock> {
+    return mapIndexed { blockIndex, existing -> if (blockIndex == index) block else existing }
+}
+
+private fun <T> List<T>.moveItem(fromIndex: Int, toIndex: Int): List<T> {
+    if (fromIndex !in indices || toIndex !in indices || fromIndex == toIndex) return this
+    return toMutableList().apply {
+        add(toIndex, removeAt(fromIndex))
+    }
+}
+
+private fun scheduleDragRowOffset(
+    index: Int,
+    draggedIndex: Int,
+    targetIndex: Int,
+    draggedOffsetY: Float,
+    rowHeight: Float
+): Float {
+    if (draggedIndex == -1 || targetIndex == -1 || rowHeight <= 0f) return 0f
+    return when {
+        index == draggedIndex -> draggedOffsetY
+        draggedIndex < targetIndex && index in (draggedIndex + 1)..targetIndex -> -rowHeight
+        draggedIndex > targetIndex && index in targetIndex until draggedIndex -> rowHeight
+        else -> 0f
+    }
+}
+
+private fun normalizeEditorScheduleBlocks(blocks: List<ScheduleBlock>): List<ScheduleBlock> {
+    if (blocks.isEmpty()) return blocks
+    var currentStart = blocks.first().timeRange.substringAfter("-", "05:30").trim()
+    return blocks.mapIndexed { index, block ->
+        if (index == 0) {
+            block
+        } else {
+            val duration = blockDurationMinutes(block.timeRange)
+            val range = nextRangeFromStart(currentStart, duration)
+            currentStart = range.substringAfter("-")
+            block.copy(timeRange = range)
+        }
+    }
+}
+
+private fun ScheduleBlock.withDuration(minutes: Int): ScheduleBlock {
+    val start = timeRange.substringBefore("-")
+    return copy(timeRange = nextRangeFromStart(start, minutes))
+}
+
+private fun ScheduleBlock.withStartTime(time: String): ScheduleBlock {
+    return copy(timeRange = "$time-${timeRange.substringAfter("-").trim()}")
+}
+
+private fun ScheduleBlock.withEndTime(time: String): ScheduleBlock {
+    return copy(timeRange = "${timeRange.substringBefore("-").trim()}-$time")
+}
+
+private fun nextScheduleRange(blocks: List<ScheduleBlock>, durationMinutes: Int): String {
+    val start = blocks.lastOrNull()?.timeRange?.substringAfter("-")?.trim().orEmpty().ifBlank { "05:30" }
+    return nextRangeFromStart(start, durationMinutes)
+}
+
+private fun nextRangeFromStart(start: String, durationMinutes: Int): String {
+    val parsed = runCatching { LocalTime.parse(start) }.getOrNull() ?: return "$start-$start"
+    val end = parsed.plusMinutes(durationMinutes.coerceIn(5, 720).toLong())
+    return "$start-${end.toString().take(5)}"
+}
+
+private fun blockDurationMinutes(timeRange: String): Int {
+    val start = runCatching { LocalTime.parse(timeRange.substringBefore("-").trim()) }.getOrNull() ?: return 60
+    val end = runCatching { LocalTime.parse(timeRange.substringAfter("-").trim()) }.getOrNull() ?: return 60
+    var minutes = java.time.Duration.between(start, end).toMinutes()
+    if (minutes <= 0) minutes += 24 * 60
+    return minutes.toInt()
+}
+
+private fun blockDurationDisplay(timeRange: String): String {
+    return durationCompactLabel(blockDurationMinutes(timeRange))
+}
+
+private fun durationCompactLabel(minutes: Int): String {
+    return "%02dh %02dm".format(minutes / 60, minutes % 60)
+}
+
+private fun durationPickerLabel(minutes: Int): String {
+    return "%02d min - %02d hr %02d min".format(minutes, minutes / 60, minutes % 60)
+}
+
+private fun normalizeTimeInput(raw: String): String? {
+    val digits = raw.filter { it.isDigit() }
+    if (digits.length !in 3..4) return null
+    val padded = digits.padStart(4, '0')
+    val hour = padded.take(2).toIntOrNull() ?: return null
+    val minute = padded.takeLast(2).toIntOrNull() ?: return null
+    if (hour !in 0..23 || minute !in 0..59) return null
+    return "%02d:%02d".format(hour, minute)
+}
+
+private fun scheduleCustomDateLabel(date: LocalDate): String {
+    return date.format(DateTimeFormatter.ofPattern("MMMM d, yyyy"))
+}
+
+@Composable
+private fun scheduleTextFieldColors() = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+    disabledTextColor = HpColors.ink,
+    disabledBorderColor = HpColors.muted,
+    disabledContainerColor = Color.Transparent,
+    disabledPlaceholderColor = HpColors.muted
+)
+
+private fun String.toLocalDateOrNull(): LocalDate? {
+    return runCatching { LocalDate.parse(this) }.getOrNull()
+}
+
+private fun weekdayLetter(weekday: Int): String {
+    return listOf("S", "M", "T", "W", "T", "F", "S").getOrElse(weekday - 1) { "?" }
+}
+
+@Composable
+internal fun ExerciseSettings(viewModel: HumanProgramViewModel) {
+    var editing by rememberSaveable { mutableStateOf(false) }
+    var labelEditorWeekday by rememberSaveable { mutableIntStateOf(0) }
+    var labelDraft by rememberSaveable { mutableStateOf("") }
+    var editingItemId by rememberSaveable { mutableStateOf<String?>(null) }
+    var editingItemWeekday by rememberSaveable { mutableIntStateOf(0) }
+    var itemDraft by rememberSaveable { mutableStateOf("") }
+    var addingWeekday by rememberSaveable { mutableIntStateOf(0) }
+    var newItemDraft by rememberSaveable { mutableStateOf("") }
+
+    fun commitItemEdit() {
+        val itemId = editingItemId ?: return
+        viewModel.renameExerciseTemplateItem(editingItemWeekday, itemId, itemDraft)
+        editingItemId = null
+        editingItemWeekday = 0
+        itemDraft = ""
+    }
+
+    fun commitNewItem() {
+        if (addingWeekday != 0) {
+            viewModel.addExerciseTemplateItem(addingWeekday, newItemDraft)
+        }
+        addingWeekday = 0
+        newItemDraft = ""
+    }
+
+    HpList(itemSpacing = 0.dp) {
         item {
-            HpSectionHeader("Exercise", viewModel.exerciseRoutine.title)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Exercise", modifier = Modifier.weight(1f), color = HpColors.ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                HpSecondaryButton(if (editing) "Done" else "Edit") {
+                    commitItemEdit()
+                    commitNewItem()
+                    editing = !editing
+                }
+            }
         }
-        val visibleExerciseItems = viewModel.exerciseRoutine.items
-            .mapIndexed { index, item -> index to item }
-            .filterNot { (_, item) -> item.equals("No exercise items have been added for today.", ignoreCase = true) }
-        if (visibleExerciseItems.isEmpty()) {
-            item { HpEmptyState("Nothing for today.", null, null) }
-        }
-        items(visibleExerciseItems) { (index, item) ->
-            SettingsRow(Icons.Outlined.FitnessCenter, item, "Exercise item") { selectedIndex = index }
+        (1..7).forEach { weekday ->
+            val template = viewModel.exerciseTemplateForWeekday(weekday)
+            item {
+                ExerciseDayHeader(
+                    weekday = weekday,
+                    title = template.title,
+                    editing = editing,
+                    onEditLabel = {
+                        labelEditorWeekday = weekday
+                        labelDraft = template.title
+                    },
+                    onAdd = {
+                        commitItemEdit()
+                        commitNewItem()
+                        addingWeekday = weekday
+                        newItemDraft = ""
+                    }
+                )
+            }
+            if (template.items.isEmpty() && addingWeekday != weekday) {
+                item {
+                    Text(
+                        "No exercise routine set.",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        color = HpColors.muted,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                    HorizontalDivider(color = HpColors.divider)
+                }
+            }
+            items(template.items, key = { it.id }) { item ->
+                val index = template.items.indexOfFirst { it.id == item.id }
+                ExerciseTemplateItemRow(
+                    item = item,
+                    editing = editing,
+                    draft = if (editingItemId == item.id) itemDraft else null,
+                    onBeginEdit = {
+                        commitItemEdit()
+                        commitNewItem()
+                        editingItemId = item.id
+                        editingItemWeekday = weekday
+                        itemDraft = item.text
+                    },
+                    onDraftChange = { itemDraft = it },
+                    onCommitDraft = { commitItemEdit() },
+                    onMoveUp = { viewModel.moveExerciseTemplateItem(weekday, index, index - 1) },
+                    onMoveDown = { viewModel.moveExerciseTemplateItem(weekday, index, index + 1) },
+                    canMoveUp = index > 0,
+                    canMoveDown = index < template.items.lastIndex,
+                    onDelete = { viewModel.deleteExerciseTemplateItem(weekday, item.id) }
+                )
+            }
+            if (addingWeekday == weekday) {
+                item {
+                    ExerciseNewItemRow(
+                        draft = newItemDraft,
+                        onDraftChange = { newItemDraft = it },
+                        onCommit = { commitNewItem() }
+                    )
+                }
+            }
         }
     }
+
+    if (labelEditorWeekday != 0) {
+        AlertDialog(
+            onDismissRequest = {
+                labelEditorWeekday = 0
+                labelDraft = ""
+            },
+            title = { Text("Edit Day Label") },
+            text = {
+                OutlinedTextField(
+                    value = labelDraft,
+                    onValueChange = { labelDraft = it },
+                    singleLine = true,
+                    placeholder = { Text("Custom label") }
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.updateExerciseTemplateTitle(labelEditorWeekday, labelDraft)
+                    labelEditorWeekday = 0
+                    labelDraft = ""
+                }) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    labelEditorWeekday = 0
+                    labelDraft = ""
+                }) { Text("Cancel") }
+            }
+        )
+    }
+}
+
+@Composable
+private fun ExerciseDayHeader(
+    weekday: Int,
+    title: String,
+    editing: Boolean,
+    onEditLabel: () -> Unit,
+    onAdd: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            exerciseSectionTitle(weekday, title),
+            modifier = Modifier
+                .weight(1f)
+                .clickable(enabled = editing, onClick = onEditLabel),
+            color = HpColors.muted,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold
+        )
+        if (editing) {
+            Icon(Icons.Outlined.Edit, contentDescription = "Edit day label", tint = HpColors.muted, modifier = Modifier.size(18.dp).clickable(onClick = onEditLabel))
+        } else {
+            Icon(Icons.Outlined.Add, contentDescription = "Add exercise item", tint = HpColors.ink, modifier = Modifier.size(22.dp).clickable(onClick = onAdd))
+        }
+    }
+}
+
+@Composable
+private fun ExerciseTemplateItemRow(
+    item: ExerciseRoutineItem,
+    editing: Boolean,
+    draft: String?,
+    onBeginEdit: () -> Unit,
+    onDraftChange: (String) -> Unit,
+    onCommitDraft: () -> Unit,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
+    onDelete: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (draft != null) {
+            BasicTextField(
+                value = draft,
+                onValueChange = onDraftChange,
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyMedium.copy(color = HpColors.ink, fontWeight = FontWeight.Medium),
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(vertical = 8.dp)
+            )
+            TextButton(onClick = onCommitDraft) { Text("Done") }
+        } else {
+            Text(
+                item.text,
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(enabled = !editing, onClick = onBeginEdit)
+                    .padding(vertical = 8.dp),
+                color = HpColors.ink,
+                style = if (item.text.length > 34) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (editing) {
+                HpTinyIconButton(Icons.Outlined.KeyboardArrowUp, "Move up", onMoveUp, enabled = canMoveUp)
+                HpTinyIconButton(Icons.Outlined.KeyboardArrowDown, "Move down", onMoveDown, enabled = canMoveDown)
+                IconButton(modifier = Modifier.size(38.dp), onClick = onDelete) {
+                    Icon(Icons.Outlined.Delete, contentDescription = "Delete exercise item", tint = HpColors.ink)
+                }
+            }
+        }
+    }
+    HorizontalDivider(color = HpColors.divider)
+}
+
+@Composable
+private fun ExerciseNewItemRow(
+    draft: String,
+    onDraftChange: (String) -> Unit,
+    onCommit: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        BasicTextField(
+            value = draft,
+            onValueChange = onDraftChange,
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodyMedium.copy(color = HpColors.ink),
+            decorationBox = { innerTextField ->
+                if (draft.isBlank()) Text("Exercise item", color = HpColors.muted)
+                innerTextField()
+            },
+            modifier = Modifier
+                .weight(1f)
+                .padding(vertical = 10.dp)
+        )
+        TextButton(onClick = onCommit, enabled = draft.isNotBlank()) {
+            Text("Add")
+        }
+    }
+    HorizontalDivider(color = HpColors.divider)
+}
+
+private fun exerciseSectionTitle(weekday: Int, title: String): String {
+    val weekdayName = exerciseWeekdayName(weekday)
+    val cleanTitle = title.trim()
+    return if (cleanTitle.isBlank()) weekdayName else "$weekdayName - $cleanTitle"
+}
+
+private fun exerciseWeekdayName(weekday: Int): String {
+    return listOf("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
+        .getOrElse(weekday - 1) { "Day $weekday" }
 }
 
 @Composable

@@ -55,6 +55,7 @@ private fun PlannerSnapshot.toPlanningJson(): String {
             listOf(
                 "\"id\":${template.id.toJsonString()}",
                 "\"title\":${template.title.toJsonString()}",
+                "\"notes\":${template.notes.toJsonString()}",
                 "\"applicableWeekdays\":${template.applicableWeekdays.sorted().joinToString(prefix = "[", separator = ",", postfix = "]")}",
                 "\"active\":${template.active}"
             ).joinToString(prefix = "{", separator = ",", postfix = "}")
@@ -67,7 +68,19 @@ private fun PlannerSnapshot.toPlanningJson(): String {
         }}",
         "\"exerciseRoutine\":${listOf(
             "\"title\":${exerciseRoutine.title.toJsonString()}",
-            "\"items\":${exerciseRoutine.items.joinToJsonStringArray()}"
+            "\"items\":${exerciseRoutine.items.joinToJsonStringArray()}",
+            "\"templates\":${exerciseRoutine.templates.joinToJsonArray { template ->
+                listOf(
+                    "\"weekday\":${template.weekday}",
+                    "\"title\":${template.title.toJsonString()}",
+                    "\"items\":${template.items.joinToJsonArray { item ->
+                        listOf(
+                            "\"id\":${item.id.toJsonString()}",
+                            "\"text\":${item.text.toJsonString()}"
+                        ).joinToString(prefix = "{", separator = ",", postfix = "}")
+                    }}"
+                ).joinToString(prefix = "{", separator = ",", postfix = "}")
+            }}"
         ).joinToString(prefix = "{", separator = ",", postfix = "}")}",
         "\"reminders\":${reminders.joinToJsonArray { reminder ->
             listOf(

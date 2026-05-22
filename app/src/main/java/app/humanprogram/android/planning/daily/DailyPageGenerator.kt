@@ -25,7 +25,8 @@ class DailyPageGenerator(
                 DailyTask(
                     title = template.title,
                     sourceType = DailyTaskSourceType.RECURRING,
-                    sourceId = template.id
+                    sourceId = template.id,
+                    notes = template.notes
                 )
             }
 

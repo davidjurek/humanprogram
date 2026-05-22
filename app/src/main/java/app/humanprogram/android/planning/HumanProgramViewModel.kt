@@ -34,11 +34,15 @@ import app.humanprogram.android.planning.model.BacklogItem
 import app.humanprogram.android.planning.model.BacklogStatus
 import app.humanprogram.android.planning.model.DailyTask
 import app.humanprogram.android.planning.model.DailyTaskSourceType
+import app.humanprogram.android.planning.model.ExerciseDayRoutine
 import app.humanprogram.android.planning.model.ExerciseRoutine
+import app.humanprogram.android.planning.model.ExerciseRoutineItem
 import app.humanprogram.android.planning.model.NotificationReminder
 import app.humanprogram.android.planning.model.RecurringTaskTemplate
 import app.humanprogram.android.planning.model.ReminderRecurrence
 import app.humanprogram.android.planning.model.ScheduleBlock
+import app.humanprogram.android.planning.model.ScheduleTemplate
+import app.humanprogram.android.planning.model.defaultExerciseDayRoutines
 import app.humanprogram.android.planning.stats.DailyCompletionSnapshot
 import app.humanprogram.android.planning.stats.StreakCalculator
 import java.io.InputStream
@@ -50,6 +54,7 @@ import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
+import java.util.UUID
 import org.json.JSONObject
 
 class HumanProgramViewModel(
@@ -90,6 +95,7 @@ class HumanProgramViewModel(
     val recurringTemplates = mutableStateListOf<RecurringTaskTemplate>()
 
     val scheduleBlocks = mutableStateListOf<ScheduleBlock>()
+    val scheduleTemplates = mutableStateListOf<ScheduleTemplate>()
 
     var exerciseRoutine by mutableStateOf(
         ExerciseRoutine(
@@ -260,7 +266,8 @@ class HumanProgramViewModel(
             applySnapshot(snapshot)
         } else {
             recurringTemplates.addAll(defaultRecurringTemplates())
-            scheduleBlocks.addAll(defaultScheduleBlocks())
+            scheduleTemplates.addAll(defaultScheduleTemplates())
+            refreshScheduleBlocksForSelectedDate()
             backlogItems.addAll(
                 listOf(
                     BacklogItem(title = "Set up first Human Program Android build"),
@@ -966,7 +973,8 @@ class HumanProgramViewModel(
         val cleanTitle = newRecurringTitle.trim()
         addRecurringTask(
             title = cleanTitle,
-            applicableWeekdays = setOf(1, 2, 3, 4, 5, 6, 7),
+            notes = "",
+            applicableWeekdays = emptySet(),
             active = true
         )
         if (cleanTitle.isNotEmpty()) {
@@ -976,6 +984,7 @@ class HumanProgramViewModel(
 
     fun addRecurringTask(
         title: String,
+        notes: String,
         applicableWeekdays: Set<Int>,
         active: Boolean
     ) {
@@ -986,6 +995,7 @@ class HumanProgramViewModel(
         val previousTasks = todayTasks.toList()
         val template = RecurringTaskTemplate(
             title = cleanTitle,
+            notes = notes,
             applicableWeekdays = applicableWeekdays.filter { it in 1..7 }.toSet(),
             active = active
         )
@@ -996,7 +1006,8 @@ class HumanProgramViewModel(
             DailyTask(
                 title = cleanTitle,
                 sourceType = DailyTaskSourceType.RECURRING,
-                sourceId = template.id
+                sourceId = template.id,
+                notes = template.notes
             )
         )
         recordEdit(
@@ -1013,6 +1024,7 @@ class HumanProgramViewModel(
     fun updateRecurringTaskDetails(
         templateId: String,
         title: String,
+        notes: String,
         applicableWeekdays: Set<Int>,
         active: Boolean
     ) {
@@ -1026,6 +1038,7 @@ class HumanProgramViewModel(
         val previous = recurringTemplates[index]
         val updated = previous.copy(
             title = cleanTitle,
+            notes = notes,
             applicableWeekdays = applicableWeekdays.filter { it in 1..7 }.toSet(),
             active = active
         )
@@ -1034,7 +1047,7 @@ class HumanProgramViewModel(
         recurringTemplates[index] = updated
         todayTasks.replaceAll { task ->
             if (task.sourceType == DailyTaskSourceType.RECURRING && (task.sourceId == templateId || task.title == previous.title)) {
-                task.copy(title = cleanTitle, sourceId = task.sourceId ?: templateId)
+                task.copy(title = cleanTitle, sourceId = task.sourceId ?: templateId, notes = notes)
             } else {
                 task
             }
@@ -1109,12 +1122,19 @@ class HumanProgramViewModel(
     }
 
     fun deleteRecurringTask(templateId: String) {
-        val template = recurringTemplates.firstOrNull { it.id == templateId } ?: return
+        deleteRecurringTasks(setOf(templateId))
+    }
+
+    fun deleteRecurringTasks(templateIds: Set<String>) {
+        if (templateIds.isEmpty()) return
+        val removedTemplates = recurringTemplates.filter { it.id in templateIds }
+        if (removedTemplates.isEmpty()) return
         val previousTemplates = recurringTemplates.toList()
         val previousTasks = todayTasks.toList()
-        recurringTemplates.removeAll { it.id == templateId }
+        val removedTitles = removedTemplates.map { it.title }.toSet()
+        recurringTemplates.removeAll { it.id in templateIds }
         todayTasks.removeAll {
-            it.sourceType == DailyTaskSourceType.RECURRING && (it.sourceId == templateId || it.title == template.title)
+            it.sourceType == DailyTaskSourceType.RECURRING && (it.sourceId in templateIds || it.title in removedTitles)
         }
         recordEdit(
             PlannerEdit.ReplaceRecurringTemplates(
@@ -1180,6 +1200,120 @@ class HumanProgramViewModel(
         saveSnapshot()
     }
 
+    fun scheduleConflictMessage(
+        templateId: String?,
+        name: String,
+        active: Boolean,
+        assignedWeekdays: Set<Int>,
+        customDateStart: LocalDate?,
+        customDateEnd: LocalDate?
+    ): String? {
+        if (!active) return null
+        val usesCustomDates = customDateStart != null && customDateEnd != null
+        val candidateWeekdays = assignedWeekdays.filter { it in 1..7 }.toSet()
+        val conflicts = scheduleTemplates
+            .filter { it.id != templateId && it.active }
+            .mapNotNull { other ->
+                if (usesCustomDates) {
+                    val start = customDateStart ?: return@mapNotNull null
+                    val end = customDateEnd ?: return@mapNotNull null
+                    val otherStart = other.customDateStart ?: return@mapNotNull null
+                    val otherEnd = other.customDateEnd ?: return@mapNotNull null
+                    if (start <= otherEnd && otherStart <= end) {
+                        "Date range overlaps with \"${other.name}\"."
+                    } else {
+                        null
+                    }
+                } else if (!other.usesCustomDateRange) {
+                    val overlap = candidateWeekdays.intersect(other.assignedWeekdays)
+                    if (overlap.isNotEmpty()) {
+                        "${overlap.sorted().joinToString { weekdayName(it) }} already assigned to \"${other.name}\"."
+                    } else {
+                        null
+                    }
+                } else {
+                    null
+                }
+            }
+        return conflicts.firstOrNull()?.let { "Cannot enable \"${name.ifBlank { "Untitled Schedule" }}\". $it" }
+    }
+
+    fun saveScheduleTemplate(
+        templateId: String?,
+        name: String,
+        active: Boolean,
+        assignedWeekdays: Set<Int>,
+        customDateStart: LocalDate?,
+        customDateEnd: LocalDate?,
+        blocks: List<ScheduleBlock>
+    ): Boolean {
+        val cleanName = resolvedScheduleName(name, templateId)
+        val normalizedBlocks = normalizeScheduleBlocks(blocks)
+        if (normalizedBlocks.isEmpty()) return false
+        val usesCustomDates = customDateStart != null && customDateEnd != null
+        val cleanTemplate = ScheduleTemplate(
+            id = templateId ?: UUID.randomUUID().toString(),
+            name = cleanName,
+            active = active,
+            assignedWeekdays = if (usesCustomDates) emptySet() else assignedWeekdays.filter { it in 1..7 }.toSet(),
+            customDateStart = if (usesCustomDates) customDateStart else null,
+            customDateEnd = if (usesCustomDates) customDateEnd else null,
+            blocks = normalizedBlocks
+        )
+        if (scheduleConflictMessage(
+                templateId = cleanTemplate.id,
+                name = cleanTemplate.name,
+                active = cleanTemplate.active,
+                assignedWeekdays = cleanTemplate.assignedWeekdays,
+                customDateStart = cleanTemplate.customDateStart,
+                customDateEnd = cleanTemplate.customDateEnd
+            ) != null
+        ) return false
+
+        val previousTemplates = scheduleTemplates.toList()
+        val index = scheduleTemplates.indexOfFirst { it.id == cleanTemplate.id }
+        if (index >= 0) {
+            scheduleTemplates[index] = cleanTemplate
+        } else {
+            scheduleTemplates.add(cleanTemplate)
+        }
+        sortScheduleTemplates()
+        refreshScheduleBlocksForSelectedDate()
+        recordEdit(PlannerEdit.ReplaceScheduleTemplates(previousTemplates, scheduleTemplates.toList()))
+        saveSnapshot()
+        return true
+    }
+
+    fun setScheduleTemplateActive(templateId: String, active: Boolean): String? {
+        val index = scheduleTemplates.indexOfFirst { it.id == templateId }
+        if (index < 0 || scheduleTemplates[index].active == active) return null
+        val template = scheduleTemplates[index]
+        if (active) {
+            scheduleConflictMessage(
+                templateId = template.id,
+                name = template.name,
+                active = true,
+                assignedWeekdays = template.assignedWeekdays,
+                customDateStart = template.customDateStart,
+                customDateEnd = template.customDateEnd
+            )?.let { return it }
+        }
+        val previousTemplates = scheduleTemplates.toList()
+        scheduleTemplates[index] = template.copy(active = active)
+        refreshScheduleBlocksForSelectedDate()
+        recordEdit(PlannerEdit.ReplaceScheduleTemplates(previousTemplates, scheduleTemplates.toList()))
+        saveSnapshot()
+        return null
+    }
+
+    fun deleteScheduleTemplate(templateId: String) {
+        val previousTemplates = scheduleTemplates.toList()
+        scheduleTemplates.removeAll { it.id == templateId }
+        refreshScheduleBlocksForSelectedDate()
+        recordEdit(PlannerEdit.ReplaceScheduleTemplates(previousTemplates, scheduleTemplates.toList()))
+        saveSnapshot()
+    }
+
     fun addExerciseItem() {
         val cleanItem = newExerciseItem.trim()
         if (cleanItem.isEmpty()) return
@@ -1228,6 +1362,78 @@ class HumanProgramViewModel(
         val item = updatedItems.removeAt(fromIndex)
         updatedItems.add(toIndex, item)
         exerciseRoutine = exerciseRoutine.copy(items = updatedItems)
+        recordEdit(PlannerEdit.ReplaceExerciseRoutine(previous, exerciseRoutine))
+        saveSnapshot()
+    }
+
+    fun exerciseTemplateForDate(date: LocalDate): ExerciseDayRoutine {
+        return exerciseTemplateForWeekday(date.toAppWeekday())
+    }
+
+    fun exerciseTemplateForWeekday(weekday: Int): ExerciseDayRoutine {
+        return exerciseRoutine.withSevenExerciseTemplates().templates
+            .firstOrNull { it.weekday == weekday }
+            ?: ExerciseDayRoutine(weekday = weekday)
+    }
+
+    fun updateExerciseTemplateTitle(weekday: Int, title: String) {
+        if (weekday !in 1..7) return
+        val previous = exerciseRoutine
+        val cleanTitle = title.trim()
+        exerciseRoutine = exerciseRoutine.updateExerciseTemplate(weekday) { template ->
+            template.copy(title = cleanTitle)
+        }
+        recordEdit(PlannerEdit.ReplaceExerciseRoutine(previous, exerciseRoutine))
+        saveSnapshot()
+    }
+
+    fun addExerciseTemplateItem(weekday: Int, text: String) {
+        if (weekday !in 1..7) return
+        val cleanText = text.trim()
+        if (cleanText.isBlank()) return
+        val previous = exerciseRoutine
+        exerciseRoutine = exerciseRoutine.updateExerciseTemplate(weekday) { template ->
+            template.copy(items = template.items + ExerciseRoutineItem(text = cleanText))
+        }
+        recordEdit(PlannerEdit.ReplaceExerciseRoutine(previous, exerciseRoutine))
+        saveSnapshot()
+    }
+
+    fun renameExerciseTemplateItem(weekday: Int, itemId: String, text: String) {
+        if (weekday !in 1..7) return
+        val cleanText = text.trimStart()
+        val template = exerciseTemplateForWeekday(weekday)
+        if (itemId !in template.items.map { it.id }) return
+        val previous = exerciseRoutine
+        exerciseRoutine = exerciseRoutine.updateExerciseTemplate(weekday) { current ->
+            if (cleanText.isBlank()) {
+                current.copy(items = current.items.filterNot { it.id == itemId })
+            } else {
+                current.copy(items = current.items.map { item -> if (item.id == itemId) item.copy(text = cleanText) else item })
+            }
+        }
+        recordEdit(PlannerEdit.ReplaceExerciseRoutine(previous, exerciseRoutine))
+        saveSnapshot()
+    }
+
+    fun deleteExerciseTemplateItem(weekday: Int, itemId: String) {
+        if (weekday !in 1..7) return
+        val previous = exerciseRoutine
+        exerciseRoutine = exerciseRoutine.updateExerciseTemplate(weekday) { template ->
+            template.copy(items = template.items.filterNot { it.id == itemId })
+        }
+        recordEdit(PlannerEdit.ReplaceExerciseRoutine(previous, exerciseRoutine))
+        saveSnapshot()
+    }
+
+    fun moveExerciseTemplateItem(weekday: Int, fromIndex: Int, toIndex: Int) {
+        if (weekday !in 1..7) return
+        val template = exerciseTemplateForWeekday(weekday)
+        if (fromIndex !in template.items.indices || toIndex !in template.items.indices || fromIndex == toIndex) return
+        val previous = exerciseRoutine
+        val updatedItems = template.items.toMutableList()
+        updatedItems.add(toIndex, updatedItems.removeAt(fromIndex))
+        exerciseRoutine = exerciseRoutine.updateExerciseTemplate(weekday) { it.copy(items = updatedItems) }
         recordEdit(PlannerEdit.ReplaceExerciseRoutine(previous, exerciseRoutine))
         saveSnapshot()
     }
@@ -1746,6 +1952,7 @@ class HumanProgramViewModel(
         backlogItems.clear()
         recurringTemplates.clear()
         scheduleBlocks.clear()
+        scheduleTemplates.clear()
         reminders.clear()
         routines.clear()
         calendarEvents.clear()
@@ -1765,7 +1972,8 @@ class HumanProgramViewModel(
         unlockedPastEditDate = null
 
         recurringTemplates.addAll(defaultRecurringTemplates())
-        scheduleBlocks.addAll(defaultScheduleBlocks())
+        scheduleTemplates.addAll(defaultScheduleTemplates())
+        refreshScheduleBlocksForSelectedDate()
         exerciseRoutine = ExerciseRoutine(
             title = "Today routine",
             items = emptyList()
@@ -1954,6 +2162,10 @@ class HumanProgramViewModel(
             is PlannerEdit.ReplaceScheduleBlocks -> {
                 scheduleBlocks.replaceWith(edit.previous)
             }
+            is PlannerEdit.ReplaceScheduleTemplates -> {
+                scheduleTemplates.replaceWith(edit.previous)
+                refreshScheduleBlocksForSelectedDate()
+            }
             is PlannerEdit.ReplaceExerciseRoutine -> {
                 exerciseRoutine = edit.previous
             }
@@ -2044,6 +2256,10 @@ class HumanProgramViewModel(
             }
             is PlannerEdit.ReplaceScheduleBlocks -> {
                 scheduleBlocks.replaceWith(edit.updated)
+            }
+            is PlannerEdit.ReplaceScheduleTemplates -> {
+                scheduleTemplates.replaceWith(edit.updated)
+                refreshScheduleBlocksForSelectedDate()
             }
             is PlannerEdit.ReplaceExerciseRoutine -> {
                 exerciseRoutine = edit.updated
@@ -2201,7 +2417,18 @@ class HumanProgramViewModel(
                 .sorted()
         )
         recurringTemplates.addAll(snapshot.recurringTemplates.ifEmpty { defaultRecurringTemplates() })
-        scheduleBlocks.addAll(snapshot.scheduleBlocks.ifEmpty { defaultScheduleBlocks() })
+        scheduleTemplates.addAll(
+            snapshot.scheduleTemplates.ifEmpty {
+                listOf(
+                    ScheduleTemplate(
+                        name = "Daily Schedule",
+                        assignedWeekdays = setOf(1, 2, 3, 4, 5, 6, 7),
+                        blocks = snapshot.scheduleBlocks.ifEmpty { defaultScheduleBlocks() }
+                    )
+                )
+            }
+        )
+        refreshScheduleBlocksForSelectedDate()
         exerciseRoutine = snapshot.exerciseRoutine
         reminders.addAll(snapshot.reminders)
         routines.addAll(snapshot.routines)
@@ -2221,6 +2448,7 @@ class HumanProgramViewModel(
             backlogItems = backlogItems,
             recurringTemplates = recurringTemplates,
             scheduleBlocks = scheduleBlocks,
+            scheduleTemplates = scheduleTemplates,
             exerciseRoutine = exerciseRoutine,
             reminders = reminders,
             routines = routines,
@@ -2272,6 +2500,7 @@ class HumanProgramViewModel(
 
         todayTasks.clear()
         todayTasks.addAll(pageTasks)
+        refreshScheduleBlocksForSelectedDate()
     }
 
     private fun refreshSelectedGeneratedTasks() {
@@ -2410,6 +2639,116 @@ class HumanProgramViewModel(
         )
     }
 
+    private fun defaultScheduleTemplates(): List<ScheduleTemplate> {
+        return listOf(
+            ScheduleTemplate(
+                name = "Daily Schedule",
+                assignedWeekdays = setOf(1, 2, 3, 4, 5, 6, 7),
+                blocks = defaultScheduleBlocks()
+            )
+        )
+    }
+
+    private fun refreshScheduleBlocksForSelectedDate() {
+        scheduleBlocks.replaceWith(scheduleTemplateForDate(selectedDate)?.blocks.orEmpty())
+    }
+
+    private fun scheduleTemplateForDate(date: LocalDate): ScheduleTemplate? {
+        val custom = scheduleTemplates
+            .filter { it.active && it.usesCustomDateRange }
+            .filter { template ->
+                val start = template.customDateStart ?: return@filter false
+                val end = template.customDateEnd ?: return@filter false
+                date in start..end
+            }
+            .minWithOrNull(compareBy<ScheduleTemplate> {
+                val start = it.customDateStart ?: date
+                val end = it.customDateEnd ?: date
+                java.time.temporal.ChronoUnit.DAYS.between(start, end)
+            }.thenBy { it.name.lowercase() })
+        if (custom != null) return custom
+        val weekday = date.dayOfWeek.value % 7 + 1
+        return scheduleTemplates.sortedBy { it.name.lowercase() }
+            .firstOrNull { it.active && !it.usesCustomDateRange && weekday in it.assignedWeekdays }
+    }
+
+    private fun LocalDate.toAppWeekday(): Int {
+        return dayOfWeek.value % 7 + 1
+    }
+
+    private fun ExerciseRoutine.withSevenExerciseTemplates(): ExerciseRoutine {
+        val existing = templates.associateBy { it.weekday }
+        val normalized = defaultExerciseDayRoutines().map { emptyTemplate ->
+            existing[emptyTemplate.weekday]?.let { template ->
+                template.copy(items = template.items.filter { it.text.isNotBlank() })
+            } ?: emptyTemplate
+        }
+        return copy(templates = normalized)
+    }
+
+    private fun ExerciseRoutine.updateExerciseTemplate(
+        weekday: Int,
+        update: (ExerciseDayRoutine) -> ExerciseDayRoutine
+    ): ExerciseRoutine {
+        val normalized = withSevenExerciseTemplates().templates
+        return copy(
+            templates = normalized.map { template ->
+                if (template.weekday == weekday) update(template) else template
+            }
+        )
+    }
+
+    private fun normalizeScheduleBlocks(blocks: List<ScheduleBlock>): List<ScheduleBlock> {
+        val cleanBlocks = blocks.filter { it.title.isNotBlank() && it.timeRange.isNotBlank() }
+        val withSleep = if (cleanBlocks.firstOrNull()?.title.equals("Sleep", ignoreCase = true)) {
+            cleanBlocks
+        } else {
+            listOf(ScheduleBlock("Sleep", "21:30-05:30")) + cleanBlocks
+        }
+        var currentStart = withSleep.first().timeRange.substringAfter("-", "05:30").trim()
+        return withSleep.mapIndexed { index, block ->
+            if (index == 0) {
+                block.copy(title = "Sleep")
+            } else {
+                val duration = blockDurationMinutes(block.timeRange)
+                val range = scheduleRangeFromStartAndDuration(currentStart, duration)
+                currentStart = range.substringAfter("-", currentStart).trim()
+                block.copy(timeRange = range)
+            }
+        }
+    }
+
+    private fun blockDurationMinutes(timeRange: String): Int {
+        val start = timeRange.substringBefore("-", "").trim().toLocalTimeOrNull() ?: return 60
+        val end = timeRange.substringAfter("-", "").trim().toLocalTimeOrNull() ?: return 60
+        var minutes = java.time.Duration.between(start, end).toMinutes()
+        if (minutes <= 0) minutes += 24 * 60
+        return minutes.toInt().coerceIn(5, 720)
+    }
+
+    private fun sortScheduleTemplates() {
+        scheduleTemplates.sortWith(compareBy<ScheduleTemplate> { it.name.lowercase() }.thenBy { it.id })
+    }
+
+    private fun resolvedScheduleName(name: String, templateId: String?): String {
+        val cleanName = name.trim()
+        if (cleanName.isNotBlank()) return cleanName
+        val existing = templateId?.let { id -> scheduleTemplates.firstOrNull { it.id == id }?.name }
+        if (!existing.isNullOrBlank()) return existing
+        val prefix = "Untitled Schedule "
+        val used = scheduleTemplates.mapNotNull { template ->
+            template.name.takeIf { it.startsWith(prefix) }?.removePrefix(prefix)?.toIntOrNull()
+        }.toSet()
+        var next = 1
+        while (next in used) next += 1
+        return "$prefix$next"
+    }
+
+    private fun weekdayName(weekday: Int): String {
+        return listOf("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
+            .getOrElse(weekday - 1) { "Day $weekday" }
+    }
+
     private fun scheduleRangeFromStartAndDuration(
         start: String,
         durationMinutes: Int
@@ -2542,6 +2881,11 @@ private sealed interface PlannerEdit {
         val updated: List<ScheduleBlock>
     ) : PlannerEdit
 
+    data class ReplaceScheduleTemplates(
+        val previous: List<ScheduleTemplate>,
+        val updated: List<ScheduleTemplate>
+    ) : PlannerEdit
+
     data class ReplaceExerciseRoutine(
         val previous: ExerciseRoutine,
         val updated: ExerciseRoutine
@@ -2567,6 +2911,8 @@ private val PlannerEdit.isUserUndoable: Boolean
         is PlannerEdit.DeleteBacklogItem,
         is PlannerEdit.RenameBacklogItem,
         is PlannerEdit.ReplaceBacklogItems,
+        is PlannerEdit.ReplaceRecurringTemplates,
+        is PlannerEdit.ReplaceScheduleTemplates,
         is PlannerEdit.AssignBacklogToday -> true
         else -> false
     }
@@ -2580,6 +2926,8 @@ private val PlannerEdit.undoMessage: String
         is PlannerEdit.DeleteBacklogItem -> "Undo deleting backlog item"
         is PlannerEdit.RenameBacklogItem -> "Undo editing backlog item"
         is PlannerEdit.ReplaceBacklogItems -> "Undo changing backlog"
+        is PlannerEdit.ReplaceRecurringTemplates -> "Undo changing recurring tasks"
+        is PlannerEdit.ReplaceScheduleTemplates -> "Undo changing schedules"
         is PlannerEdit.AssignBacklogToday -> "Undo assigning backlog item"
         else -> "Undo change"
     }
@@ -2593,6 +2941,8 @@ private val PlannerEdit.redoMessage: String
         is PlannerEdit.DeleteBacklogItem -> "Redo deleting backlog item"
         is PlannerEdit.RenameBacklogItem -> "Redo editing backlog item"
         is PlannerEdit.ReplaceBacklogItems -> "Redo changing backlog"
+        is PlannerEdit.ReplaceRecurringTemplates -> "Redo changing recurring tasks"
+        is PlannerEdit.ReplaceScheduleTemplates -> "Redo changing schedules"
         is PlannerEdit.AssignBacklogToday -> "Redo assigning backlog item"
         else -> "Redo change"
     }
