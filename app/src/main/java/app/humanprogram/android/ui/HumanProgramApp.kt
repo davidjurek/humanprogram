@@ -180,7 +180,10 @@ fun HumanProgramApp(
     var selectedScheduleTemplateId by rememberSaveable { mutableStateOf<String?>(null) }
     var scheduleTemplateCreating by rememberSaveable { mutableStateOf(false) }
     var scheduleTemplateEditing by rememberSaveable { mutableStateOf(false) }
+    var exerciseTemplateEditing by rememberSaveable { mutableStateOf(false) }
+    var scheduleEditorCanSave by rememberSaveable { mutableStateOf(false) }
     var scheduleEditorSaveRequest by rememberSaveable { mutableIntStateOf(0) }
+    var scheduleEditorCopyRequest by rememberSaveable { mutableIntStateOf(0) }
     var scheduleEditorDeleteRequest by rememberSaveable { mutableIntStateOf(0) }
     var scheduleEditorCloseRequest by rememberSaveable { mutableIntStateOf(0) }
     var taskDetailEditing by rememberSaveable { mutableStateOf(false) }
@@ -248,10 +251,22 @@ fun HumanProgramApp(
         showProjectMoveDestinationPopup = false
         showProjectTaskAssignPopup = false
         recurringTaskDeleteConfirmationIds = emptySet()
+        if (route != HpRoute.BACKLOG) {
+            showBacklogViewPopup = false
+            showBacklogSortPopup = false
+            showBacklogBulkDatePicker = false
+        }
+        if (route != HpRoute.BACKLOG && route != HpRoute.PROJECT) {
+            showBacklogAddPopup = false
+            showProjectTitleDialog = false
+        }
         if (settingsDetail != SettingsDetail.SCHEDULE) {
             selectedScheduleTemplateId = null
             scheduleTemplateCreating = false
             scheduleTemplateEditing = false
+        }
+        if (settingsDetail != SettingsDetail.EXERCISE) {
+            exerciseTemplateEditing = false
         }
     }
 
@@ -676,6 +691,7 @@ fun HumanProgramApp(
             selectedScheduleTemplateId = null
             scheduleTemplateCreating = false
             scheduleTemplateEditing = false
+            scheduleEditorCanSave = false
         }
         BackHandler(enabled = route == HpRoute.BACKLOG_TASK_FORM) {
             leaveBacklogTaskForm()
@@ -950,23 +966,40 @@ fun HumanProgramApp(
                         scheduleTemplateCreating = true
                         selectedScheduleTemplateId = null
                         scheduleTemplateEditing = true
+                        scheduleEditorCanSave = false
                     }
+                } else if (settingsDetail == SettingsDetail.SCHEDULE && scheduleTemplateCreating) {
+                    HpCommandAction(
+                        icon = Icons.Outlined.Event,
+                        contentDescription = "Copy existing schedule",
+                        enabled = viewModel.scheduleTemplates.isNotEmpty(),
+                        onClick = { scheduleEditorCopyRequest += 1 }
+                    )
                 } else if (settingsDetail == SettingsDetail.RECURRING) {
                     HpCommandAction(Icons.Outlined.Add, "Add recurring task") { openRecurringTaskForm() }
+                } else if (settingsDetail == SettingsDetail.EXERCISE) {
+                    HpCommandAction(
+                        icon = if (exerciseTemplateEditing) Icons.Outlined.Check else Icons.Outlined.Edit,
+                        contentDescription = if (exerciseTemplateEditing) "Done editing exercise" else "Edit exercise",
+                        onClick = { exerciseTemplateEditing = !exerciseTemplateEditing }
+                    )
                 } else {
                     null
                 },
                 if (settingsDetail == SettingsDetail.SCHEDULE && (scheduleTemplateCreating || selectedScheduleTemplateId != null)) {
                     if (scheduleTemplateEditing) {
-                        HpCommandAction(Icons.Outlined.Save, "Save schedule") {
-                            scheduleEditorSaveRequest += 1
-                        }
+                        HpCommandAction(
+                            icon = Icons.Outlined.Save,
+                            contentDescription = "Save schedule",
+                            enabled = scheduleEditorCanSave,
+                            onClick = { scheduleEditorSaveRequest += 1 }
+                        )
                     } else {
                         HpCommandAction(Icons.Outlined.Edit, "Edit schedule") {
                             scheduleTemplateEditing = true
                         }
                     }
-                } else if (settingsDetail == SettingsDetail.RECURRING || settingsDetail == SettingsDetail.SCHEDULE) {
+                } else if (settingsDetail == SettingsDetail.RECURRING || settingsDetail == SettingsDetail.SCHEDULE || settingsDetail == SettingsDetail.EXERCISE) {
                     HpCommandAction(Icons.Outlined.MoreHoriz, "Undo and redo") {
                         undoRedoMode = true
                     }
@@ -1301,11 +1334,13 @@ fun HumanProgramApp(
                     scheduleTemplateCreating = true
                     selectedScheduleTemplateId = null
                     scheduleTemplateEditing = true
+                    scheduleEditorCanSave = false
                 },
                 onOpenSchedule = {
                     selectedScheduleTemplateId = it
                     scheduleTemplateCreating = false
                     scheduleTemplateEditing = false
+                    scheduleEditorCanSave = false
                 },
                 onCloseScheduleEditor = { closeScheduleEditor() },
                 onScheduleEditorSaved = {
@@ -1313,6 +1348,7 @@ fun HumanProgramApp(
                         closeScheduleEditor()
                     } else {
                         scheduleTemplateEditing = false
+                        scheduleEditorCanSave = false
                     }
                 },
                 onScheduleEditorExitEdit = {
@@ -1320,10 +1356,14 @@ fun HumanProgramApp(
                         closeScheduleEditor()
                     } else {
                         scheduleTemplateEditing = false
+                        scheduleEditorCanSave = false
                     }
                 },
                 scheduleEditorEditing = scheduleTemplateEditing,
+                onScheduleEditorCanSaveChange = { scheduleEditorCanSave = it },
+                exerciseEditorEditing = exerciseTemplateEditing,
                 saveRequest = scheduleEditorSaveRequest,
+                copyRequest = scheduleEditorCopyRequest,
                 deleteRequest = scheduleEditorDeleteRequest,
                 closeRequest = scheduleEditorCloseRequest,
                 recurringTaskSelectMode = recurringTaskSelectMode,

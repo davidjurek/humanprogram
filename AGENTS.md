@@ -78,7 +78,8 @@ testing/
 - Before coding, check `git status --short` when practical.
 - Search with `rg` or `rg --files`.
 - For UI work, read `UI_DEVELOPMENT_GUIDE.md` first.
-- Read and edit modes for the same screen must share identical UI positioning and styling unless the owner explicitly asks for a difference.
+- Read and edit modes for the same screen must share identical UI positioning and styling unless the owner explicitly asks for a difference. This is not optional. Hiding edit-only controls in read mode must not move other content; reserve the same spacing, columns, row heights, padding, and alignment.
+- For read/edit UI, hiding something is not the same as removing it. Build one shared layout, keep all positioning identical, and make edit-only controls invisible, plain, or disabled in read mode without causing any reflow.
 - For dailyOS parity work, use the folded lessons in `ADD.md` and `UI_DEVELOPMENT_GUIDE.md`.
 - For feature scope and product rules, read `ADD.md` first.
 - For current next steps, read `BUILD_STATUS.md` first.

@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
@@ -111,6 +112,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -118,6 +121,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -165,7 +169,10 @@ internal fun SettingsScreen(
     onScheduleEditorSaved: () -> Unit,
     onScheduleEditorExitEdit: () -> Unit,
     scheduleEditorEditing: Boolean,
+    onScheduleEditorCanSaveChange: (Boolean) -> Unit,
+    exerciseEditorEditing: Boolean,
     saveRequest: Int,
+    copyRequest: Int,
     deleteRequest: Int,
     closeRequest: Int,
     recurringTaskSelectMode: Boolean,
@@ -219,11 +226,16 @@ internal fun SettingsScreen(
             onSaved = onScheduleEditorSaved,
             onExitEdit = onScheduleEditorExitEdit,
             editing = scheduleEditorEditing,
+            onCanSaveChange = onScheduleEditorCanSaveChange,
             saveRequest = saveRequest,
+            copyRequest = copyRequest,
             deleteRequest = deleteRequest,
             closeRequest = closeRequest
         )
-        SettingsDetail.EXERCISE -> ExerciseSettings(viewModel)
+        SettingsDetail.EXERCISE -> ExerciseSettings(
+            viewModel = viewModel,
+            editing = exerciseEditorEditing
+        )
         SettingsDetail.NOTIFICATIONS -> RemindersScreen(
             viewModel = viewModel,
             mode = HpMode.READ,
@@ -633,13 +645,14 @@ private fun RecurringWeekdaySelector(
     dayOptions: List<Pair<Int, String>>,
     weekdays: Set<Int>,
     editing: Boolean,
+    horizontalPadding: Dp = 18.dp,
     onWeekdaysChange: (Set<Int>) -> Unit
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(28.dp))
-            .padding(horizontal = 18.dp, vertical = 8.dp),
+            .padding(horizontal = horizontalPadding, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Row(
@@ -711,7 +724,9 @@ internal fun ScheduleSettings(
     onSaved: () -> Unit,
     onExitEdit: () -> Unit,
     editing: Boolean,
+    onCanSaveChange: (Boolean) -> Unit,
     saveRequest: Int,
+    copyRequest: Int,
     deleteRequest: Int,
     closeRequest: Int
 ) {
@@ -723,19 +738,21 @@ internal fun ScheduleSettings(
             template = editingTemplate,
             editing = editing,
             saveRequest = saveRequest,
+            copyRequest = copyRequest,
+            copySources = viewModel.scheduleTemplates.sortedBy { it.name.lowercase() },
             deleteRequest = deleteRequest,
             closeRequest = closeRequest,
             onBack = onCloseEditor,
             onExitEdit = onExitEdit,
+            onCanSaveChange = onCanSaveChange,
             onSave = { id, name, active, weekdays, customStart, customEnd, blocks ->
                 val conflict = viewModel.scheduleConflictMessage(id, name, active, weekdays, customStart, customEnd)
-                if (conflict != null) {
-                    conflictMessage = conflict
-                    false
-                } else {
-                    viewModel.saveScheduleTemplate(id, name, active, weekdays, customStart, customEnd, blocks)
+                val savedActive = if (conflict == null) active else false
+                if (viewModel.saveScheduleTemplate(id, name, savedActive, weekdays, customStart, customEnd, blocks)) {
                     onSaved()
                     true
+                } else {
+                    false
                 }
             },
             onDelete = { id ->
@@ -866,10 +883,13 @@ private fun ScheduleTemplateEditor(
     template: ScheduleTemplate?,
     editing: Boolean,
     saveRequest: Int,
+    copyRequest: Int,
+    copySources: List<ScheduleTemplate>,
     deleteRequest: Int,
     closeRequest: Int,
     onBack: () -> Unit,
     onExitEdit: () -> Unit,
+    onCanSaveChange: (Boolean) -> Unit,
     onSave: (String?, String, Boolean, Set<Int>, LocalDate?, LocalDate?, List<ScheduleBlock>) -> Boolean,
     onDelete: (String) -> Unit
 ) {
@@ -896,7 +916,9 @@ private fun ScheduleTemplateEditor(
     var editorRootTop by remember { mutableStateOf(0f) }
     var showUnsavedDialog by rememberSaveable { mutableStateOf(false) }
     var showDeleteDialog by rememberSaveable { mutableStateOf(false) }
+    var showCopyDialog by rememberSaveable { mutableStateOf(false) }
     var handledSaveRequest by rememberSaveable(template?.id) { mutableIntStateOf(saveRequest) }
+    var handledCopyRequest by rememberSaveable(template?.id) { mutableIntStateOf(copyRequest) }
     var handledDeleteRequest by rememberSaveable(template?.id) { mutableIntStateOf(deleteRequest) }
     var handledCloseRequest by rememberSaveable(template?.id) { mutableIntStateOf(closeRequest) }
     val initialName = template?.name.orEmpty()
@@ -913,8 +935,23 @@ private fun ScheduleTemplateEditor(
         customEnd != initialCustomEnd ||
         blocks != initialBlocks ||
         newBlockTitle.isNotBlank()
+    val canSave = name.trim().isNotEmpty()
+
+    fun copyScheduleIntoDraft(source: ScheduleTemplate) {
+        name = scheduleCopyName(source.name, copySources)
+        active = source.active
+        usesCustomDates = source.usesCustomDateRange
+        weekdays = source.assignedWeekdays
+        customStart = source.customDateStart?.toString().orEmpty()
+        customEnd = source.customDateEnd?.toString().orEmpty()
+        blocks = normalizeEditorScheduleBlocks(source.blocks.ifEmpty { defaultScheduleEditorBlocks() })
+        blockIds = blocks.map { UUID.randomUUID().toString() }
+        newBlockTitle = ""
+        newBlockDurationMinutes = 60
+    }
 
     fun save(): Boolean {
+        if (!canSave) return false
         val parsedStart = if (usesCustomDates) customStart.toLocalDateOrNull() ?: LocalDate.now() else null
         val parsedEnd = if (usesCustomDates) customEnd.toLocalDateOrNull() ?: parsedStart else null
         val finalBlocks = if (newBlockTitle.isNotBlank()) {
@@ -925,11 +962,22 @@ private fun ScheduleTemplateEditor(
         return onSave(template?.id, name, active, weekdays, parsedStart, parsedEnd, finalBlocks)
     }
 
+    LaunchedEffect(editing, canSave) {
+        onCanSaveChange(editing && canSave)
+    }
+
     LaunchedEffect(saveRequest) {
         if (saveRequest != handledSaveRequest && editing) {
             handledSaveRequest = saveRequest
             focusManager.clearFocus()
             save()
+        }
+    }
+    LaunchedEffect(copyRequest) {
+        if (copyRequest != handledCopyRequest && template == null) {
+            handledCopyRequest = copyRequest
+            focusManager.clearFocus()
+            if (copySources.isNotEmpty()) showCopyDialog = true
         }
     }
     LaunchedEffect(deleteRequest) {
@@ -970,25 +1018,32 @@ private fun ScheduleTemplateEditor(
             )
         }
         item {
-            Row(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 16.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .height(56.dp),
+                contentAlignment = Alignment.Center
             ) {
-                Text("Custom dates", modifier = Modifier.weight(1f), color = HpColors.ink, fontWeight = FontWeight.SemiBold)
-                Switch(
-                    checked = usesCustomDates,
-                    onCheckedChange = { enabled ->
-                        usesCustomDates = enabled
-                        if (enabled) {
-                            val today = LocalDate.now().toString()
-                            if (customStart.isBlank()) customStart = today
-                            if (customEnd.isBlank()) customEnd = customStart
-                        }
-                    },
-                    enabled = editing
-                )
+                if (editing) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                    Text("Custom dates", modifier = Modifier.weight(1f), color = HpColors.ink, fontWeight = FontWeight.SemiBold)
+                    Switch(
+                        checked = usesCustomDates,
+                        onCheckedChange = { enabled ->
+                            usesCustomDates = enabled
+                            if (enabled) {
+                                val today = LocalDate.now().toString()
+                                if (customStart.isBlank()) customStart = today
+                                if (customEnd.isBlank()) customEnd = customStart
+                            }
+                        },
+                        enabled = true
+                    )
+                    }
+                }
             }
         }
         if (usesCustomDates) {
@@ -1007,6 +1062,7 @@ private fun ScheduleTemplateEditor(
                     dayOptions = listOf(1 to "Sunday", 2 to "Monday", 3 to "Tuesday", 4 to "Wednesday", 5 to "Thursday", 6 to "Friday", 7 to "Saturday"),
                     weekdays = weekdays,
                     editing = editing,
+                    horizontalPadding = 0.dp,
                     onWeekdaysChange = { weekdays = it }
                 )
             }
@@ -1014,7 +1070,7 @@ private fun ScheduleTemplateEditor(
         item {
             Text(
                 "Sleep",
-                modifier = Modifier.padding(start = 16.dp, top = 2.dp, bottom = 2.dp),
+                modifier = Modifier.padding(start = 0.dp, top = 2.dp, bottom = 2.dp),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = HpColors.ink
@@ -1031,7 +1087,7 @@ private fun ScheduleTemplateEditor(
         item {
             Text(
                 "Daily Schedule",
-                modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 2.dp),
+                modifier = Modifier.padding(start = 0.dp, top = 8.dp, bottom = 2.dp),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = HpColors.ink
@@ -1119,18 +1175,24 @@ private fun ScheduleTemplateEditor(
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         ScheduleDurationButton(
-                            modifier = Modifier.width(128.dp),
+                            modifier = Modifier.width(96.dp),
                             enabled = true,
                             minutes = newBlockDurationMinutes,
                             onClick = { durationPickerBlockIndex = -1 }
                         )
-                        HpSecondaryButton("Add", enabled = newBlockTitle.isNotBlank()) {
+                        IconButton(
+                            modifier = Modifier.size(54.dp),
+                            enabled = newBlockTitle.isNotBlank(),
+                            onClick = {
                             if (newBlockTitle.isNotBlank()) {
                                 blocks = normalizeEditorScheduleBlocks(blocks + ScheduleBlock(newBlockTitle.trim(), nextScheduleRange(blocks, newBlockDurationMinutes)))
                                 blockIds = blockIds + UUID.randomUUID().toString()
                                 newBlockTitle = ""
                                 newBlockDurationMinutes = 60
                             }
+                            }
+                        ) {
+                            Icon(Icons.Outlined.Add, contentDescription = "Add schedule block", tint = if (newBlockTitle.isNotBlank()) HpColors.ink else HpColors.muted.copy(alpha = 0.45f))
                         }
                     }
                 }
@@ -1150,6 +1212,42 @@ private fun ScheduleTemplateEditor(
             },
             onCancel = { showUnsavedDialog = false },
             saveEnabled = blocks.isNotEmpty()
+        )
+    }
+    if (showCopyDialog) {
+        AlertDialog(
+            onDismissRequest = { showCopyDialog = false },
+            title = { Text("Copy schedule") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    copySources.forEach { source ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable {
+                                    copyScheduleIntoDraft(source)
+                                    showCopyDialog = false
+                                }
+                                .padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Outlined.Event, contentDescription = null, tint = HpColors.accent)
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                source.name,
+                                color = HpColors.ink,
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showCopyDialog = false }) { Text("Cancel") }
+            }
         )
     }
     if (showDeleteDialog && template != null) {
@@ -1242,7 +1340,7 @@ private fun ScheduleNameRow(
     val modifier = Modifier
         .fillMaxWidth()
         .height(56.dp)
-        .padding(horizontal = 16.dp)
+        .padding(horizontal = 0.dp)
 
     if (editing) {
         Box(modifier = modifier, contentAlignment = Alignment.CenterStart) {
@@ -1328,40 +1426,46 @@ private fun ScheduleEditorBlockRow(
                 Text(
                     block.timeRange,
                     color = HpColors.muted,
-                    style = MaterialTheme.typography.bodyMedium
+                    style = MaterialTheme.typography.bodySmall
                 )
                 Text(
                     blockDurationDisplay(block.timeRange),
                     color = HpColors.muted,
-                    style = MaterialTheme.typography.bodyMedium
+                    style = MaterialTheme.typography.bodySmall
                 )
             }
+            Box(
+                modifier = Modifier
+                    .size(width = 32.dp, height = 44.dp)
+                    .then(
+                        if (editing) {
+                            Modifier.pointerInput(Unit) {
+                                detectDragGesturesAfterLongPress(
+                                    onDragStart = { onDragStart() },
+                                    onDragCancel = onDragCancel,
+                                    onDragEnd = onDragEnd,
+                                    onDrag = { change, dragAmount ->
+                                        change.consume()
+                                        onDrag(dragAmount.y)
+                                    }
+                                )
+                            }
+                        } else {
+                            Modifier
+                        }
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                if (editing) ScheduleDragHandle()
+            }
+            Spacer(Modifier.width(14.dp))
             if (editing) {
-                Box(
-                    modifier = Modifier
-                        .size(width = 32.dp, height = 44.dp)
-                        .pointerInput(Unit) {
-                            detectDragGesturesAfterLongPress(
-                                onDragStart = { onDragStart() },
-                                onDragCancel = onDragCancel,
-                                onDragEnd = onDragEnd,
-                                onDrag = { change, dragAmount ->
-                                    change.consume()
-                                    onDrag(dragAmount.y)
-                                }
-                            )
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    ScheduleDragHandle()
-                }
-                Spacer(Modifier.width(14.dp))
                 BasicTextField(
                     value = block.title,
                     onValueChange = onTitleChange,
                     modifier = Modifier.weight(1f),
                     singleLine = true,
-                    textStyle = MaterialTheme.typography.titleMedium.copy(
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(
                         color = HpColors.ink,
                         fontWeight = FontWeight.Medium
                     )
@@ -1377,11 +1481,12 @@ private fun ScheduleEditorBlockRow(
                     block.title,
                     modifier = Modifier.weight(1f),
                     color = HpColors.ink,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                Spacer(Modifier.size(38.dp))
             }
         }
         HorizontalDivider(color = HpColors.divider)
@@ -1395,7 +1500,7 @@ private fun ScheduleSleepSettingsSection(
     onSleepStartClick: () -> Unit,
     onWakeClick: () -> Unit
 ) {
-    Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+    Column(modifier = Modifier.padding(horizontal = 0.dp)) {
         ScheduleSleepSettingRow(
             label = "Sleep starts",
             value = sleep.timeRange.substringBefore("-").trim(),
@@ -1431,25 +1536,17 @@ private fun ScheduleSleepSettingRow(
             color = HpColors.ink,
             style = MaterialTheme.typography.titleMedium
         )
-        if (editing) {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(HpColors.glass)
-                    .clickable(onClick = onClick)
-                    .padding(horizontal = 18.dp, vertical = 9.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    value,
-                    color = HpColors.ink,
-                    style = MaterialTheme.typography.titleMedium
-                )
-            }
-        } else {
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .background(if (editing) HpColors.glass else Color.Transparent)
+                .clickable(enabled = editing, onClick = onClick)
+                .padding(horizontal = 18.dp, vertical = 9.dp),
+            contentAlignment = Alignment.Center
+        ) {
             Text(
                 value,
-                color = HpColors.muted,
+                color = HpColors.ink,
                 style = MaterialTheme.typography.titleMedium
             )
         }
@@ -1559,7 +1656,7 @@ private fun ScheduleCustomDateRows(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = 0.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         ScheduleCustomDateRow("From", start, editing, onPickStart)
@@ -1584,22 +1681,14 @@ private fun ScheduleCustomDateRow(
             color = HpColors.ink,
             style = MaterialTheme.typography.titleMedium
         )
-        if (editing) {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(HpColors.glass)
-                    .clickable(onClick = onClick)
-                    .padding(horizontal = 18.dp, vertical = 9.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    date?.let(::scheduleCustomDateLabel) ?: "Choose date",
-                    color = HpColors.ink,
-                    style = MaterialTheme.typography.titleMedium
-                )
-            }
-        } else {
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .background(if (editing) HpColors.glass else Color.Transparent)
+                .clickable(enabled = editing, onClick = onClick)
+                .padding(horizontal = 18.dp, vertical = 9.dp),
+            contentAlignment = Alignment.Center
+        ) {
             Text(
                 date?.let(::scheduleCustomDateLabel) ?: "Choose date",
                 color = HpColors.ink,
@@ -1647,17 +1736,17 @@ private fun ScheduleDurationButton(
 ) {
     Box(
         modifier = modifier
-            .height(56.dp)
-            .clip(RoundedCornerShape(24.dp))
-            .border(1.dp, HpColors.muted, RoundedCornerShape(24.dp))
+            .height(54.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .background(HpColors.glass)
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 24.dp),
-        contentAlignment = Alignment.CenterStart
+            .padding(horizontal = 18.dp),
+        contentAlignment = Alignment.Center
     ) {
         Text(
-            durationCompactLabel(minutes),
+            durationClockLabel(minutes),
             color = HpColors.ink,
-            style = MaterialTheme.typography.bodyLarge
+            style = MaterialTheme.typography.titleMedium
         )
     }
 }
@@ -1808,6 +1897,20 @@ private fun durationCompactLabel(minutes: Int): String {
     return "%02dh %02dm".format(minutes / 60, minutes % 60)
 }
 
+private fun durationClockLabel(minutes: Int): String {
+    return "%02d:%02d".format(minutes / 60, minutes % 60)
+}
+
+private fun scheduleCopyName(sourceName: String, templates: List<ScheduleTemplate>): String {
+    val cleanSourceName = sourceName.trim().ifBlank { "Untitled schedule" }
+    val baseCopyName = "$cleanSourceName - copy"
+    val existingNames = templates.map { it.name.trim().lowercase() }.toSet()
+    if (baseCopyName.lowercase() !in existingNames) return baseCopyName
+    var copyNumber = 2
+    while ("$baseCopyName $copyNumber".lowercase() in existingNames) copyNumber += 1
+    return "$baseCopyName $copyNumber"
+}
+
 private fun durationPickerLabel(minutes: Int): String {
     return "%02d min - %02d hr %02d min".format(minutes, minutes / 60, minutes % 60)
 }
@@ -1843,8 +1946,10 @@ private fun weekdayLetter(weekday: Int): String {
 }
 
 @Composable
-internal fun ExerciseSettings(viewModel: HumanProgramViewModel) {
-    var editing by rememberSaveable { mutableStateOf(false) }
+internal fun ExerciseSettings(
+    viewModel: HumanProgramViewModel,
+    editing: Boolean
+) {
     var labelEditorWeekday by rememberSaveable { mutableIntStateOf(0) }
     var labelDraft by rememberSaveable { mutableStateOf("") }
     var editingItemId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -1852,6 +1957,12 @@ internal fun ExerciseSettings(viewModel: HumanProgramViewModel) {
     var itemDraft by rememberSaveable { mutableStateOf("") }
     var addingWeekday by rememberSaveable { mutableIntStateOf(0) }
     var newItemDraft by rememberSaveable { mutableStateOf("") }
+    var draggedItemId by rememberSaveable { mutableStateOf<String?>(null) }
+    var draggedWeekday by rememberSaveable { mutableIntStateOf(0) }
+    var draggedItemIndex by rememberSaveable { mutableIntStateOf(-1) }
+    var dragTargetIndex by rememberSaveable { mutableIntStateOf(-1) }
+    var draggedItemOffsetY by remember { mutableStateOf(0f) }
+    var exerciseItemRowHeight by remember { mutableStateOf(1f) }
 
     fun commitItemEdit() {
         val itemId = editingItemId ?: return
@@ -1869,21 +1980,29 @@ internal fun ExerciseSettings(viewModel: HumanProgramViewModel) {
         newItemDraft = ""
     }
 
+    LaunchedEffect(editing) {
+        if (!editing) {
+            commitItemEdit()
+            commitNewItem()
+            draggedItemId = null
+            draggedWeekday = 0
+            draggedItemIndex = -1
+            dragTargetIndex = -1
+            draggedItemOffsetY = 0f
+        }
+    }
+
     HpList(itemSpacing = 0.dp) {
         item {
-            Row(
+            Text(
+                "Exercise",
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Exercise", modifier = Modifier.weight(1f), color = HpColors.ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                HpSecondaryButton(if (editing) "Done" else "Edit") {
-                    commitItemEdit()
-                    commitNewItem()
-                    editing = !editing
-                }
-            }
+                color = HpColors.ink,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold
+            )
         }
         (1..7).forEach { weekday ->
             val template = viewModel.exerciseTemplateForWeekday(weekday)
@@ -1915,14 +2034,26 @@ internal fun ExerciseSettings(viewModel: HumanProgramViewModel) {
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium
                     )
-                    HorizontalDivider(color = HpColors.divider)
                 }
             }
-            items(template.items, key = { it.id }) { item ->
-                val index = template.items.indexOfFirst { it.id == item.id }
+            itemsIndexed(template.items, key = { _, item -> item.id }) { index, item ->
+                val isDragging = draggedItemId == item.id
+                val sameDraggedDay = draggedWeekday == weekday
                 ExerciseTemplateItemRow(
                     item = item,
                     editing = editing,
+                    isDragging = isDragging,
+                    rowOffsetY = if (sameDraggedDay) {
+                        scheduleDragRowOffset(
+                            index = index,
+                            draggedIndex = draggedItemIndex,
+                            targetIndex = dragTargetIndex,
+                            draggedOffsetY = draggedItemOffsetY,
+                            rowHeight = exerciseItemRowHeight
+                        )
+                    } else {
+                        0f
+                    },
                     draft = if (editingItemId == item.id) itemDraft else null,
                     onBeginEdit = {
                         commitItemEdit()
@@ -1933,10 +2064,47 @@ internal fun ExerciseSettings(viewModel: HumanProgramViewModel) {
                     },
                     onDraftChange = { itemDraft = it },
                     onCommitDraft = { commitItemEdit() },
-                    onMoveUp = { viewModel.moveExerciseTemplateItem(weekday, index, index - 1) },
-                    onMoveDown = { viewModel.moveExerciseTemplateItem(weekday, index, index + 1) },
-                    canMoveUp = index > 0,
-                    canMoveDown = index < template.items.lastIndex,
+                    onPositioned = { height ->
+                        if (height > 0) exerciseItemRowHeight = height
+                    },
+                    onDragStart = {
+                        if (editing) {
+                            commitItemEdit()
+                            commitNewItem()
+                            draggedItemId = item.id
+                            draggedWeekday = weekday
+                            draggedItemIndex = index
+                            dragTargetIndex = index
+                            draggedItemOffsetY = 0f
+                        }
+                    },
+                    onDragCancel = {
+                        draggedItemId = null
+                        draggedWeekday = 0
+                        draggedItemIndex = -1
+                        dragTargetIndex = -1
+                        draggedItemOffsetY = 0f
+                    },
+                    onDragEnd = {
+                        val draggedId = draggedItemId
+                        val fromIndex = template.items.indexOfFirst { it.id == draggedId }
+                        if (draggedWeekday == weekday && fromIndex in template.items.indices && dragTargetIndex in template.items.indices && fromIndex != dragTargetIndex) {
+                            viewModel.moveExerciseTemplateItem(weekday, fromIndex, dragTargetIndex)
+                        }
+                        draggedItemId = null
+                        draggedWeekday = 0
+                        draggedItemIndex = -1
+                        dragTargetIndex = -1
+                        draggedItemOffsetY = 0f
+                    },
+                    onDrag = { dragAmount ->
+                        if (draggedWeekday == weekday && draggedItemIndex != -1 && template.items.isNotEmpty()) {
+                            draggedItemOffsetY += dragAmount
+                            dragTargetIndex = ((draggedItemIndex * exerciseItemRowHeight + exerciseItemRowHeight / 2f + draggedItemOffsetY) / exerciseItemRowHeight)
+                                .roundToInt()
+                                .coerceIn(0, template.items.lastIndex)
+                        }
+                    },
                     onDelete = { viewModel.deleteExerciseTemplateItem(weekday, item.id) }
                 )
             }
@@ -1948,6 +2116,9 @@ internal fun ExerciseSettings(viewModel: HumanProgramViewModel) {
                         onCommit = { commitNewItem() }
                     )
                 }
+            }
+            item {
+                HorizontalDivider(color = HpColors.divider)
             }
         }
     }
@@ -2003,13 +2174,11 @@ private fun ExerciseDayHeader(
             modifier = Modifier
                 .weight(1f)
                 .clickable(enabled = editing, onClick = onEditLabel),
-            color = HpColors.muted,
-            style = MaterialTheme.typography.bodyMedium,
+            color = HpColors.ink,
+            style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold
         )
         if (editing) {
-            Icon(Icons.Outlined.Edit, contentDescription = "Edit day label", tint = HpColors.muted, modifier = Modifier.size(18.dp).clickable(onClick = onEditLabel))
-        } else {
             Icon(Icons.Outlined.Add, contentDescription = "Add exercise item", tint = HpColors.ink, modifier = Modifier.size(22.dp).clickable(onClick = onAdd))
         }
     }
@@ -2019,56 +2188,104 @@ private fun ExerciseDayHeader(
 private fun ExerciseTemplateItemRow(
     item: ExerciseRoutineItem,
     editing: Boolean,
+    isDragging: Boolean,
+    rowOffsetY: Float,
     draft: String?,
     onBeginEdit: () -> Unit,
     onDraftChange: (String) -> Unit,
     onCommitDraft: () -> Unit,
-    onMoveUp: () -> Unit,
-    onMoveDown: () -> Unit,
-    canMoveUp: Boolean,
-    canMoveDown: Boolean,
+    onPositioned: (Float) -> Unit,
+    onDragStart: () -> Unit,
+    onDragCancel: () -> Unit,
+    onDragEnd: () -> Unit,
+    onDrag: (Float) -> Unit,
     onDelete: () -> Unit
 ) {
+    val textStyle = if (item.text.length > 34) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium
+    val animatedRowOffsetY by animateFloatAsState(
+        targetValue = rowOffsetY,
+        animationSpec = tween(durationMillis = 170),
+        label = "exercise-row-drag-offset"
+    )
+    val displayedOffsetY = if (isDragging) rowOffsetY else animatedRowOffsetY
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .zIndex(if (isDragging) 1f else 0f)
+            .offset { IntOffset(0, displayedOffsetY.roundToInt()) }
+            .background(
+                color = if (isDragging) HpColors.divider.copy(alpha = 0.55f) else Color.Transparent,
+                shape = RoundedCornerShape(12.dp)
+            )
+            .onGloballyPositioned { coordinates -> onPositioned(coordinates.size.height.toFloat()) }
+            .heightIn(min = 42.dp)
+            .padding(horizontal = 16.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (draft != null) {
-            BasicTextField(
+            ExerciseItemTextField(
                 value = draft,
                 onValueChange = onDraftChange,
-                singleLine = true,
-                textStyle = MaterialTheme.typography.bodyMedium.copy(color = HpColors.ink, fontWeight = FontWeight.Medium),
+                placeholder = "",
+                textStyle = textStyle,
                 modifier = Modifier
                     .weight(1f)
-                    .padding(vertical = 8.dp)
+                    .padding(vertical = 2.dp)
             )
-            TextButton(onClick = onCommitDraft) { Text("Done") }
+            IconButton(modifier = Modifier.size(38.dp), onClick = onCommitDraft) {
+                Icon(Icons.Outlined.Check, contentDescription = "Save exercise item", tint = HpColors.ink)
+            }
         } else {
-            Text(
-                item.text,
+            Row(
                 modifier = Modifier
                     .weight(1f)
-                    .clickable(enabled = !editing, onClick = onBeginEdit)
-                    .padding(vertical = 8.dp),
-                color = HpColors.ink,
-                style = if (item.text.length > 34) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
+                    .then(
+                        if (editing) {
+                            Modifier.pointerInput(item.id) {
+                                detectDragGesturesAfterLongPress(
+                                    onDragStart = { onDragStart() },
+                                    onDragCancel = onDragCancel,
+                                    onDragEnd = onDragEnd,
+                                    onDrag = { change, dragAmount ->
+                                        change.consume()
+                                        onDrag(dragAmount.y)
+                                    }
+                                )
+                            }
+                        } else {
+                            Modifier
+                        }
+                    )
+                    .padding(vertical = 2.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                Text(
+                    "\u2022",
+                    modifier = Modifier.width(18.dp),
+                    color = HpColors.muted,
+                    style = textStyle,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    item.text,
+                    modifier = Modifier.weight(1f),
+                    color = HpColors.muted,
+                    style = textStyle,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
             if (editing) {
-                HpTinyIconButton(Icons.Outlined.KeyboardArrowUp, "Move up", onMoveUp, enabled = canMoveUp)
-                HpTinyIconButton(Icons.Outlined.KeyboardArrowDown, "Move down", onMoveDown, enabled = canMoveDown)
+                IconButton(modifier = Modifier.size(38.dp), onClick = onBeginEdit) {
+                    Icon(Icons.Outlined.Edit, contentDescription = "Edit exercise item", tint = HpColors.ink)
+                }
                 IconButton(modifier = Modifier.size(38.dp), onClick = onDelete) {
                     Icon(Icons.Outlined.Delete, contentDescription = "Delete exercise item", tint = HpColors.ink)
                 }
             }
         }
     }
-    HorizontalDivider(color = HpColors.divider)
 }
 
 @Composable
@@ -2077,30 +2294,75 @@ private fun ExerciseNewItemRow(
     onDraftChange: (String) -> Unit,
     onCommit: () -> Unit
 ) {
+    val focusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+        keyboardController?.show()
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .heightIn(min = 42.dp)
+            .padding(horizontal = 16.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        BasicTextField(
+        ExerciseItemTextField(
             value = draft,
             onValueChange = onDraftChange,
-            singleLine = true,
-            textStyle = MaterialTheme.typography.bodyMedium.copy(color = HpColors.ink),
-            decorationBox = { innerTextField ->
-                if (draft.isBlank()) Text("Exercise item", color = HpColors.muted)
-                innerTextField()
-            },
+            placeholder = "Exercise item",
+            textStyle = MaterialTheme.typography.bodyMedium,
             modifier = Modifier
                 .weight(1f)
-                .padding(vertical = 10.dp)
+                .focusRequester(focusRequester)
+                .padding(vertical = 2.dp)
         )
-        TextButton(onClick = onCommit, enabled = draft.isNotBlank()) {
-            Text("Add")
+        IconButton(modifier = Modifier.size(38.dp), onClick = onCommit) {
+            Icon(Icons.Outlined.Check, contentDescription = "Save exercise item", tint = HpColors.ink)
         }
     }
-    HorizontalDivider(color = HpColors.divider)
+}
+
+@Composable
+private fun ExerciseItemTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    textStyle: androidx.compose.ui.text.TextStyle,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.Top
+    ) {
+        Text(
+            "\u2022",
+            modifier = Modifier.width(18.dp),
+            color = HpColors.muted,
+            style = textStyle,
+            fontWeight = FontWeight.Medium
+        )
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            singleLine = true,
+            textStyle = textStyle.copy(color = HpColors.muted, fontWeight = FontWeight.Medium),
+            decorationBox = { innerTextField ->
+                if (value.isBlank() && placeholder.isNotBlank()) {
+                    Text(
+                        placeholder,
+                        color = HpColors.muted,
+                        style = textStyle,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+                innerTextField()
+            },
+            modifier = Modifier.weight(1f)
+        )
+    }
 }
 
 private fun exerciseSectionTitle(weekday: Int, title: String): String {

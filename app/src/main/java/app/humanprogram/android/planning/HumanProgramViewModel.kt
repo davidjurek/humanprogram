@@ -1235,7 +1235,9 @@ class HumanProgramViewModel(
                     null
                 }
             }
-        return conflicts.firstOrNull()?.let { "Cannot enable \"${name.ifBlank { "Untitled Schedule" }}\". $it" }
+        return conflicts.firstOrNull()?.let {
+            "Cannot enable \"${name.ifBlank { "Untitled Schedule" }}\" because one of its days is already used by another enabled schedule. Check the selected days or disable the other schedule first. $it"
+        }
     }
 
     fun saveScheduleTemplate(
@@ -1247,6 +1249,7 @@ class HumanProgramViewModel(
         customDateEnd: LocalDate?,
         blocks: List<ScheduleBlock>
     ): Boolean {
+        if (name.trim().isBlank()) return false
         val cleanName = resolvedScheduleName(name, templateId)
         val normalizedBlocks = normalizeScheduleBlocks(blocks)
         if (normalizedBlocks.isEmpty()) return false

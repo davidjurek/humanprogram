@@ -3,6 +3,7 @@ package app.humanprogram.android.planning
 import app.humanprogram.android.planning.calendar.DeviceCalendarEvent
 import app.humanprogram.android.planning.model.DailyTaskSourceType
 import app.humanprogram.android.planning.model.ReminderRecurrence
+import app.humanprogram.android.planning.model.ScheduleBlock
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -540,6 +541,47 @@ class HumanProgramViewModelTest {
         viewModel.redoLastEdit()
 
         assertEquals("Changed block", viewModel.scheduleBlocks.first().title)
+    }
+
+    @Test
+    fun blankScheduleNameCannotSave() {
+        val viewModel = HumanProgramViewModel()
+
+        val saved = viewModel.saveScheduleTemplate(
+            templateId = null,
+            name = "",
+            active = false,
+            assignedWeekdays = setOf(5),
+            customDateStart = null,
+            customDateEnd = null,
+            blocks = listOf(ScheduleBlock("Sleep", "21:30-05:30"))
+        )
+
+        assertFalse(saved)
+    }
+
+    @Test
+    fun conflictingInactiveScheduleCanSaveButCannotBeEnabled() {
+        val viewModel = HumanProgramViewModel()
+
+        val saved = viewModel.saveScheduleTemplate(
+            templateId = null,
+            name = "Thursday backup",
+            active = false,
+            assignedWeekdays = setOf(5),
+            customDateStart = null,
+            customDateEnd = null,
+            blocks = listOf(ScheduleBlock("Sleep", "21:30-05:30"))
+        )
+
+        assertTrue(saved)
+        val template = viewModel.scheduleTemplates.first { it.name == "Thursday backup" }
+        assertFalse(template.active)
+
+        val conflict = viewModel.setScheduleTemplateActive(template.id, true)
+
+        assertTrue(conflict.orEmpty().contains("already used by another enabled schedule"))
+        assertFalse(viewModel.scheduleTemplates.first { it.id == template.id }.active)
     }
 
     @Test

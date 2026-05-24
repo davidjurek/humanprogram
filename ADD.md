@@ -250,7 +250,7 @@ planning/
   calendar/
   stats/
   settings/
-gamebridge/
+gamebridge/ 
 game/
 testing/
 ```

@@ -1,6 +1,7 @@
 package app.humanprogram.android.ui
 
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -248,16 +249,16 @@ internal fun TodayScreen(
             ) {
                 HpSectionHeader("Things to Do", null)
                 Spacer(Modifier.weight(1f))
-                if (viewModel.canEditSelectedDate) {
-                    Box(
-                        modifier = Modifier
-                            .height(26.dp)
-                            .width(80.dp)
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(HpColors.glass)
-                            .clickable(onClick = onAddTask),
-                        contentAlignment = Alignment.Center
-                    ) {
+                Box(
+                    modifier = Modifier
+                        .height(26.dp)
+                        .width(80.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(if (viewModel.canEditSelectedDate) HpColors.glass else Color.Transparent)
+                        .clickable(enabled = viewModel.canEditSelectedDate, onClick = onAddTask),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (viewModel.canEditSelectedDate) {
                         Icon(Icons.Outlined.Add, contentDescription = "Add manual task", tint = HpColors.ink, modifier = Modifier.size(18.dp))
                     }
                 }
@@ -440,31 +441,61 @@ internal fun DayStatusPanel(
             color = HpColors.ink
         )
         if (viewModel.isPastDate) {
+            var lockPressed by remember { mutableStateOf(false) }
+            val lockSlotWidth = 98.dp
+            val lockButtonScale by animateFloatAsState(
+                targetValue = if (lockPressed) 1.14f else 1f,
+                label = "past-lock-scale"
+            )
+            val lockButtonColor by animateColorAsState(
+                targetValue = if (viewModel.canEditSelectedDate) {
+                    HpColors.success
+                } else {
+                    if (LocalHpDark.current) Color(0xFFD96B6B) else Color(0xFFB84A4A)
+                },
+                label = "past-lock-color"
+            )
             Box(
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
-                    .width(82.dp)
+                    .width(lockSlotWidth)
                     .fillMaxHeight()
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(HpColors.glass)
-                    .pointerInput(viewModel.selectedDate, viewModel.canEditSelectedDate) {
-                        detectTapGestures(
-                            onTap = {
-                                viewModel.toggleSelectedPastDateEditLock()
-                            },
-                            onLongPress = {
-                                viewModel.toggleSelectedPastDateEditLock()
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            }
-                        )
-                    },
-                contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = if (viewModel.canEditSelectedDate) Icons.Outlined.LockOpen else Icons.Outlined.Lock,
-                    contentDescription = if (viewModel.canEditSelectedDate) "Past page unlocked" else "Past page locked",
-                    tint = HpColors.ink
-                )
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .width(82.dp)
+                        .fillMaxHeight()
+                        .graphicsLayer {
+                            scaleX = lockButtonScale
+                            scaleY = lockButtonScale
+                        }
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(lockButtonColor)
+                        .pointerInput(viewModel.selectedDate) {
+                            detectTapGestures(
+                                onPress = {
+                                    lockPressed = true
+                                    try {
+                                        tryAwaitRelease()
+                                    } finally {
+                                        lockPressed = false
+                                    }
+                                },
+                                onLongPress = {
+                                    viewModel.toggleSelectedPastDateEditLock()
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                }
+                            )
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (viewModel.canEditSelectedDate) Icons.Outlined.LockOpen else Icons.Outlined.Lock,
+                        contentDescription = if (viewModel.canEditSelectedDate) "Past page unlocked" else "Past page locked",
+                        tint = Color.White
+                    )
+                }
             }
         }
     }

@@ -178,6 +178,8 @@ Use this file to track what has been built, what is next, and what decisions hav
 - Fixed reminder alarm lifecycle bugs: deleting a reminder now cancels its existing Android alarm, and import/reset paths cancel existing reminder alarms before replacing planner data and then resync the new reminder set.
 - Added regression tests for direct date jumping and reset validation return behavior.
 - Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew lintDebug test assembleDebug`; lint now reports `No issues found`.
+- Fixed Schedule editor/read layout parity: read mode now keeps schedule row text aligned with edit mode while hiding drag/delete controls, hides the custom-date switch row in read mode, keeps sleep/wake values as matching pills, and uses a smaller schedule item title size.
+- Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew test assembleDebug` successfully after the schedule UI parity fixes.
 - Installed the debug APK on the emulator and confirmed `app.humanprogram.android` launches and stays running.
 - Split the rebuilt Compose UI out of the oversized `HumanProgramApp.kt` file into focused UI files under `ui/design`, `ui/shell`, `ui/screens`, and `ui/components` while keeping behavior unchanged.
 - Re-ran `JAVA_HOME=/Applications/Android\ Studio.app/Contents/jbr/Contents/Home ./gradlew lintDebug test assembleDebug` successfully after the Compose UI file split.
