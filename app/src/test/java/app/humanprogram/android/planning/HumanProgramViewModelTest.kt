@@ -113,6 +113,24 @@ class HumanProgramViewModelTest {
     }
 
     @Test
+    fun appLockCanBeSetToNeverLock() {
+        val viewModel = HumanProgramViewModel()
+        viewModel.updateAppLockPinInput("1234")
+        val hash = viewModel.setupAppLockPin()
+
+        viewModel.loadStoredAppLockPin(
+            enabled = true,
+            biometricEnabled = false,
+            saltBase64 = hash!!.saltBase64,
+            hashBase64 = hash.hashBase64,
+            timeoutMinutes = -1
+        )
+        viewModel.lockAppIfEnabled(Instant.now())
+
+        assertFalse(viewModel.appLocked)
+    }
+
+    @Test
     fun appLockCanLockImmediatelyFromSettings() {
         val viewModel = HumanProgramViewModel()
         viewModel.updateAppLockPinInput("1234")

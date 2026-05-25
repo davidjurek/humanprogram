@@ -136,6 +136,7 @@ import java.time.ZoneOffset
 fun HumanProgramApp(
     viewModel: HumanProgramViewModel = viewModel(),
     appearance: String = "system",
+    dateFormat: String = "month_day_year",
     backlogViewPreference: String = "tasks",
     backlogSortPreference: String = "creation",
     notificationPermissionGranted: Boolean = false,
@@ -144,6 +145,8 @@ fun HumanProgramApp(
     onRequestCalendarPermission: () -> Unit = {},
     onExportHprgm: () -> Unit = {},
     onImportHprgmPreview: () -> Unit = {},
+    onImportBacklogCsv: () -> Unit = {},
+    onExportBacklogCsvTemplate: () -> Unit = {},
     onReminderScheduleChanged: () -> Unit = {},
     onReminderDeleted: (String) -> Unit = {},
     onPlannerDataReplacing: () -> Unit = {},
@@ -152,9 +155,11 @@ fun HumanProgramApp(
     onOnboardingComplete: () -> Unit = {},
     onAppLockPinSet: (PinHash) -> Unit = {},
     onRecoveryPhraseSet: (PinHash) -> Unit = {},
+    onRecoveryPhraseRevoked: () -> Unit = {},
     onAppLockTimeoutChanged: (Int) -> Unit = {},
     onBiometricUnlockChanged: (Boolean) -> Unit = {},
     onAppearanceChanged: (String) -> Unit = {},
+    onDateFormatChanged: (String) -> Unit = {},
     onBacklogViewPreferenceChanged: (String) -> Unit = {},
     onBacklogSortPreferenceChanged: (String) -> Unit = {},
     onRequestBiometricUnlock: () -> Unit = {}
@@ -190,6 +195,8 @@ fun HumanProgramApp(
     var taskDetailTitleDraft by rememberSaveable { mutableStateOf("") }
     var taskDetailNotesDraft by rememberSaveable { mutableStateOf("") }
     var settingsDetail by rememberSaveable { mutableStateOf<SettingsDetail?>(null) }
+    var settingsInnerBackAvailable by rememberSaveable { mutableStateOf(false) }
+    var settingsInnerBackRequest by rememberSaveable { mutableIntStateOf(0) }
     var mode by rememberSaveable { mutableStateOf(HpMode.READ) }
     var undoRedoMode by rememberSaveable { mutableStateOf(false) }
     var undoRedoMessage by rememberSaveable { mutableStateOf<String?>(null) }
@@ -716,6 +723,11 @@ fun HumanProgramApp(
                 route == HpRoute.SETTINGS && settingsDetail == SettingsDetail.SCHEDULE && (scheduleTemplateCreating || selectedScheduleTemplateId != null) -> {
                     scheduleEditorCloseRequest += 1
                 }
+                route == HpRoute.SETTINGS && settingsDetail == SettingsDetail.RECURRING && recurringTaskSelectMode -> {
+                    recurringTaskSelectMode = false
+                    selectedRecurringTemplateIds = emptySet()
+                }
+                route == HpRoute.SETTINGS && settingsInnerBackAvailable -> settingsInnerBackRequest += 1
                 route == HpRoute.SETTINGS && settingsDetail != null -> settingsDetail = null
                 route == HpRoute.BACKLOG_TASK_FORM -> leaveBacklogTaskForm()
                 route == HpRoute.BACKLOG_TASK_EDIT -> leaveBacklogTaskEdit()
@@ -727,6 +739,9 @@ fun HumanProgramApp(
                 }
                 route != HpRoute.PROGRAM -> route = HpRoute.PROGRAM
             }
+        }
+        BackHandler(enabled = route != HpRoute.PROGRAM && route != HpRoute.HIDDEN_GATE) {
+            goBack()
         }
         val menuSlot = HpCommandAction(Icons.Outlined.Apps, "Program", onClick = openProgram)
         val backSlot = HpCommandAction(Icons.AutoMirrored.Outlined.ArrowBack, "Back", onClick = goBack)
@@ -1278,6 +1293,8 @@ fun HumanProgramApp(
                 viewModel = viewModel,
                 onExportHprgm = onExportHprgm,
                 onImportHprgmPreview = onImportHprgmPreview,
+                onImportBacklogCsv = onImportBacklogCsv,
+                onExportBacklogCsvTemplate = onExportBacklogCsvTemplate,
                 onPlannerDataReplacing = onPlannerDataReplacing,
                 onReminderScheduleChanged = onReminderScheduleChanged
             )
@@ -1326,6 +1343,7 @@ fun HumanProgramApp(
                 viewModel = viewModel,
                 detail = settingsDetail,
                 appearance = appearance,
+                dateFormat = dateFormat,
                 onDetail = { settingsDetail = it },
                 onOpenRecurringTask = { openRecurringTaskEdit(it) },
                 scheduleEditorTemplateId = selectedScheduleTemplateId,
@@ -1386,14 +1404,20 @@ fun HumanProgramApp(
                 onToggleCalendarSource = onToggleCalendarSource,
                 onExportHprgm = onExportHprgm,
                 onImportHprgmPreview = onImportHprgmPreview,
+                onImportBacklogCsv = onImportBacklogCsv,
+                onExportBacklogCsvTemplate = onExportBacklogCsvTemplate,
                 onReminderDeleted = onReminderDeleted,
                 onPlannerDataReplacing = onPlannerDataReplacing,
                 onReminderScheduleChanged = onReminderScheduleChanged,
                 onAppLockPinSet = onAppLockPinSet,
                 onRecoveryPhraseSet = onRecoveryPhraseSet,
+                onRecoveryPhraseRevoked = onRecoveryPhraseRevoked,
                 onAppLockTimeoutChanged = onAppLockTimeoutChanged,
                 onBiometricUnlockChanged = onBiometricUnlockChanged,
                 onAppearanceChanged = onAppearanceChanged,
+                onDateFormatChanged = onDateFormatChanged,
+                innerBackRequest = settingsInnerBackRequest,
+                onInnerBackAvailableChange = { settingsInnerBackAvailable = it },
                 onHiddenGateReady = {
                     viewModel.requestHiddenSudokuGate()
                     if (viewModel.hiddenSudokuGateVisible) route = HpRoute.HIDDEN_GATE

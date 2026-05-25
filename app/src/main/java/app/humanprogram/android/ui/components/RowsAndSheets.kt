@@ -198,6 +198,7 @@ internal fun BacklogTaskRow(
     selectMode: Boolean,
     onTitleChange: (String) -> Unit,
     onSaveDetails: (String, String, String, String) -> Unit,
+    dateLabel: (LocalDate) -> String = { it.toString() },
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onDelete: () -> Unit
@@ -256,7 +257,7 @@ internal fun BacklogTaskRow(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    val dateText = item.assignedDate?.let { " / $it" }.orEmpty()
+                    val dateText = item.assignedDate?.let { " / ${dateLabel(it)}" }.orEmpty()
                     Text(
                         item.projectBucket.ifBlank { "Unorganized" } + dateText,
                         color = HpColors.muted,

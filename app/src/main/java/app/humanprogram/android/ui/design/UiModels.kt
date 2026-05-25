@@ -162,7 +162,7 @@ internal object HpColors {
     val canvas: Color
         @Composable get() = if (LocalHpDark.current) Color(0xFF111318) else Color(0xFFFBF8F1)
     val surface: Color
-        @Composable get() = if (LocalHpDark.current) Color(0xFF1C2028) else Color(0xFFFFFFFF)
+        @Composable get() = if (LocalHpDark.current) Color(0xFF1C2028) else Color(0xFFFBF8F1)
     val hero: Color
         @Composable get() = if (LocalHpDark.current) Color(0xFF23283A) else Color(0xFFEAF1FF)
     val glass: Color
@@ -237,18 +237,21 @@ internal enum class SettingsDetail(
     val subtitle: String,
     val icon: ImageVector
 ) {
+    GENERAL_SETTINGS("General Settings", "Appearance and dates", Icons.Outlined.Settings),
     APPEARANCE("Appearance", "Theme and display", Icons.Outlined.DarkMode),
     TODAY_DISPLAY("Today Display", "Date, metadata, and density", Icons.Outlined.CalendarMonth),
     BACKLOG("Backlog", "Project and task display", Icons.Outlined.Folder),
     RECURRING("Recurring Tasks", "Templates", Icons.Outlined.CheckCircle),
     SCHEDULE("Schedule", "Daily blocks", Icons.Outlined.Event),
     EXERCISE("Exercise", "Routine items", Icons.Outlined.FitnessCenter),
-    NOTIFICATIONS("Reminders", "Notification reminders", Icons.Outlined.Notifications),
+    NOTIFICATIONS("Notifications", "Permissions and reminders", Icons.Outlined.Notifications),
     CALENDAR("Calendar", "Sources feeding Today", Icons.Outlined.CalendarMonth),
+    IMPORT("Import", "Backlog and backup imports", Icons.Outlined.ImportExport),
+    EXPORT("Export", "Backup export", Icons.Outlined.ImportExport),
     IMPORT_EXPORT("Import / Export", "Backups and data", Icons.Outlined.ImportExport),
-    SECURITY("Security / App Lock", "PIN and recovery", Icons.Outlined.Lock),
+    SECURITY("Security", "Lock, recovery, and encryption", Icons.Outlined.Lock),
     STATS("Stats", "Tracking summaries", Icons.AutoMirrored.Outlined.ShowChart),
-    RESET("Reset", "Local data reset", Icons.Outlined.RestartAlt),
+    RESET("Factory Reset", "Local data reset", Icons.Outlined.RestartAlt),
     ABOUT("About", "Version and credits", Icons.Outlined.Info)
 }
 
@@ -258,11 +261,11 @@ internal data class SettingsGroup(
 )
 
 internal val settingsGroups = listOf(
-    SettingsGroup("Personalization", listOf(SettingsDetail.APPEARANCE, SettingsDetail.TODAY_DISPLAY, SettingsDetail.BACKLOG)),
-    SettingsGroup("Program", listOf(SettingsDetail.RECURRING, SettingsDetail.SCHEDULE, SettingsDetail.EXERCISE, SettingsDetail.CALENDAR)),
-    SettingsGroup("Tools", listOf(SettingsDetail.NOTIFICATIONS, SettingsDetail.IMPORT_EXPORT, SettingsDetail.STATS)),
-    SettingsGroup("Privacy", listOf(SettingsDetail.SECURITY)),
-    SettingsGroup("System", listOf(SettingsDetail.RESET, SettingsDetail.ABOUT))
+    SettingsGroup("General", listOf(SettingsDetail.GENERAL_SETTINGS, SettingsDetail.CALENDAR, SettingsDetail.NOTIFICATIONS, SettingsDetail.SECURITY)),
+    SettingsGroup("Planning", listOf(SettingsDetail.RECURRING, SettingsDetail.SCHEDULE, SettingsDetail.EXERCISE)),
+    SettingsGroup("Import-Export", listOf(SettingsDetail.IMPORT, SettingsDetail.EXPORT)),
+    SettingsGroup("About", listOf(SettingsDetail.ABOUT)),
+    SettingsGroup("Danger Zone", listOf(SettingsDetail.RESET))
 )
 
 internal data class MenuRow(

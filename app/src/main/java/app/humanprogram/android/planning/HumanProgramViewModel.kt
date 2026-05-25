@@ -61,7 +61,6 @@ class HumanProgramViewModel(
     private val snapshotStore: PlannerSnapshotStore? = null
 ) : ViewModel() {
     private val today = LocalDate.now()
-    private val dateFormatter = DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy")
     private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
     private val completionService = DailyCompletionService()
     private val dailyPageGenerator = DailyPageGenerator(completionService)
@@ -80,8 +79,11 @@ class HumanProgramViewModel(
     var selectedDate by mutableStateOf(today)
         private set
 
+    var dateFormatPreference by mutableStateOf("month_day_year")
+        private set
+
     val selectedDateLabel: String
-        get() = selectedDate.format(dateFormatter)
+        get() = "${selectedDate.dayOfWeek.name.lowercase().replaceFirstChar { it.titlecase() }}, ${formatDate(selectedDate)}"
 
     val selectedDateTitle: String
         get() = if (selectedDate == today) "Today" else "Daily Page"
@@ -487,11 +489,11 @@ class HumanProgramViewModel(
     }
 
     fun updateAppLockPinInput(value: String) {
-        appLockPinInput = value.filter { it.isDigit() }.take(12)
+        appLockPinInput = value.take(128)
     }
 
     fun updateAppUnlockPinInput(value: String) {
-        appUnlockPinInput = value.filter { it.isDigit() }.take(12)
+        appUnlockPinInput = value.take(128)
     }
 
     fun updateRecoveryPhraseInput(value: String) {
@@ -500,6 +502,21 @@ class HumanProgramViewModel(
 
     fun updateResetConfirmationInput(value: String) {
         resetConfirmationInput = value.take(20)
+    }
+
+    fun updateDateFormatPreference(value: String) {
+        dateFormatPreference = value
+    }
+
+    fun formatDate(date: LocalDate): String {
+        return when (dateFormatPreference) {
+            "mdy_slash" -> date.format(DateTimeFormatter.ofPattern("MM/dd/yyyy"))
+            "dmy_slash" -> date.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"))
+            "iso" -> date.format(DateTimeFormatter.ISO_LOCAL_DATE)
+            "day_month_year" -> date.format(DateTimeFormatter.ofPattern("d MMMM yyyy"))
+            "year_month_day" -> date.format(DateTimeFormatter.ofPattern("yyyy MMMM d"))
+            else -> date.format(DateTimeFormatter.ofPattern("MMMM d, yyyy"))
+        }
     }
 
     fun loadOnboardingComplete(complete: Boolean) {
@@ -538,9 +555,10 @@ class HumanProgramViewModel(
         hashBase64: String,
         timeoutMinutes: Int,
         recoverySaltBase64: String = "",
-        recoveryHashBase64: String = ""
+        recoveryHashBase64: String = "",
+        recoveryPhrasePlainText: String = ""
     ) {
-        appLockTimeoutMinutes = timeoutMinutes.coerceAtLeast(0)
+        appLockTimeoutMinutes = timeoutMinutes.coerceAtLeast(-1)
         biometricUnlockEnabled = biometricEnabled
         recoveryPhraseHash = if (recoverySaltBase64.isNotBlank() && recoveryHashBase64.isNotBlank()) {
             PinHash(
@@ -550,6 +568,9 @@ class HumanProgramViewModel(
         } else {
             null
         }
+        if (generatedRecoveryPhrase.isBlank()) {
+            generatedRecoveryPhrase = recoveryPhrasePlainText
+        }
         if (enabled && saltBase64.isNotBlank() && hashBase64.isNotBlank()) {
             val wasAlreadyEnabled = appLockEnabled
             appLockEnabled = true
@@ -557,7 +578,7 @@ class HumanProgramViewModel(
                 saltBase64 = saltBase64,
                 hashBase64 = hashBase64
             )
-            if (!wasAlreadyEnabled) {
+            if (!wasAlreadyEnabled && appLockTimeoutMinutes != -1) {
                 appLocked = true
             }
             if (appLockPinMessage.isBlank()) {
@@ -594,7 +615,11 @@ class HumanProgramViewModel(
     }
 
     fun updateAppLockTimeoutMinutes(minutes: Int) {
-        appLockTimeoutMinutes = minutes.coerceAtLeast(0)
+        appLockTimeoutMinutes = minutes.coerceAtLeast(-1)
+    }
+
+    fun reportAppLockMessage(message: String) {
+        appLockPinMessage = message
     }
 
     fun addManualTask() {
@@ -1459,8 +1484,39 @@ class HumanProgramViewModel(
         }
     }
 
+    fun importBacklogCsv(csv: String) {
+        backlogCsvInput = csv
+        importBacklogCsvPreviewAcceptedRows()
+    }
+
+    fun reportBacklogImportMessage(message: String) {
+        backlogCsvMessage = message
+    }
+
+    fun importBacklogPlainText(text: String) {
+        val items = text
+            .lines()
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .map { BacklogItem(title = it) }
+
+        if (items.isEmpty()) {
+            backlogCsvMessage = "No backlog items found."
+            return
+        }
+
+        backlogItems.addAll(items)
+        refreshSelectedGeneratedTasks()
+        saveSnapshot()
+        backlogCsvMessage = "${items.size} backlog items imported from text."
+    }
+
     fun refreshBacklogCsvExportPreview() {
         backlogCsvExportPreview = backlogCsvExporter.exportCurrentBacklog(backlogItems)
+    }
+
+    fun backlogCsvTemplate(): String {
+        return "title,date,project_bucket,note\nExample task,${today},Example project,Optional note"
     }
 
     fun refreshDailyTaskHistoryCsvExportPreview() {
@@ -1561,7 +1617,7 @@ class HumanProgramViewModel(
     fun setupAppLockPin(): PinHash? {
         val pin = appLockPinInput
         if (pin.length < 4) {
-            appLockPinMessage = "Use at least 4 digits."
+            appLockPinMessage = "Use at least 4 characters."
             return null
         }
 
@@ -1586,6 +1642,12 @@ class HumanProgramViewModel(
         return recoveryPhraseHash
     }
 
+    fun revokeRecoveryPhrase() {
+        generatedRecoveryPhrase = ""
+        recoveryPhraseHash = null
+        recoveryPhraseMessage = "Recovery phrase revoked."
+    }
+
     fun testAppLockPin() {
         val hash = appLockPinHash
         if (hash == null) {
@@ -1603,6 +1665,7 @@ class HumanProgramViewModel(
 
     fun lockAppIfEnabled(now: Instant = Instant.now()) {
         if (!appLockEnabled) return
+        if (appLockTimeoutMinutes == -1) return
 
         val shouldLock = appLockTimeoutMinutes == 0 ||
             lastUnlockedAt == null ||
@@ -1934,7 +1997,7 @@ class HumanProgramViewModel(
     fun canFactoryResetLocalPlannerData(): Boolean {
         return resetSequenceStarted &&
             resetExportReminderAcknowledged &&
-            resetConfirmationInput.trim().lowercase() == "reset"
+            resetConfirmationInput.lowercase() == "reset"
     }
 
     fun factoryResetLocalPlannerData(): Boolean {

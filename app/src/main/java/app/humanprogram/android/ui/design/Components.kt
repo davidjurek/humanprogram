@@ -86,6 +86,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -112,6 +113,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.humanprogram.android.core.security.PinHash
 import app.humanprogram.android.planning.HumanProgramViewModel
@@ -184,10 +186,418 @@ internal fun HpSoftPanel(
 }
 
 @Composable
+internal fun HpSettingsPanel(
+    modifier: Modifier = Modifier,
+    contentPadding: Dp = HpTheme.spacing.lg,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(contentPadding),
+        content = content
+    )
+}
+
+@Composable
 internal fun HpSectionHeader(title: String, subtitle: String?) {
     Column(verticalArrangement = Arrangement.spacedBy(HpTheme.spacing.xs)) {
-        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = HpColors.ink)
-        if (!subtitle.isNullOrBlank()) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = HpColors.muted)
+        Text(
+            title,
+            style = MaterialTheme.typography.titleMedium.copy(fontSize = 18.sp),
+            fontWeight = FontWeight.SemiBold,
+            color = HpColors.ink
+        )
+    }
+}
+
+internal data class HpSettingsMenuItem(
+    val title: String,
+    val icon: ImageVector,
+    val onClick: () -> Unit
+)
+
+internal data class HpSettingsMenuSection(
+    val title: String,
+    val items: List<HpSettingsMenuItem>
+)
+
+internal data class HpRadioChoiceOption<T>(
+    val value: T,
+    val label: String
+)
+
+internal data class HpToggleSettingItem<T>(
+    val value: T,
+    val title: String,
+    val checked: Boolean,
+    val enabled: Boolean = true
+)
+
+internal data class HpSettingsInlineLabel(
+    val label: String,
+    val active: Boolean
+)
+
+private object HpSettingsPageMetrics {
+    val topPadding = 11.dp
+    val titleStartPadding = 20.dp
+    val menuTitleBottomGap = 17.dp
+    val choiceTitleBottomGap = 11.dp
+    val listHorizontalPadding = titleStartPadding
+    val listVerticalPadding = 8.dp
+    val sectionGap = 28.dp
+    val menuRowHeight = 58.dp
+    val rowCornerRadius = 16.dp
+    val rowVerticalPadding = 2.dp
+    val rowItemGap = 12.dp
+    val switchRowVerticalPadding = 16.dp
+    val switchRowContentGap = 8.dp
+    val inlineLabelGap = 8.dp
+    val weekdayCircleSize = 42.dp
+}
+
+@Composable
+internal fun HpSettingsMenu(
+    sections: List<HpSettingsMenuSection>,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        sections.forEachIndexed { sectionIndex, section ->
+            if (sectionIndex > 0) Spacer(Modifier.height(HpSettingsPageMetrics.sectionGap))
+            HpSettingsMenuSection(section)
+        }
+    }
+}
+
+@Composable
+private fun HpSettingsPageLayout(
+    title: String,
+    modifier: Modifier = Modifier,
+    titleBottomGap: Dp,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Column(modifier = modifier.padding(top = HpSettingsPageMetrics.topPadding)) {
+        Text(
+            text = title,
+            modifier = Modifier.padding(start = HpSettingsPageMetrics.titleStartPadding),
+            style = MaterialTheme.typography.titleMedium.copy(fontSize = 18.sp),
+            fontWeight = FontWeight.SemiBold,
+            color = HpColors.ink
+        )
+        Spacer(Modifier.height(titleBottomGap))
+        content()
+    }
+}
+
+@Composable
+internal fun HpSettingsMenuPage(
+    sections: List<HpSettingsMenuSection>,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        sections.forEachIndexed { sectionIndex, section ->
+            if (sectionIndex > 0) Spacer(Modifier.height(HpSettingsPageMetrics.sectionGap))
+            HpSettingsMenuSection(section)
+        }
+    }
+}
+
+@Composable
+private fun HpSettingsMenuSection(section: HpSettingsMenuSection) {
+    HpSettingsPageLayout(
+        title = section.title,
+        titleBottomGap = HpSettingsPageMetrics.menuTitleBottomGap
+    ) {
+        section.items.forEach { item ->
+            HpSettingsMenuRow(item)
+        }
+    }
+}
+
+@Composable
+internal fun <T> HpRadioChoiceList(
+    title: String,
+    options: List<HpRadioChoiceOption<T>>,
+    selectedValue: T,
+    onSelectedChange: (T) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    HpSettingsListPage(
+        title = title,
+        modifier = modifier
+    ) {
+        options.forEach { option ->
+            HpRadioChoiceRow(
+                label = option.label,
+                selected = option.value == selectedValue,
+                onClick = { onSelectedChange(option.value) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun HpRadioChoiceRow(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(HpSettingsPageMetrics.rowCornerRadius))
+            .clickable(onClick = onClick)
+            .padding(vertical = HpSettingsPageMetrics.rowVerticalPadding),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(HpSettingsPageMetrics.rowItemGap)
+    ) {
+        RadioButton(
+            selected = selected,
+            onClick = onClick
+        )
+        Text(
+            text = label,
+            color = HpColors.ink,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
+}
+
+@Composable
+internal fun <T> HpToggleSettingsList(
+    title: String,
+    items: List<HpToggleSettingItem<T>>,
+    onCheckedChange: (T, Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    HpSettingsListPage(
+        title = title,
+        modifier = modifier
+    ) {
+        items.forEach { item ->
+            HpToggleSettingRow(
+                title = item.title,
+                checked = item.checked,
+                enabled = item.enabled,
+                onCheckedChange = { checked -> onCheckedChange(item.value, checked) }
+            )
+        }
+    }
+}
+
+@Composable
+internal fun HpSettingsListPage(
+    title: String,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    HpSettingsPageLayout(
+        title = title,
+        modifier = modifier,
+        titleBottomGap = HpSettingsPageMetrics.choiceTitleBottomGap
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(
+                    horizontal = HpSettingsPageMetrics.listHorizontalPadding,
+                    vertical = HpSettingsPageMetrics.listVerticalPadding
+                ),
+            verticalArrangement = Arrangement.spacedBy(0.dp)
+        ) { content() }
+    }
+}
+
+@Composable
+internal fun HpSettingsMessagePage(
+    title: String,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    HpSettingsPageLayout(
+        title = title,
+        modifier = modifier,
+        titleBottomGap = HpSettingsPageMetrics.choiceTitleBottomGap
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(
+                    horizontal = HpSettingsPageMetrics.titleStartPadding,
+                    vertical = HpSettingsPageMetrics.listVerticalPadding
+                ),
+            verticalArrangement = Arrangement.spacedBy(HpTheme.spacing.md),
+            content = content
+        )
+    }
+}
+
+@Composable
+internal fun HpSettingsContentPage(
+    title: String,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    HpSettingsMessagePage(
+        title = title,
+        modifier = modifier,
+        content = content
+    )
+}
+
+@Composable
+private fun HpToggleSettingRow(
+    title: String,
+    checked: Boolean,
+    enabled: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    HpSettingsSwitchActionRow(
+        title = title,
+        checked = checked,
+        enabled = enabled,
+        onCheckedChange = onCheckedChange,
+        onClick = { onCheckedChange(!checked) }
+    )
+}
+
+@Composable
+internal fun HpSettingsSwitchActionRow(
+    title: String,
+    checked: Boolean,
+    enabled: Boolean = true,
+    icon: ImageVector? = null,
+    onCheckedChange: (Boolean) -> Unit,
+    onClick: (() -> Unit)? = null,
+    supportingLabels: List<HpSettingsInlineLabel> = emptyList()
+) {
+    val rowModifier = Modifier
+        .fillMaxWidth()
+        .clip(RoundedCornerShape(HpSettingsPageMetrics.rowCornerRadius))
+        .then(
+            if (onClick != null) {
+                Modifier.clickable(enabled = enabled, onClick = onClick)
+            } else {
+                Modifier
+            }
+        )
+        .padding(
+            start = 0.dp,
+            top = HpSettingsPageMetrics.switchRowVerticalPadding,
+            end = 0.dp,
+            bottom = HpSettingsPageMetrics.switchRowVerticalPadding
+        )
+    Row(
+        modifier = rowModifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(HpSettingsPageMetrics.rowItemGap)
+    ) {
+        if (icon != null) Icon(icon, contentDescription = null, tint = HpColors.accent)
+        Column(
+            Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(HpSettingsPageMetrics.switchRowContentGap)
+        ) {
+            Text(
+                text = title,
+                color = if (enabled) HpColors.ink else HpColors.muted,
+                fontWeight = FontWeight.SemiBold
+            )
+            if (supportingLabels.isNotEmpty()) {
+                HpSettingsInlineLabels(labels = supportingLabels)
+            }
+        }
+        Switch(
+            checked = checked,
+            enabled = enabled,
+            onCheckedChange = onCheckedChange
+        )
+    }
+}
+
+@Composable
+internal fun HpSettingsInlineLabels(labels: List<HpSettingsInlineLabel>) {
+    Row(horizontalArrangement = Arrangement.spacedBy(HpSettingsPageMetrics.inlineLabelGap)) {
+        labels.forEach { item ->
+            Text(
+                text = item.label,
+                color = if (item.active) HpColors.ink else HpColors.muted.copy(alpha = 0.45f),
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+}
+
+@Composable
+internal fun HpSettingsWeekdayCircles(activeWeekdays: Set<Int>) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = HpSettingsPageMetrics.switchRowVerticalPadding),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        hpSettingsWeekdayLabels().forEach { item ->
+            Box(
+                modifier = Modifier
+                    .size(HpSettingsPageMetrics.weekdayCircleSize)
+                    .clip(CircleShape)
+                    .background(if (item.value in activeWeekdays) HpColors.ink else HpColors.glass),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = item.label,
+                    color = if (item.value in activeWeekdays) HpColors.surface else HpColors.ink,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
+internal fun hpSettingsWeekdayInlineLabels(activeWeekdays: Set<Int>): List<HpSettingsInlineLabel> {
+    return hpSettingsWeekdayLabels().map { item ->
+        HpSettingsInlineLabel(label = item.label, active = item.value in activeWeekdays)
+    }
+}
+
+private data class HpSettingsWeekdayLabel(
+    val value: Int,
+    val label: String
+)
+
+private fun hpSettingsWeekdayLabels(): List<HpSettingsWeekdayLabel> {
+    return listOf(
+        HpSettingsWeekdayLabel(1, "S"),
+        HpSettingsWeekdayLabel(2, "M"),
+        HpSettingsWeekdayLabel(3, "T"),
+        HpSettingsWeekdayLabel(4, "W"),
+        HpSettingsWeekdayLabel(5, "T"),
+        HpSettingsWeekdayLabel(6, "F"),
+        HpSettingsWeekdayLabel(7, "S")
+    )
+}
+
+@Composable
+private fun HpSettingsMenuRow(item: HpSettingsMenuItem) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(HpSettingsPageMetrics.menuRowHeight)
+            .clip(RoundedCornerShape(HpTheme.radii.row))
+            .clickable(onClick = item.onClick)
+            .padding(start = HpSettingsPageMetrics.titleStartPadding),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(HpTheme.spacing.md)
+    ) {
+        Icon(item.icon, contentDescription = null, tint = HpColors.accent)
+        Text(
+            item.title,
+            style = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp),
+            color = HpColors.ink,
+            fontWeight = FontWeight.Medium
+        )
     }
 }
 
@@ -272,7 +682,6 @@ internal fun HpPlainRow(icon: ImageVector, title: String, subtitle: String, trai
         Icon(icon, contentDescription = null, tint = HpColors.accent)
         Column(Modifier.weight(1f)) {
             Text(title, color = HpColors.ink, fontWeight = FontWeight.Medium)
-            Text(subtitle, color = HpColors.muted, style = MaterialTheme.typography.bodySmall)
         }
         if (trailing != null) Text(trailing, color = HpColors.muted)
     }
@@ -292,11 +701,7 @@ internal fun SettingsRow(icon: ImageVector, title: String, subtitle: String, onC
         Icon(icon, contentDescription = null, tint = HpColors.accent)
         Column(Modifier.weight(1f)) {
             Text(title, color = HpColors.ink, fontWeight = FontWeight.Medium)
-            if (subtitle.isNotBlank()) {
-                Text(subtitle, color = HpColors.muted, style = MaterialTheme.typography.bodySmall)
-            }
         }
-        Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null, tint = HpColors.muted)
     }
 }
 
@@ -317,7 +722,6 @@ internal fun HpSwitchRow(
     ) {
         Column(Modifier.weight(1f)) {
             Text(title, color = HpColors.ink, fontWeight = FontWeight.Medium)
-            Text(subtitle, color = HpColors.muted, style = MaterialTheme.typography.bodySmall)
         }
         Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
     }
@@ -325,8 +729,8 @@ internal fun HpSwitchRow(
 
 @Composable
 internal fun StatTile(label: String, value: String, suffix: String, modifier: Modifier = Modifier) {
-    HpSoftPanel {
-        Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(HpTheme.spacing.xs)) {
+    HpSettingsPanel(modifier = modifier) {
+        Column(verticalArrangement = Arrangement.spacedBy(HpTheme.spacing.xs)) {
             Text(label, color = HpColors.muted, style = MaterialTheme.typography.bodySmall)
             Text(value, color = HpColors.ink, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Text(suffix, color = HpColors.muted, style = MaterialTheme.typography.bodySmall)

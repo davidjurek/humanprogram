@@ -13,6 +13,7 @@ private val Context.appPreferencesDataStore by preferencesDataStore(name = "app_
 
 data class AppPreferences(
     val appearance: String,
+    val dateFormat: String = "month_day_year",
     val fontChoice: String,
     val metadataVisibleByDefault: Boolean,
     val showProjectBucket: Boolean,
@@ -27,6 +28,7 @@ data class AppPreferences(
     val appLockPinHashBase64: String = "",
     val recoveryPhraseSaltBase64: String = "",
     val recoveryPhraseHashBase64: String = "",
+    val recoveryPhrasePlainText: String = "",
     val backlogView: String = "tasks",
     val backlogSort: String = "creation"
 )
@@ -37,6 +39,7 @@ class AppPreferencesRepository(
     val preferences: Flow<AppPreferences> = context.appPreferencesDataStore.data.map { prefs ->
         AppPreferences(
             appearance = prefs[Keys.Appearance] ?: "system",
+            dateFormat = prefs[Keys.DateFormat] ?: "month_day_year",
             fontChoice = prefs[Keys.FontChoice] ?: "serif",
             metadataVisibleByDefault = prefs[Keys.MetadataVisibleByDefault] ?: false,
             showProjectBucket = prefs[Keys.ShowProjectBucket] ?: false,
@@ -51,6 +54,7 @@ class AppPreferencesRepository(
             appLockPinHashBase64 = prefs[Keys.AppLockPinHashBase64].orEmpty(),
             recoveryPhraseSaltBase64 = prefs[Keys.RecoveryPhraseSaltBase64].orEmpty(),
             recoveryPhraseHashBase64 = prefs[Keys.RecoveryPhraseHashBase64].orEmpty(),
+            recoveryPhrasePlainText = prefs[Keys.RecoveryPhrasePlainText].orEmpty(),
             backlogView = prefs[Keys.BacklogView] ?: "tasks",
             backlogSort = prefs[Keys.BacklogSort] ?: "creation"
         )
@@ -70,6 +74,7 @@ class AppPreferencesRepository(
 
     object Keys {
         val Appearance = stringPreferencesKey("appearance")
+        val DateFormat = stringPreferencesKey("date_format")
         val FontChoice = stringPreferencesKey("font_choice")
         val MetadataVisibleByDefault = booleanPreferencesKey("metadata_visible_by_default")
         val ShowProjectBucket = booleanPreferencesKey("show_project_bucket")
@@ -84,6 +89,7 @@ class AppPreferencesRepository(
         val AppLockPinHashBase64 = stringPreferencesKey("app_lock_pin_hash_base64")
         val RecoveryPhraseSaltBase64 = stringPreferencesKey("recovery_phrase_salt_base64")
         val RecoveryPhraseHashBase64 = stringPreferencesKey("recovery_phrase_hash_base64")
+        val RecoveryPhrasePlainText = stringPreferencesKey("recovery_phrase_plain_text")
         val BacklogView = stringPreferencesKey("backlog_view")
         val BacklogSort = stringPreferencesKey("backlog_sort")
     }

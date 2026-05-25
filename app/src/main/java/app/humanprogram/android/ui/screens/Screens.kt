@@ -793,8 +793,21 @@ internal fun TodayTaskDetailPage(
             )
         }
         item {
-            HpSoftPanel {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (editing) {
+                HpSoftPanel {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        TaskInfoRow("Source", task.sourceType.label)
+                        TaskInfoRow("Project", projectBucket)
+                        TaskInfoRow("Completion", if (task.completed) "Complete" else "Incomplete")
+                    }
+                }
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(HpTheme.spacing.lg),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                     TaskInfoRow("Source", task.sourceType.label)
                     TaskInfoRow("Project", projectBucket)
                     TaskInfoRow("Completion", if (task.completed) "Complete" else "Incomplete")
@@ -1007,6 +1020,7 @@ internal fun BacklogScreen(
                     onSaveDetails = { title, notes, project, assignedDate ->
                         viewModel.updateBacklogItemDetails(item.id, title, notes, project, assignedDate)
                     },
+                    dateLabel = viewModel::formatDate,
                     onClick = {
                         if (taskSelectMode) onToggleTaskSelection(item.id) else onOpenTask(item.id)
                     },
@@ -1082,6 +1096,7 @@ internal fun ProjectDetailScreen(
                 onSaveDetails = { title, notes, project, assignedDate ->
                     viewModel.updateBacklogItemDetails(item.id, title, notes, project, assignedDate)
                 },
+                dateLabel = viewModel::formatDate,
                 onClick = {
                     if (taskSelectMode) onToggleTaskSelection(item.id) else onOpenTask(item.id)
                 },
@@ -1708,8 +1723,13 @@ internal fun BacklogTaskEditPage(
                 }
             }
             item {
+                val assignedDateText = if (assignedDate.isBlank()) {
+                    "No date assigned"
+                } else {
+                    assignedDate
+                }
                 BacklogDetailButtonLikeField(
-                    text = "Date: ${assignedDate.ifBlank { "No date assigned" }}",
+                    text = "Date: $assignedDateText",
                     editing = editing,
                     icon = Icons.Outlined.CalendarMonth,
                     readOnlyMuted = true,
@@ -2044,10 +2064,14 @@ private fun SearchHitRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Icon(hit.icon, contentDescription = null, tint = HpColors.accent)
-            Column(Modifier.weight(1f)) {
-                Text(hit.title, color = HpColors.ink, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(hit.subtitle, color = HpColors.muted, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            }
+            Text(
+                text = hit.title,
+                modifier = Modifier.weight(1f),
+                color = HpColors.ink,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
             Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null, tint = HpColors.muted)
         }
     }
@@ -2286,7 +2310,7 @@ internal fun RemindersScreen(
 ) {
     HpList {
         item {
-            HpHeroPanel {
+            HpSettingsPanel {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     Icon(Icons.Outlined.Notifications, contentDescription = null, tint = HpColors.accent)
                     Column(Modifier.weight(1f)) {
@@ -2298,7 +2322,7 @@ internal fun RemindersScreen(
         }
         if (!notificationPermissionGranted) {
             item {
-                HpSoftPanel {
+                HpSettingsPanel {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text("Notifications are off.", modifier = Modifier.weight(1f), color = HpColors.muted)
                         HpSecondaryButton("Allow", onRequestNotificationPermission)
@@ -2373,7 +2397,7 @@ internal fun StatsScreen(viewModel: HumanProgramViewModel) {
 
 @Composable
 private fun CompletionGraph(viewModel: HumanProgramViewModel) {
-    HpSoftPanel {
+    HpSettingsPanel {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2400,15 +2424,27 @@ internal fun ImportExportScreen(
     viewModel: HumanProgramViewModel,
     onExportHprgm: () -> Unit,
     onImportHprgmPreview: () -> Unit,
+    onImportBacklogCsv: () -> Unit,
+    onExportBacklogCsvTemplate: () -> Unit,
     onPlannerDataReplacing: () -> Unit,
-    onReminderScheduleChanged: () -> Unit
+    onReminderScheduleChanged: () -> Unit,
+    innerBackRequest: Int = 0,
+    onInnerBackAvailableChange: (Boolean) -> Unit = {}
 ) {
     var section by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(section) {
+        onInnerBackAvailableChange(section != null)
+    }
+    LaunchedEffect(innerBackRequest) {
+        if (innerBackRequest > 0 && section != null) section = null
+    }
     if (section == "backup") {
         BackupPackagePage(
             viewModel = viewModel,
             onExportHprgm = onExportHprgm,
             onImportHprgmPreview = onImportHprgmPreview,
+            onImportBacklogCsv = onImportBacklogCsv,
+            onExportBacklogCsvTemplate = onExportBacklogCsvTemplate,
             onPlannerDataReplacing = onPlannerDataReplacing,
             onReminderScheduleChanged = onReminderScheduleChanged,
             onBack = { section = null }
@@ -2430,10 +2466,123 @@ internal fun ImportExportScreen(
 }
 
 @Composable
+internal fun ImportScreen(
+    viewModel: HumanProgramViewModel,
+    onImportHprgmPreview: () -> Unit,
+    onImportBacklogCsv: () -> Unit,
+    onExportBacklogCsvTemplate: () -> Unit,
+    onPlannerDataReplacing: () -> Unit,
+    onReminderScheduleChanged: () -> Unit,
+    innerBackRequest: Int,
+    onInnerBackAvailableChange: (Boolean) -> Unit
+) {
+    var page by rememberSaveable { mutableStateOf("root") }
+    var textImportDraft by rememberSaveable { mutableStateOf("") }
+    LaunchedEffect(page) {
+        onInnerBackAvailableChange(page != "root")
+    }
+    LaunchedEffect(innerBackRequest) {
+        if (innerBackRequest > 0 && page != "root") page = "root"
+    }
+
+    if (page == "text") {
+        HpList {
+            item {
+                HpSectionHeader("Import from Text", null)
+                HpSettingsPanel {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        HpFormTextField(
+                            label = "Backlog items",
+                            value = textImportDraft,
+                            onValueChange = { textImportDraft = it },
+                            minLines = 6
+                        )
+                        HpSecondaryButton("Import Text", textImportDraft.isNotBlank()) {
+                            viewModel.importBacklogPlainText(textImportDraft)
+                            textImportDraft = ""
+                        }
+                        if (viewModel.backlogCsvMessage.isNotBlank()) Text(viewModel.backlogCsvMessage, color = HpColors.muted)
+                    }
+                }
+            }
+        }
+        return
+    }
+    if (page == "csv") {
+        HpList {
+            item {
+                HpSectionHeader("Import from CSV", null)
+                HpSettingsPanel {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        HpSecondaryButton("Save CSV Import Template", onExportBacklogCsvTemplate)
+                        HpPrimaryButton("Choose CSV", onImportBacklogCsv)
+                        if (viewModel.backlogCsvMessage.isNotBlank()) Text(viewModel.backlogCsvMessage, color = HpColors.muted)
+                    }
+                }
+            }
+        }
+        return
+    }
+    if (page == "backup") {
+        HpList {
+            item {
+                HpSectionHeader("Import Backup", null)
+                HpSettingsPanel {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        HpFormTextField("Backup password", viewModel.hprgmExportPassword, viewModel::updateHprgmExportPassword)
+                        HpPrimaryButton("Choose Backup", onImportHprgmPreview)
+                        if (viewModel.hasPendingHprgmImport) {
+                            HpPrimaryButton("Apply Import") {
+                                onPlannerDataReplacing()
+                                if (viewModel.applyPendingHprgmImport()) {
+                                    onReminderScheduleChanged()
+                                }
+                            }
+                        }
+                        if (viewModel.hprgmMessage.isNotBlank()) Text(viewModel.hprgmMessage, color = HpColors.muted)
+                    }
+                }
+            }
+        }
+        return
+    }
+    HpList(itemSpacing = HpTheme.spacing.xl) {
+        item { HpSectionHeader("Import Backlog", null) }
+        item { SettingsRow(Icons.AutoMirrored.Outlined.FormatListBulleted, "Import from Text", "") { page = "text" } }
+        item { SettingsRow(Icons.Outlined.ImportExport, "Import from CSV", "") { page = "csv" } }
+        item { HpSectionHeader("Import Backup", null) }
+        item { SettingsRow(Icons.Outlined.ImportExport, "Import Backup", "") { page = "backup" } }
+    }
+}
+
+@Composable
+internal fun ExportScreen(
+    viewModel: HumanProgramViewModel,
+    onExportHprgm: () -> Unit
+) {
+    HpList {
+        item {
+            HpSectionHeader("Export", null)
+            HpSettingsPanel {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    HpPrimaryButton("Export Backup") {
+                        viewModel.updateHprgmExportPassword("")
+                        onExportHprgm()
+                    }
+                    if (viewModel.hprgmMessage.isNotBlank()) Text(viewModel.hprgmMessage, color = HpColors.muted)
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun BackupPackagePage(
     viewModel: HumanProgramViewModel,
     onExportHprgm: () -> Unit,
     onImportHprgmPreview: () -> Unit,
+    onImportBacklogCsv: () -> Unit,
+    onExportBacklogCsvTemplate: () -> Unit,
     onPlannerDataReplacing: () -> Unit,
     onReminderScheduleChanged: () -> Unit,
     onBack: () -> Unit
@@ -2445,6 +2594,10 @@ private fun BackupPackagePage(
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 HpPrimaryButton("Save Backup", onExportHprgm)
                 HpSecondaryButton("Choose Backup", onImportHprgmPreview)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                HpSecondaryButton("Import CSV", onImportBacklogCsv)
+                HpSecondaryButton("CSV Template", onExportBacklogCsvTemplate)
             }
         }
         if (viewModel.hasPendingHprgmImport) {

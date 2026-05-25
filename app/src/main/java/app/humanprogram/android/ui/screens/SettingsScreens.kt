@@ -67,6 +67,7 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.LockOpen
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.Notifications
@@ -131,6 +132,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.humanprogram.android.core.security.PinHash
@@ -159,6 +161,7 @@ internal fun SettingsScreen(
     viewModel: HumanProgramViewModel,
     detail: SettingsDetail?,
     appearance: String,
+    dateFormat: String,
     onDetail: (SettingsDetail) -> Unit,
     onOpenRecurringTask: (String) -> Unit,
     scheduleEditorTemplateId: String?,
@@ -186,22 +189,39 @@ internal fun SettingsScreen(
     onToggleCalendarSource: (String) -> Unit,
     onExportHprgm: () -> Unit,
     onImportHprgmPreview: () -> Unit,
+    onImportBacklogCsv: () -> Unit,
+    onExportBacklogCsvTemplate: () -> Unit,
     onReminderDeleted: (String) -> Unit,
     onPlannerDataReplacing: () -> Unit,
     onReminderScheduleChanged: () -> Unit,
     onAppLockPinSet: (PinHash) -> Unit,
     onRecoveryPhraseSet: (PinHash) -> Unit,
+    onRecoveryPhraseRevoked: () -> Unit,
     onAppLockTimeoutChanged: (Int) -> Unit,
     onBiometricUnlockChanged: (Boolean) -> Unit,
     onAppearanceChanged: (String) -> Unit,
+    onDateFormatChanged: (String) -> Unit,
+    innerBackRequest: Int,
+    onInnerBackAvailableChange: (Boolean) -> Unit,
     onHiddenGateReady: () -> Unit
 ) {
+    LaunchedEffect(detail) {
+        onInnerBackAvailableChange(false)
+    }
     if (detail == null) {
         SettingsRoot(viewModel, onDetail)
         return
     }
 
     when (detail) {
+        SettingsDetail.GENERAL_SETTINGS -> GeneralSettings(
+            appearance = appearance,
+            dateFormat = dateFormat,
+            onAppearanceChanged = onAppearanceChanged,
+            onDateFormatChanged = onDateFormatChanged,
+            innerBackRequest = innerBackRequest,
+            onInnerBackAvailableChange = onInnerBackAvailableChange
+        )
         SettingsDetail.APPEARANCE -> AppearanceSettings(
             appearance = appearance,
             onAppearanceChanged = onAppearanceChanged
@@ -254,13 +274,47 @@ internal fun SettingsScreen(
             viewModel = viewModel,
             onExportHprgm = onExportHprgm,
             onImportHprgmPreview = onImportHprgmPreview,
+            onImportBacklogCsv = onImportBacklogCsv,
+            onExportBacklogCsvTemplate = onExportBacklogCsvTemplate,
             onPlannerDataReplacing = onPlannerDataReplacing,
-            onReminderScheduleChanged = onReminderScheduleChanged
+            onReminderScheduleChanged = onReminderScheduleChanged,
+            innerBackRequest = innerBackRequest,
+            onInnerBackAvailableChange = onInnerBackAvailableChange
         )
-        SettingsDetail.SECURITY -> SecuritySettings(viewModel, onAppLockPinSet, onRecoveryPhraseSet, onAppLockTimeoutChanged, onBiometricUnlockChanged)
+        SettingsDetail.IMPORT -> ImportScreen(
+            viewModel = viewModel,
+            onImportHprgmPreview = onImportHprgmPreview,
+            onImportBacklogCsv = onImportBacklogCsv,
+            onExportBacklogCsvTemplate = onExportBacklogCsvTemplate,
+            onPlannerDataReplacing = onPlannerDataReplacing,
+            onReminderScheduleChanged = onReminderScheduleChanged,
+            innerBackRequest = innerBackRequest,
+            onInnerBackAvailableChange = onInnerBackAvailableChange
+        )
+        SettingsDetail.EXPORT -> ExportScreen(
+            viewModel = viewModel,
+            onExportHprgm = onExportHprgm
+        )
+        SettingsDetail.SECURITY -> SecuritySettings(
+            viewModel,
+            onAppLockPinSet,
+            onRecoveryPhraseSet,
+            onRecoveryPhraseRevoked,
+            onAppLockTimeoutChanged,
+            onBiometricUnlockChanged,
+            innerBackRequest,
+            onInnerBackAvailableChange
+        )
         SettingsDetail.STATS -> StatsScreen(viewModel)
-        SettingsDetail.RESET -> ResetSettings(viewModel, onExportHprgm, onPlannerDataReplacing, onReminderScheduleChanged)
-        SettingsDetail.ABOUT -> AboutSettings(viewModel, onHiddenGateReady)
+        SettingsDetail.RESET -> ResetSettings(
+            viewModel = viewModel,
+            onOpenExport = { onDetail(SettingsDetail.EXPORT) },
+            onPlannerDataReplacing = onPlannerDataReplacing,
+            onReminderScheduleChanged = onReminderScheduleChanged,
+            innerBackRequest = innerBackRequest,
+            onInnerBackAvailableChange = onInnerBackAvailableChange
+        )
+        SettingsDetail.ABOUT -> AboutSettings(viewModel, innerBackRequest, onInnerBackAvailableChange, onHiddenGateReady)
     }
 }
 
@@ -269,12 +323,111 @@ internal fun SettingsRoot(
     viewModel: HumanProgramViewModel,
     onDetail: (SettingsDetail) -> Unit
 ) {
-    HpList(itemSpacing = HpTheme.spacing.xl) {
-        settingsGroups.forEach { group ->
-            item { HpSectionHeader(group.label, null) }
-            items(group.items) { detail ->
-                SettingsRow(detail.icon, detail.label, "") { onDetail(detail) }
-            }
+    HpList(itemSpacing = 0.dp) {
+        item {
+            HpSettingsMenuPage(
+                sections = settingsGroups.map { group ->
+                    HpSettingsMenuSection(
+                        title = group.label,
+                        items = group.items.map { detail ->
+                            HpSettingsMenuItem(
+                                title = detail.label,
+                                icon = detail.icon,
+                                onClick = { onDetail(detail) }
+                            )
+                        }
+                    )
+                }
+            )
+        }
+    }
+}
+
+private val dateFormatOptions = listOf(
+    HpRadioChoiceOption("mdy_slash", "MM/DD/YYYY"),
+    HpRadioChoiceOption("dmy_slash", "DD/MM/YYYY"),
+    HpRadioChoiceOption("iso", "YYYY-MM-DD"),
+    HpRadioChoiceOption("day_month_year", "Day Month Year"),
+    HpRadioChoiceOption("month_day_year", "Month Day Year"),
+    HpRadioChoiceOption("year_month_day", "Year Month Day")
+)
+
+private val appearanceOptions = listOf(
+    HpRadioChoiceOption("system", "Match System"),
+    HpRadioChoiceOption("light", "Light"),
+    HpRadioChoiceOption("dark", "Dark")
+)
+
+private val appLockTimeoutOptions = listOf(
+    HpRadioChoiceOption(0, "Immediately"),
+    HpRadioChoiceOption(1, "1m"),
+    HpRadioChoiceOption(5, "5m"),
+    HpRadioChoiceOption(15, "15m"),
+    HpRadioChoiceOption(-1, "Do not lock")
+)
+
+@Composable
+internal fun GeneralSettings(
+    appearance: String,
+    dateFormat: String,
+    onAppearanceChanged: (String) -> Unit,
+    onDateFormatChanged: (String) -> Unit,
+    innerBackRequest: Int,
+    onInnerBackAvailableChange: (Boolean) -> Unit
+) {
+    var page by rememberSaveable { mutableStateOf("root") }
+    LaunchedEffect(page) {
+        onInnerBackAvailableChange(page != "root")
+    }
+    LaunchedEffect(innerBackRequest) {
+        if (innerBackRequest > 0 && page != "root") page = "root"
+    }
+    if (page == "appearance") {
+        AppearanceSettings(appearance = appearance, onAppearanceChanged = onAppearanceChanged)
+        return
+    }
+    if (page == "date") {
+        DateFormatSettings(dateFormat = dateFormat, onDateFormatChanged = onDateFormatChanged)
+        return
+    }
+    HpList(itemSpacing = 0.dp) {
+        item {
+            HpSettingsMenuPage(
+                sections = listOf(
+                    HpSettingsMenuSection(
+                        title = "General Settings",
+                        items = listOf(
+                            HpSettingsMenuItem(
+                                title = "Appearance",
+                                icon = Icons.Outlined.DarkMode,
+                                onClick = { page = "appearance" }
+                            ),
+                            HpSettingsMenuItem(
+                                title = "Date Format",
+                                icon = Icons.Outlined.CalendarMonth,
+                                onClick = { page = "date" }
+                            )
+                        )
+                    )
+                )
+            )
+        }
+    }
+}
+
+@Composable
+private fun DateFormatSettings(
+    dateFormat: String,
+    onDateFormatChanged: (String) -> Unit
+) {
+    HpList {
+        item {
+            HpRadioChoiceList(
+                title = "Date Format",
+                options = dateFormatOptions,
+                selectedValue = dateFormat,
+                onSelectedChange = onDateFormatChanged
+            )
         }
     }
 }
@@ -284,65 +437,14 @@ internal fun AppearanceSettings(
     appearance: String,
     onAppearanceChanged: (String) -> Unit
 ) {
-    HpList(itemSpacing = 12.dp) {
+    HpList {
         item {
-            HpSectionHeader("Appearance", "Persisted display mode")
-            HpSoftPanel {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    AppearanceChoiceRow(
-                        title = "Match System",
-                        subtitle = "Follow the device light/dark setting",
-                        selected = appearance == "system",
-                        onClick = { onAppearanceChanged("system") }
-                    )
-                    HorizontalDivider(color = HpColors.divider)
-                    AppearanceChoiceRow(
-                        title = "Light",
-                        subtitle = "Warm, bright command-center surfaces",
-                        selected = appearance == "light",
-                        onClick = { onAppearanceChanged("light") }
-                    )
-                    HorizontalDivider(color = HpColors.divider)
-                    AppearanceChoiceRow(
-                        title = "Dark",
-                        subtitle = "Deep charcoal surfaces for low-light use",
-                        selected = appearance == "dark",
-                        onClick = { onAppearanceChanged("dark") }
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun AppearanceChoiceRow(
-    title: String,
-    subtitle: String,
-    selected: Boolean,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
-            .padding(vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .size(34.dp)
-                .clip(CircleShape)
-                .background(if (selected) HpColors.accent else HpColors.canvas),
-            contentAlignment = Alignment.Center
-        ) {
-            if (selected) Icon(Icons.Outlined.Check, contentDescription = null, tint = Color.White)
-        }
-        Column(Modifier.weight(1f)) {
-            Text(title, color = HpColors.ink, fontWeight = FontWeight.SemiBold)
-            Text(subtitle, color = HpColors.muted, style = MaterialTheme.typography.bodySmall)
+            HpRadioChoiceList(
+                title = "Appearance",
+                options = appearanceOptions,
+                selectedValue = appearance,
+                onSelectedChange = onAppearanceChanged
+            )
         }
     }
 }
@@ -351,8 +453,8 @@ internal fun AppearanceChoiceRow(
 internal fun TodayDisplaySettings() {
     HpList {
         item {
-            HpSectionHeader("Today Display", "Fixed command-center layout")
-            HpSoftPanel {
+            HpSectionHeader("Today Display", null)
+            HpSettingsPanel {
                 Column(verticalArrangement = Arrangement.spacedBy(HpTheme.spacing.md)) {
                     HpPlainRow(Icons.Outlined.CalendarMonth, "Date control", "Tap the date in Today to jump directly.")
                     HpPlainRow(Icons.Outlined.CheckCircle, "Required tasks", "Calendar, recurring, backlog, and manual tasks stay together.")
@@ -367,8 +469,8 @@ internal fun TodayDisplaySettings() {
 internal fun BacklogSettings(viewModel: HumanProgramViewModel) {
     HpList {
         item {
-            HpSectionHeader("Backlog", "Project and task display")
-            HpSoftPanel {
+            HpSectionHeader("Backlog", null)
+            HpSettingsPanel {
                 Column(verticalArrangement = Arrangement.spacedBy(HpTheme.spacing.md)) {
                     HpPlainRow(Icons.Outlined.Folder, "Projects", "${viewModel.activeBacklogByProject.size} active project groups")
                     HpPlainRow(Icons.AutoMirrored.Outlined.FormatListBulleted, "Tasks", "${viewModel.activeBacklogItems.size} active backlog tasks")
@@ -388,28 +490,26 @@ internal fun CalendarSettings(
 ) {
     HpList {
         item {
-            HpSectionHeader("Calendar Sources", if (granted) "${viewModel.selectedCalendarSourceIds.size} selected" else "Permission needed")
-            HpSoftPanel {
-                if (!granted) {
-                    Column(verticalArrangement = Arrangement.spacedBy(HpTheme.spacing.md)) {
-                        Text("Selected device calendars feed Calendar and Today.", color = HpColors.muted)
-                        HpPrimaryButton("Allow Calendar", onRequest)
-                    }
-                } else if (viewModel.calendarSources.isEmpty()) {
-                    Text("No device calendars are available.", color = HpColors.muted)
-                } else {
-                    Column {
-                        viewModel.calendarSources.forEachIndexed { index, source ->
-                            HpSwitchRow(
-                                title = source.displayName,
-                                subtitle = "Feeds Today when selected",
-                                checked = source.calendarId in viewModel.selectedCalendarSourceIds,
-                                onCheckedChange = { onToggleCalendarSource(source.calendarId) }
-                            )
-                            if (index != viewModel.calendarSources.lastIndex) HorizontalDivider(color = HpColors.divider)
-                        }
-                    }
+            if (!granted) {
+                HpSettingsMessagePage(title = "Calendar Sources") {
+                    HpPrimaryButton("Allow Calendar", onRequest)
                 }
+            } else if (viewModel.calendarSources.isEmpty()) {
+                HpSettingsMessagePage(title = "Calendar Sources") {
+                    Text("No calendars", color = HpColors.ink, fontWeight = FontWeight.SemiBold)
+                }
+            } else {
+                HpToggleSettingsList(
+                    title = "Calendar Sources",
+                    items = viewModel.calendarSources.map { source ->
+                        HpToggleSettingItem(
+                            value = source.calendarId,
+                            title = source.displayName,
+                            checked = source.calendarId in viewModel.selectedCalendarSourceIds
+                        )
+                    },
+                    onCheckedChange = { sourceId, _ -> onToggleCalendarSource(sourceId) }
+                )
             }
         }
     }
@@ -426,16 +526,22 @@ internal fun RecurringSettings(
     onToggleSelection: (String) -> Unit
 ) {
     HpList {
-        items(viewModel.recurringTemplates, key = { it.id }) { template ->
-            RecurringTemplateListRow(
-                template = template,
-                selected = template.id in selectedTemplateIds,
-                selectMode = selectMode,
-                onClick = {
-                    if (selectMode) onToggleSelection(template.id) else onOpenRecurringTask(template.id)
-                },
-                onLongClick = { onLongPress(template.id) }
-            )
+        item {
+            HpSettingsContentPage(title = "Recurring Tasks") {
+                Column {
+                    viewModel.recurringTemplates.forEach { template ->
+                        RecurringTemplateListRow(
+                            template = template,
+                            selected = template.id in selectedTemplateIds,
+                            selectMode = selectMode,
+                            onClick = {
+                                if (selectMode) onToggleSelection(template.id) else onOpenRecurringTask(template.id)
+                            },
+                            onLongClick = { onLongPress(template.id) }
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -452,13 +558,13 @@ private fun RecurringTemplateListRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(HpTheme.radii.row))
             .background(if (selected) HpColors.glass else Color.Transparent)
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick
             )
-            .padding(horizontal = 0.dp, vertical = 12.dp),
+            .padding(vertical = HpTheme.spacing.md),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
@@ -761,27 +867,34 @@ internal fun ScheduleSettings(
             }
         )
     } else {
-        HpList(itemSpacing = 0.dp) {
+        HpList {
             item {
-                ScheduleAssignmentSummary(
-                    assignedWeekdays = viewModel.scheduleTemplates
-                        .filter { it.active && !it.usesCustomDateRange }
-                        .flatMap { it.assignedWeekdays }
-                        .toSet()
-                )
-            }
-            item { HorizontalDivider(color = HpColors.divider) }
-            if (viewModel.scheduleTemplates.isEmpty()) {
-                item { HpEmptyState("No schedules yet.", null, null) }
-            }
-            items(viewModel.scheduleTemplates.sortedBy { it.name.lowercase() }, key = { it.id }) { schedule ->
-                ScheduleTemplateListRow(
-                    schedule = schedule,
-                    onClick = { onOpen(schedule.id) },
-                    onActiveChange = { active ->
-                        conflictMessage = viewModel.setScheduleTemplateActive(schedule.id, active)
+                HpSettingsListPage(title = "Schedule") {
+                    HpSettingsWeekdayCircles(
+                        activeWeekdays = viewModel.scheduleTemplates
+                            .filter { it.active && !it.usesCustomDateRange }
+                            .flatMap { it.assignedWeekdays }
+                            .toSet()
+                    )
+                    if (viewModel.scheduleTemplates.isEmpty()) {
+                        HpEmptyState("No schedules yet.", null, null)
+                    } else {
+                        Column {
+                            viewModel.scheduleTemplates.sortedBy { it.name.lowercase() }.forEach { schedule ->
+                                HpSettingsSwitchActionRow(
+                                    title = schedule.name,
+                                    checked = schedule.active,
+                                    icon = Icons.Outlined.Event,
+                                    onCheckedChange = { active ->
+                                        conflictMessage = viewModel.setScheduleTemplateActive(schedule.id, active)
+                                    },
+                                    onClick = { onOpen(schedule.id) },
+                                    supportingLabels = hpSettingsWeekdayInlineLabels(schedule.assignedWeekdays)
+                                )
+                            }
+                        }
                     }
-                )
+                }
             }
         }
     }
@@ -797,84 +910,6 @@ internal fun ScheduleSettings(
                 }
             }
         )
-    }
-}
-
-@Composable
-private fun ScheduleAssignmentSummary(
-    assignedWeekdays: Set<Int>
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 12.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        (1..7).forEach { weekday ->
-            Box(
-                modifier = Modifier
-                    .size(42.dp)
-                    .clip(CircleShape)
-                    .background(if (weekday in assignedWeekdays) HpColors.ink else HpColors.glass),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = weekdayLetter(weekday),
-                    color = if (weekday in assignedWeekdays) HpColors.surface else HpColors.ink,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun ScheduleTemplateListRow(
-    schedule: ScheduleTemplate,
-    onClick: () -> Unit,
-    onActiveChange: (Boolean) -> Unit
-) {
-    Column {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .clickable(onClick = onClick)
-                .padding(vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Icon(Icons.Outlined.Event, contentDescription = null, tint = HpColors.accent)
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text(schedule.name, color = HpColors.ink, fontWeight = FontWeight.Medium)
-                if (schedule.usesCustomDateRange) {
-                    Text(
-                        "${schedule.customDateStart} - ${schedule.customDateEnd}",
-                        color = HpColors.muted,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-                ScheduleWeekdayLetterSummary(schedule.assignedWeekdays)
-            }
-            Switch(checked = schedule.active, onCheckedChange = onActiveChange)
-            Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null, tint = HpColors.muted)
-        }
-        HorizontalDivider(color = HpColors.divider)
-    }
-}
-
-@Composable
-private fun ScheduleWeekdayLetterSummary(assignedWeekdays: Set<Int>) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        (1..7).forEach { weekday ->
-            Text(
-                weekdayLetter(weekday),
-                color = if (weekday in assignedWeekdays) HpColors.ink else HpColors.muted.copy(alpha = 0.45f),
-                style = MaterialTheme.typography.bodySmall,
-                fontWeight = FontWeight.SemiBold
-            )
-        }
     }
 }
 
@@ -1941,10 +1976,6 @@ private fun String.toLocalDateOrNull(): LocalDate? {
     return runCatching { LocalDate.parse(this) }.getOrNull()
 }
 
-private fun weekdayLetter(weekday: Int): String {
-    return listOf("S", "M", "T", "W", "T", "F", "S").getOrElse(weekday - 1) { "?" }
-}
-
 @Composable
 internal fun ExerciseSettings(
     viewModel: HumanProgramViewModel,
@@ -2410,17 +2441,13 @@ internal fun NotificationSettings(
 ) {
     HpList {
         item {
-            HpSectionHeader("Notifications", if (granted) "Permission allowed" else "Permission off")
-            HpSoftPanel {
+            HpSectionHeader("Notifications", null)
+            HpSettingsPanel {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(
-                        "Reminders use local Android notifications. Missed reminders are dropped instead of shown late.",
-                        color = HpColors.muted
-                    )
-                    HpPlainRow(Icons.Outlined.Notifications, "General reminders", "Daily, weekdays, and custom weekday schedules")
-                    HpPlainRow(Icons.Outlined.Lock, "Private by default", "Notification content should stay concise and non-sensitive")
                     if (!granted) {
                         HpSecondaryButton("Allow Notifications", onRequest)
+                    } else {
+                        HpPlainRow(Icons.Outlined.Notifications, "Notifications allowed", "")
                     }
                 }
             }
@@ -2433,59 +2460,132 @@ internal fun SecuritySettings(
     viewModel: HumanProgramViewModel,
     onAppLockPinSet: (PinHash) -> Unit,
     onRecoveryPhraseSet: (PinHash) -> Unit,
+    onRecoveryPhraseRevoked: () -> Unit,
     onAppLockTimeoutChanged: (Int) -> Unit,
-    onBiometricUnlockChanged: (Boolean) -> Unit
+    onBiometricUnlockChanged: (Boolean) -> Unit,
+    innerBackRequest: Int,
+    onInnerBackAvailableChange: (Boolean) -> Unit
 ) {
     var showPinSetup by rememberSaveable { mutableStateOf(!viewModel.appLockEnabled) }
-    var showRecoverySetup by rememberSaveable { mutableStateOf(false) }
-    HpList {
-        item {
-            HpSectionHeader("App Lock", if (viewModel.appLockEnabled) "PIN set" else "Not set")
-            HpSoftPanel {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (showPinSetup) {
-                        HpFormTextField("PIN", viewModel.appLockPinInput, viewModel::updateAppLockPinInput)
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            HpPrimaryButton("Set PIN") {
-                                viewModel.setupAppLockPin()?.let(onAppLockPinSet)
-                                showPinSetup = false
-                            }
-                            if (viewModel.appLockEnabled) {
-                                HpSecondaryButton("Cancel") { showPinSetup = false }
-                            }
-                        }
-                    } else {
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            HpSecondaryButton("Change PIN") { showPinSetup = true }
-                            HpSecondaryButton("Lock Now", viewModel::lockAppNow)
-                        }
-                    }
-                    Text(viewModel.appLockPinMessage, color = HpColors.muted)
-                    HpSwitchRow(
-                        title = "Biometric unlock",
-                        subtitle = if (viewModel.biometricUnlockAvailable) "PIN remains available as fallback" else "Not available on this device",
-                        checked = viewModel.biometricUnlockEnabled,
-                        enabled = viewModel.biometricUnlockAvailable,
-                        onCheckedChange = onBiometricUnlockChanged
+    var page by rememberSaveable { mutableStateOf("root") }
+    LaunchedEffect(page) {
+        onInnerBackAvailableChange(page != "root")
+    }
+    LaunchedEffect(innerBackRequest) {
+        if (innerBackRequest > 0 && page != "root") page = "root"
+    }
+    if (page != "root") {
+        HpList {
+            when (page) {
+                "lock" -> item {
+                    HpRadioChoiceList(
+                        title = "Lock Settings",
+                        options = appLockTimeoutOptions,
+                        selectedValue = viewModel.appLockTimeoutMinutes,
+                        onSelectedChange = onAppLockTimeoutChanged
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf(0 to "Now", 1 to "1m", 5 to "5m", 15 to "15m").forEach { (minutes, label) ->
-                            HpChoiceChip(label, viewModel.appLockTimeoutMinutes == minutes) {
-                                onAppLockTimeoutChanged(minutes)
+                }
+                "pin" -> item {
+                    HpSettingsContentPage(title = "PIN / Password") {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            if (showPinSetup) {
+                                HpFormTextField("PIN or password", viewModel.appLockPinInput, viewModel::updateAppLockPinInput)
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    HpPrimaryButton(if (viewModel.appLockEnabled) "Save" else "Set") {
+                                        viewModel.setupAppLockPin()?.let { hash ->
+                                            onAppLockPinSet(hash)
+                                            if (viewModel.generatedRecoveryPhrase.isBlank()) {
+                                                viewModel.generateRecoveryPhrase()?.let(onRecoveryPhraseSet)
+                                            }
+                                        }
+                                        showPinSetup = false
+                                    }
+                                    if (viewModel.appLockEnabled) HpSecondaryButton("Cancel") { showPinSetup = false }
+                                }
+                            } else {
+                                HpSecondaryButton("Change PIN / Password") { showPinSetup = true }
                             }
+                            if (viewModel.appLockPinMessage.isNotBlank()) Text(viewModel.appLockPinMessage, color = HpColors.muted)
                         }
                     }
-                    if (showRecoverySetup) {
-                        HpSecondaryButton("Generate Recovery Phrase") {
-                            viewModel.generateRecoveryPhrase()?.let(onRecoveryPhraseSet)
-                        }
-                    } else {
-                        HpSecondaryButton("Recovery Phrase") { showRecoverySetup = true }
+                }
+                "biometric" -> item {
+                    HpToggleSettingsList(
+                        title = "Biometric Unlock",
+                        items = listOf(
+                            HpToggleSettingItem(
+                                value = "biometric",
+                                title = "Biometric unlock",
+                                checked = viewModel.biometricUnlockEnabled,
+                                enabled = viewModel.biometricUnlockAvailable
+                            )
+                        ),
+                        onCheckedChange = { _, checked -> onBiometricUnlockChanged(checked) }
+                    )
+                }
+                "encryption" -> item {
+                    HpSettingsContentPage(title = "Encryption Settings") {
+                        HpPlainRow(Icons.Outlined.Lock, "Always encrypted", "Android Keystore AES-GCM")
                     }
-                    if (viewModel.generatedRecoveryPhrase.isNotBlank()) Text(viewModel.generatedRecoveryPhrase, color = HpColors.accent)
-                    if (viewModel.recoveryPhraseMessage.isNotBlank()) Text(viewModel.recoveryPhraseMessage, color = HpColors.muted)
+                }
+                "recovery" -> item {
+                    HpSettingsContentPage(title = "Recovery") {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            if (viewModel.generatedRecoveryPhrase.isNotBlank()) {
+                                Text(viewModel.generatedRecoveryPhrase, color = HpColors.accent, fontWeight = FontWeight.SemiBold)
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                HpSecondaryButton(if (viewModel.generatedRecoveryPhrase.isBlank()) "Generate Recovery Phrase" else "Generate New Phrase") {
+                                    viewModel.generateRecoveryPhrase()?.let(onRecoveryPhraseSet)
+                                }
+                                if (viewModel.generatedRecoveryPhrase.isNotBlank()) {
+                                    HpSecondaryButton("Revoke", onRecoveryPhraseRevoked)
+                                }
+                            }
+                            if (viewModel.recoveryPhraseMessage.isNotBlank()) Text(viewModel.recoveryPhraseMessage, color = HpColors.muted)
+                        }
+                    }
                 }
             }
+        }
+        return
+    }
+    HpList(itemSpacing = 0.dp) {
+        item {
+            HpSettingsMenuPage(
+                sections = listOf(
+                    HpSettingsMenuSection(
+                        title = "Security",
+                        items = listOf(
+                            HpSettingsMenuItem(
+                                title = "Lock Settings",
+                                icon = Icons.Outlined.Lock,
+                                onClick = { page = "lock" }
+                            ),
+                            HpSettingsMenuItem(
+                                title = "PIN / Password",
+                                icon = Icons.Outlined.Lock,
+                                onClick = { page = "pin" }
+                            ),
+                            HpSettingsMenuItem(
+                                title = "Biometric Unlock",
+                                icon = Icons.Outlined.LockOpen,
+                                onClick = { page = "biometric" }
+                            ),
+                            HpSettingsMenuItem(
+                                title = "Encryption Settings",
+                                icon = Icons.Outlined.Lock,
+                                onClick = { page = "encryption" }
+                            ),
+                            HpSettingsMenuItem(
+                                title = "Recovery",
+                                icon = Icons.Outlined.RestartAlt,
+                                onClick = { page = "recovery" }
+                            )
+                        )
+                    )
+                )
+            )
         }
     }
 }
@@ -2493,72 +2593,191 @@ internal fun SecuritySettings(
 @Composable
 internal fun ResetSettings(
     viewModel: HumanProgramViewModel,
-    onExportHprgm: () -> Unit,
+    onOpenExport: () -> Unit,
     onPlannerDataReplacing: () -> Unit,
-    onReminderScheduleChanged: () -> Unit
+    onReminderScheduleChanged: () -> Unit,
+    innerBackRequest: Int,
+    onInnerBackAvailableChange: (Boolean) -> Unit
 ) {
+    var showConfirmDialog by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        onInnerBackAvailableChange(false)
+    }
     HpList {
         item {
-            HpSectionHeader("Reset Local Data", "Back up before clearing planner data")
-            HpSoftPanel {
+            HpSectionHeader("Factory Reset", null)
+            HpSettingsPanel {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("This resets planner data stored inside the app. Exported files outside app storage are not deleted.", color = HpColors.muted)
-                    if (!viewModel.resetSequenceStarted) {
-                        HpSecondaryButton("Prepare Reset", viewModel::beginResetSequence)
-                    } else {
-                        Text("Save a backup first if you want to keep this data.", color = HpColors.ink)
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            HpSecondaryButton("Save Backup", onExportHprgm)
-                            HpSecondaryButton("Continue", viewModel::acknowledgeResetExportReminder)
+                    Text("Export a .hprgm backup first if you want to keep your data.", color = HpColors.ink, fontWeight = FontWeight.SemiBold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        HpSecondaryButton("Go to Export Backup", onOpenExport)
+                        HpSecondaryButton("Continue Factory Reset") {
+                            viewModel.beginResetSequence()
+                            viewModel.acknowledgeResetExportReminder()
+                            showConfirmDialog = true
                         }
-                        if (viewModel.resetExportReminderAcknowledged) {
-                            HpFormTextField("Confirmation", viewModel.resetConfirmationInput, viewModel::updateResetConfirmationInput)
-                            HpPrimaryButton("Reset Local Data") {
-                                if (viewModel.canFactoryResetLocalPlannerData()) {
-                                    onPlannerDataReplacing()
-                                }
-                                if (viewModel.factoryResetLocalPlannerData()) {
-                                    onReminderScheduleChanged()
-                                }
-                            }
-                        }
-                        HpSecondaryButton("Cancel Reset", viewModel::cancelResetSequence)
                     }
-                    if (viewModel.resetMessage.isNotBlank()) Text(viewModel.resetMessage, color = HpColors.muted)
+                    if (viewModel.resetMessage.isNotBlank()) Text(viewModel.resetMessage, color = HpColors.ink)
                 }
             }
         }
     }
+    if (showConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showConfirmDialog = false
+                viewModel.cancelResetSequence()
+            },
+            title = { Text("Confirm Factory Reset") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Type reset below to confirm the factory reset. You cannot undo this action.")
+                    HpFormTextField("Confirmation", viewModel.resetConfirmationInput, viewModel::updateResetConfirmationInput)
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = viewModel.canFactoryResetLocalPlannerData(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB3261E)),
+                    onClick = {
+                        if (viewModel.canFactoryResetLocalPlannerData()) {
+                            onPlannerDataReplacing()
+                        }
+                        if (viewModel.factoryResetLocalPlannerData()) {
+                            onReminderScheduleChanged()
+                            showConfirmDialog = false
+                        }
+                    }
+                ) {
+                    Text("Reset")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showConfirmDialog = false
+                        viewModel.cancelResetSequence()
+                    }
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun AboutSettings(
     viewModel: HumanProgramViewModel,
+    innerBackRequest: Int,
+    onInnerBackAvailableChange: (Boolean) -> Unit,
     onHiddenGateReady: () -> Unit
 ) {
-    var taps by rememberSaveable { mutableIntStateOf(0) }
-    HpList {
-        item {
-            HpSectionHeader("About", null)
-            HpSoftPanel {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Version 0.1.0", color = HpColors.ink)
-                    Text(
-                        modifier = Modifier.clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
+    var showHiddenArticle by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(showHiddenArticle) {
+        onInnerBackAvailableChange(showHiddenArticle)
+    }
+    LaunchedEffect(innerBackRequest) {
+        if (innerBackRequest > 0) {
+            showHiddenArticle = false
+        }
+    }
+    if (showHiddenArticle) {
+        HpList {
+            item { HpTinyIconButton(Icons.AutoMirrored.Outlined.ArrowBack, "Back", onClick = { showHiddenArticle = false }) }
+            item {
+                HpSectionHeader("Habit", "Adapted from Wikipedia")
+                HpSettingsPanel {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(170.dp)
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(HpColors.accentSoft),
+                            contentAlignment = Alignment.Center
                         ) {
-                            taps += 1
-                            if (taps >= 2) {
-                                taps = 0
-                                onHiddenGateReady()
-                            }
-                        },
-                        text = "Developer: Human Program",
-                        color = HpColors.muted
-                    )
+                            Icon(Icons.Outlined.CheckCircle, contentDescription = null, tint = HpColors.accent, modifier = Modifier.size(44.dp))
+                        }
+                        Text("A habit is a routine behavior that is repeated regularly and can happen with little conscious thought.", color = HpColors.ink, fontWeight = FontWeight.SemiBold)
+                        Text("Habits have been studied in psychology and philosophy as learned patterns of thinking, feeling, and acting. Everyday routines can become automatic because repeated behavior strengthens the link between a situation and a response.", color = HpColors.muted)
+                        Text("Formation", color = HpColors.ink, fontWeight = FontWeight.SemiBold)
+                        Text("Habit formation happens when a behavior is repeated in a stable context. A cue, a repeated action, and a reward can make the behavior easier to repeat over time. Research often describes this as increasing automaticity.", color = HpColors.muted)
+                        Text("Goals", color = HpColors.ink, fontWeight = FontWeight.SemiBold)
+                        Text("Goals can start a habit by giving a reason to repeat an action. Once the habit is learned, the cue and context may be enough to trigger the behavior even when the original goal is no longer active.", color = HpColors.muted)
+                        Text("Nervous and unwanted habits", color = HpColors.ink, fontWeight = FontWeight.SemiBold)
+                        Text("Some habits are linked to stress or nervousness, such as nail biting or fidgeting. Unwanted habits can also include procrastination, overspending, or other repeated behaviors that work against a person's intentions.", color = HpColors.muted)
+                        Text("Changing habits", color = HpColors.ink, fontWeight = FontWeight.SemiBold)
+                        Text("Changing a habit usually means noticing the cue, changing the routine, and making the new response rewarding enough to repeat. Repetition, context, and environment all matter.", color = HpColors.muted)
+                        Text("Source: Wikipedia, Habit", color = HpColors.muted)
+                    }
                 }
             }
+        }
+        return
+    }
+    HpList(itemSpacing = HpTheme.spacing.xl) {
+        item { HpSectionHeader("About", null) }
+        item {
+            AboutListRow(
+                icon = Icons.Outlined.Info,
+                title = "Version",
+                trailing = "0.1.0",
+                onClick = {},
+                onDoubleClick = { showHiddenArticle = true }
+            )
+        }
+        item {
+            AboutListRow(
+                icon = Icons.Outlined.Settings,
+                title = "Build",
+                trailing = "debug",
+                onClick = {}
+            )
+        }
+        item {
+            AboutListRow(
+                icon = Icons.Outlined.Info,
+                title = "David Jurek",
+                trailing = null,
+                onClick = {},
+                onDoubleClick = onHiddenGateReady
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun AboutListRow(
+    icon: ImageVector,
+    title: String,
+    trailing: String?,
+    onClick: () -> Unit,
+    onDoubleClick: (() -> Unit)? = null
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(HpTheme.radii.row))
+            .combinedClickable(
+                onClick = onClick,
+                onDoubleClick = onDoubleClick
+            )
+            .padding(horizontal = HpTheme.spacing.md, vertical = HpTheme.spacing.md),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(HpTheme.spacing.md)
+    ) {
+        Icon(icon, contentDescription = null, tint = HpColors.accent)
+        Text(
+            text = title,
+            modifier = Modifier.weight(1f),
+            color = HpColors.ink,
+            fontWeight = FontWeight.Medium
+        )
+        if (trailing != null) {
+            Text(text = trailing, color = HpColors.muted)
         }
     }
 }
@@ -2630,15 +2849,21 @@ internal fun WelcomeScreen(
             }
         }
         item {
-            HpSectionHeader("Optional app lock", null)
+            HpSectionHeader("Security Setup", null)
             HpSoftPanel {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    HpFormTextField("PIN", viewModel.appLockPinInput, viewModel::updateAppLockPinInput)
+                    Text("Create a PIN or password before entering the app. A recovery phrase will be generated right away.", color = HpColors.muted)
+                    HpFormTextField("PIN or password", viewModel.appLockPinInput, viewModel::updateAppLockPinInput)
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        HpSecondaryButton("Set PIN") { viewModel.setupAppLockPin()?.let(onAppLockPinSet) }
-                        HpSecondaryButton("Recovery Phrase") { viewModel.generateRecoveryPhrase()?.let(onRecoveryPhraseSet) }
+                        HpSecondaryButton("Set PIN / Password") {
+                            viewModel.setupAppLockPin()?.let { hash ->
+                                onAppLockPinSet(hash)
+                                viewModel.generateRecoveryPhrase()?.let(onRecoveryPhraseSet)
+                            }
+                        }
                     }
                     if (viewModel.generatedRecoveryPhrase.isNotBlank()) Text(viewModel.generatedRecoveryPhrase, color = HpColors.accent)
+                    if (viewModel.appLockPinMessage.isNotBlank()) Text(viewModel.appLockPinMessage, color = HpColors.muted)
                 }
             }
         }
@@ -2653,8 +2878,12 @@ internal fun WelcomeScreen(
         }
         item {
             HpPrimaryButton("Enter Today") {
-                viewModel.completeOnboarding()
-                onOnboardingComplete()
+                if (viewModel.appLockEnabled && viewModel.generatedRecoveryPhrase.isNotBlank()) {
+                    viewModel.completeOnboarding()
+                    onOnboardingComplete()
+                } else {
+                    viewModel.reportAppLockMessage("Set a PIN or password first.")
+                }
             }
         }
     }

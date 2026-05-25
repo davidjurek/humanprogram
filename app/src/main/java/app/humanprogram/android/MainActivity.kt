@@ -47,6 +47,7 @@ class MainActivity : ComponentActivity() {
     private val biometricExecutor: Executor by lazy { mainExecutor }
     private var biometricCancellationSignal: CancellationSignal? = null
     private var appearancePreference by mutableStateOf("system")
+    private var dateFormatPreference by mutableStateOf("month_day_year")
     private var backlogViewPreference by mutableStateOf("tasks")
     private var backlogSortPreference by mutableStateOf("creation")
 
@@ -98,6 +99,41 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val importBacklogCsvLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri == null) {
+            plannerViewModel.reportBacklogImportMessage("CSV import was cancelled.")
+            return@registerForActivityResult
+        }
+
+        runCatching {
+            val csv = contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                ?: error("Could not open CSV file.")
+            plannerViewModel.importBacklogCsv(csv)
+        }.onFailure {
+            plannerViewModel.reportBacklogImportMessage("CSV import failed: ${it.message.orEmpty()}")
+        }
+    }
+
+    private val exportBacklogTemplateLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri ->
+        if (uri == null) {
+            plannerViewModel.reportBacklogImportMessage("Template save was cancelled.")
+            return@registerForActivityResult
+        }
+
+        runCatching {
+            contentResolver.openOutputStream(uri)?.use { output ->
+                output.write(plannerViewModel.backlogCsvTemplate().toByteArray())
+            } ?: error("Could not create template file.")
+            plannerViewModel.reportBacklogImportMessage("CSV import template saved.")
+        }.onFailure {
+            plannerViewModel.reportBacklogImportMessage("Template save failed: ${it.message.orEmpty()}")
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -141,6 +177,7 @@ class MainActivity : ComponentActivity() {
                 HumanProgramApp(
                     viewModel = plannerViewModel,
                     appearance = appearancePreference,
+                    dateFormat = dateFormatPreference,
                     backlogViewPreference = backlogViewPreference,
                     backlogSortPreference = backlogSortPreference,
                     notificationPermissionGranted = hasNotificationPermission(),
@@ -158,6 +195,19 @@ class MainActivity : ComponentActivity() {
                                 "*/*"
                             )
                         )
+                    },
+                    onImportBacklogCsv = {
+                        importBacklogCsvLauncher.launch(
+                            arrayOf(
+                                "text/csv",
+                                "text/comma-separated-values",
+                                "text/plain",
+                                "*/*"
+                            )
+                        )
+                    },
+                    onExportBacklogCsvTemplate = {
+                        exportBacklogTemplateLauncher.launch("human-program-backlog-import-template.csv")
                     },
                     onReminderScheduleChanged = ::syncReminderSchedule,
                     onReminderDeleted = reminderScheduler::cancel,
@@ -199,6 +249,27 @@ class MainActivity : ComponentActivity() {
                                 AppPreferencesRepository.Keys.RecoveryPhraseHashBase64,
                                 phraseHash.hashBase64
                             )
+                            appPreferencesRepository.setString(
+                                AppPreferencesRepository.Keys.RecoveryPhrasePlainText,
+                                plannerViewModel.generatedRecoveryPhrase
+                            )
+                        }
+                    },
+                    onRecoveryPhraseRevoked = {
+                        plannerViewModel.revokeRecoveryPhrase()
+                        lifecycleScope.launch {
+                            appPreferencesRepository.setString(
+                                AppPreferencesRepository.Keys.RecoveryPhraseSaltBase64,
+                                ""
+                            )
+                            appPreferencesRepository.setString(
+                                AppPreferencesRepository.Keys.RecoveryPhraseHashBase64,
+                                ""
+                            )
+                            appPreferencesRepository.setString(
+                                AppPreferencesRepository.Keys.RecoveryPhrasePlainText,
+                                ""
+                            )
                         }
                     },
                     onAppLockTimeoutChanged = { minutes ->
@@ -225,6 +296,16 @@ class MainActivity : ComponentActivity() {
                             appPreferencesRepository.setString(
                                 AppPreferencesRepository.Keys.Appearance,
                                 appearance
+                            )
+                        }
+                    },
+                    onDateFormatChanged = { dateFormat ->
+                        dateFormatPreference = dateFormat
+                        plannerViewModel.updateDateFormatPreference(dateFormat)
+                        lifecycleScope.launch {
+                            appPreferencesRepository.setString(
+                                AppPreferencesRepository.Keys.DateFormat,
+                                dateFormat
                             )
                         }
                     },
@@ -351,6 +432,8 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             appPreferencesRepository.preferences.collect { preferences ->
                 appearancePreference = preferences.appearance
+                dateFormatPreference = preferences.dateFormat
+                plannerViewModel.updateDateFormatPreference(preferences.dateFormat)
                 backlogViewPreference = preferences.backlogView
                 backlogSortPreference = preferences.backlogSort
                 plannerViewModel.loadStoredAppLockPin(
@@ -360,7 +443,8 @@ class MainActivity : ComponentActivity() {
                     hashBase64 = preferences.appLockPinHashBase64,
                     timeoutMinutes = preferences.appLockTimeoutMinutes,
                     recoverySaltBase64 = preferences.recoveryPhraseSaltBase64,
-                    recoveryHashBase64 = preferences.recoveryPhraseHashBase64
+                    recoveryHashBase64 = preferences.recoveryPhraseHashBase64,
+                    recoveryPhrasePlainText = preferences.recoveryPhrasePlainText
                 )
                 plannerViewModel.loadSelectedCalendarSources(
                     preferences.selectedCalendarIdsCsv
