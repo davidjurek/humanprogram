@@ -2420,52 +2420,6 @@ private fun CompletionGraph(viewModel: HumanProgramViewModel) {
 }
 
 @Composable
-internal fun ImportExportScreen(
-    viewModel: HumanProgramViewModel,
-    onExportHprgm: () -> Unit,
-    onImportHprgmPreview: () -> Unit,
-    onImportBacklogCsv: () -> Unit,
-    onExportBacklogCsvTemplate: () -> Unit,
-    onPlannerDataReplacing: () -> Unit,
-    onReminderScheduleChanged: () -> Unit,
-    innerBackRequest: Int = 0,
-    onInnerBackAvailableChange: (Boolean) -> Unit = {}
-) {
-    var section by rememberSaveable { mutableStateOf<String?>(null) }
-    LaunchedEffect(section) {
-        onInnerBackAvailableChange(section != null)
-    }
-    LaunchedEffect(innerBackRequest) {
-        if (innerBackRequest > 0 && section != null) section = null
-    }
-    if (section == "backup") {
-        BackupPackagePage(
-            viewModel = viewModel,
-            onExportHprgm = onExportHprgm,
-            onImportHprgmPreview = onImportHprgmPreview,
-            onImportBacklogCsv = onImportBacklogCsv,
-            onExportBacklogCsvTemplate = onExportBacklogCsvTemplate,
-            onPlannerDataReplacing = onPlannerDataReplacing,
-            onReminderScheduleChanged = onReminderScheduleChanged,
-            onBack = { section = null }
-        )
-        return
-    }
-    if (section == "advanced") {
-        AdvancedDataPage(viewModel = viewModel, onBack = { section = null })
-        return
-    }
-    HpList {
-        item {
-            SettingsRow(Icons.Outlined.ImportExport, "Backup Package", "Encrypted save and restore") { section = "backup" }
-        }
-        item {
-            SettingsRow(Icons.AutoMirrored.Outlined.FormatListBulleted, "Advanced Data", "CSV import and previews") { section = "advanced" }
-        }
-    }
-}
-
-@Composable
 internal fun ImportScreen(
     viewModel: HumanProgramViewModel,
     onImportHprgmPreview: () -> Unit,
@@ -2488,8 +2442,7 @@ internal fun ImportScreen(
     if (page == "text") {
         HpList {
             item {
-                HpSectionHeader("Import from Text", null)
-                HpSettingsPanel {
+                HpSettingsContentPage(title = "Import from Text") {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         HpFormTextField(
                             label = "Backlog items",
@@ -2511,8 +2464,7 @@ internal fun ImportScreen(
     if (page == "csv") {
         HpList {
             item {
-                HpSectionHeader("Import from CSV", null)
-                HpSettingsPanel {
+                HpSettingsContentPage(title = "Import from CSV") {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         HpSecondaryButton("Save CSV Import Template", onExportBacklogCsvTemplate)
                         HpPrimaryButton("Choose CSV", onImportBacklogCsv)
@@ -2526,8 +2478,7 @@ internal fun ImportScreen(
     if (page == "backup") {
         HpList {
             item {
-                HpSectionHeader("Import Backup", null)
-                HpSettingsPanel {
+                HpSettingsContentPage(title = "Import Backup") {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         HpFormTextField("Backup password", viewModel.hprgmExportPassword, viewModel::updateHprgmExportPassword)
                         HpPrimaryButton("Choose Backup", onImportHprgmPreview)
@@ -2546,12 +2497,38 @@ internal fun ImportScreen(
         }
         return
     }
-    HpList(itemSpacing = HpTheme.spacing.xl) {
-        item { HpSectionHeader("Import Backlog", null) }
-        item { SettingsRow(Icons.AutoMirrored.Outlined.FormatListBulleted, "Import from Text", "") { page = "text" } }
-        item { SettingsRow(Icons.Outlined.ImportExport, "Import from CSV", "") { page = "csv" } }
-        item { HpSectionHeader("Import Backup", null) }
-        item { SettingsRow(Icons.Outlined.ImportExport, "Import Backup", "") { page = "backup" } }
+    HpList(itemSpacing = 0.dp) {
+        item {
+            HpSettingsMenuPage(
+                sections = listOf(
+                    HpSettingsMenuSection(
+                        title = "Import Backlog",
+                        items = listOf(
+                            HpSettingsMenuItem(
+                                title = "Import from Text",
+                                icon = Icons.AutoMirrored.Outlined.FormatListBulleted,
+                                onClick = { page = "text" }
+                            ),
+                            HpSettingsMenuItem(
+                                title = "Import from CSV",
+                                icon = Icons.Outlined.ImportExport,
+                                onClick = { page = "csv" }
+                            )
+                        )
+                    ),
+                    HpSettingsMenuSection(
+                        title = "Import Backup",
+                        items = listOf(
+                            HpSettingsMenuItem(
+                                title = "Import Backup",
+                                icon = Icons.Outlined.ImportExport,
+                                onClick = { page = "backup" }
+                            )
+                        )
+                    )
+                )
+            )
+        }
     }
 }
 
@@ -2562,8 +2539,7 @@ internal fun ExportScreen(
 ) {
     HpList {
         item {
-            HpSectionHeader("Export", null)
-            HpSettingsPanel {
+            HpSettingsContentPage(title = "Export") {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     HpPrimaryButton("Export Backup") {
                         viewModel.updateHprgmExportPassword("")
@@ -2572,46 +2548,6 @@ internal fun ExportScreen(
                     if (viewModel.hprgmMessage.isNotBlank()) Text(viewModel.hprgmMessage, color = HpColors.muted)
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun BackupPackagePage(
-    viewModel: HumanProgramViewModel,
-    onExportHprgm: () -> Unit,
-    onImportHprgmPreview: () -> Unit,
-    onImportBacklogCsv: () -> Unit,
-    onExportBacklogCsvTemplate: () -> Unit,
-    onPlannerDataReplacing: () -> Unit,
-    onReminderScheduleChanged: () -> Unit,
-    onBack: () -> Unit
-) {
-    HpList {
-        item { HpTinyIconButton(Icons.AutoMirrored.Outlined.ArrowBack, "Back", onBack) }
-        item {
-            HpFormTextField("Backup password", viewModel.hprgmExportPassword, viewModel::updateHprgmExportPassword)
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                HpPrimaryButton("Save Backup", onExportHprgm)
-                HpSecondaryButton("Choose Backup", onImportHprgmPreview)
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                HpSecondaryButton("Import CSV", onImportBacklogCsv)
-                HpSecondaryButton("CSV Template", onExportBacklogCsvTemplate)
-            }
-        }
-        if (viewModel.hasPendingHprgmImport) {
-            item {
-                HpPrimaryButton("Apply Import") {
-                    onPlannerDataReplacing()
-                    if (viewModel.applyPendingHprgmImport()) {
-                        onReminderScheduleChanged()
-                    }
-                }
-            }
-        }
-        if (viewModel.hprgmMessage.isNotBlank()) {
-            item { Text(viewModel.hprgmMessage, color = HpColors.muted) }
         }
     }
 }

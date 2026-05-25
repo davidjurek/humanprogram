@@ -142,6 +142,7 @@ internal fun HpAppFrame(
     primaryContentDescription: String?,
     onPrimaryAction: (() -> Unit)?,
     routeActions: List<HpCommandAction?> = emptyList(),
+    commandCapsuleVisible: Boolean = true,
     overflowExpanded: Boolean,
     undoRedoMessage: String?,
     canEdit: Boolean,
@@ -170,7 +171,7 @@ internal fun HpAppFrame(
             Column(
                 modifier = Modifier.fillMaxSize()
             ) {
-            if (route != HpRoute.PROGRAM && route != HpRoute.HIDDEN_GATE) {
+            if (commandCapsuleVisible && route != HpRoute.PROGRAM && route != HpRoute.HIDDEN_GATE) {
                 HpCommandCapsule(
                     slots = routeActions,
                     undoRedoMode = overflowExpanded,
@@ -191,7 +192,7 @@ internal fun HpAppFrame(
                 content()
             }
             }
-            if (route != HpRoute.PROGRAM && route != HpRoute.HIDDEN_GATE) {
+            if (commandCapsuleVisible && route != HpRoute.PROGRAM && route != HpRoute.HIDDEN_GATE) {
                 AnimatedVisibility(
                     visible = undoRedoMessage != null,
                     modifier = Modifier

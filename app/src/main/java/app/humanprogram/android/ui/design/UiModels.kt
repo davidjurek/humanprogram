@@ -196,7 +196,6 @@ internal enum class HpRoute {
     ROUTINES,
     REMINDERS,
     STATS,
-    IMPORT_EXPORT,
     SEARCH,
     SETTINGS,
     BACKLOG_TASK_FORM,
@@ -239,8 +238,6 @@ internal enum class SettingsDetail(
 ) {
     GENERAL_SETTINGS("General Settings", "Appearance and dates", Icons.Outlined.Settings),
     APPEARANCE("Appearance", "Theme and display", Icons.Outlined.DarkMode),
-    TODAY_DISPLAY("Today Display", "Date, metadata, and density", Icons.Outlined.CalendarMonth),
-    BACKLOG("Backlog", "Project and task display", Icons.Outlined.Folder),
     RECURRING("Recurring Tasks", "Templates", Icons.Outlined.CheckCircle),
     SCHEDULE("Schedule", "Daily blocks", Icons.Outlined.Event),
     EXERCISE("Exercise", "Routine items", Icons.Outlined.FitnessCenter),
@@ -248,9 +245,7 @@ internal enum class SettingsDetail(
     CALENDAR("Calendar", "Sources feeding Today", Icons.Outlined.CalendarMonth),
     IMPORT("Import", "Backlog and backup imports", Icons.Outlined.ImportExport),
     EXPORT("Export", "Backup export", Icons.Outlined.ImportExport),
-    IMPORT_EXPORT("Import / Export", "Backups and data", Icons.Outlined.ImportExport),
     SECURITY("Security", "Lock, recovery, and encryption", Icons.Outlined.Lock),
-    STATS("Stats", "Tracking summaries", Icons.AutoMirrored.Outlined.ShowChart),
     RESET("Factory Reset", "Local data reset", Icons.Outlined.RestartAlt),
     ABOUT("About", "Version and credits", Icons.Outlined.Info)
 }

@@ -1,5 +1,11 @@
 package app.humanprogram.android.ui
 
+import android.graphics.Color as AndroidColor
+import android.os.Handler
+import android.os.Looper
+import android.webkit.JavascriptInterface
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -112,12 +118,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
@@ -133,6 +139,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.humanprogram.android.core.security.PinHash
@@ -148,6 +155,11 @@ import app.humanprogram.android.planning.model.RecurringTaskTemplate
 import app.humanprogram.android.planning.model.ReminderRecurrence
 import app.humanprogram.android.planning.model.ScheduleBlock
 import app.humanprogram.android.planning.model.ScheduleTemplate
+import me.saket.telephoto.subsamplingimage.SubSamplingImage
+import me.saket.telephoto.subsamplingimage.SubSamplingImageSource
+import me.saket.telephoto.subsamplingimage.rememberSubSamplingImageState
+import me.saket.telephoto.zoomable.rememberZoomableState
+import me.saket.telephoto.zoomable.zoomable
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -203,7 +215,10 @@ internal fun SettingsScreen(
     onDateFormatChanged: (String) -> Unit,
     innerBackRequest: Int,
     onInnerBackAvailableChange: (Boolean) -> Unit,
-    onHiddenGateReady: () -> Unit
+    onHiddenGateReady: () -> Unit,
+    articleFontScale: Float,
+    onArticleOpenChange: (Boolean) -> Unit,
+    onArticleImageOpenChange: (Boolean) -> Unit
 ) {
     LaunchedEffect(detail) {
         onInnerBackAvailableChange(false)
@@ -226,8 +241,6 @@ internal fun SettingsScreen(
             appearance = appearance,
             onAppearanceChanged = onAppearanceChanged
         )
-        SettingsDetail.TODAY_DISPLAY -> TodayDisplaySettings()
-        SettingsDetail.BACKLOG -> BacklogSettings(viewModel)
         SettingsDetail.RECURRING -> RecurringSettings(
             viewModel = viewModel,
             onOpenRecurringTask = onOpenRecurringTask,
@@ -256,9 +269,8 @@ internal fun SettingsScreen(
             viewModel = viewModel,
             editing = exerciseEditorEditing
         )
-        SettingsDetail.NOTIFICATIONS -> RemindersScreen(
+        SettingsDetail.NOTIFICATIONS -> NotificationsSettings(
             viewModel = viewModel,
-            mode = HpMode.READ,
             notificationPermissionGranted = notificationPermissionGranted,
             onRequestNotificationPermission = onRequestNotificationPermission,
             onReminderScheduleChanged = onReminderScheduleChanged,
@@ -269,17 +281,6 @@ internal fun SettingsScreen(
             granted = calendarPermissionGranted,
             onRequest = onRequestCalendarPermission,
             onToggleCalendarSource = onToggleCalendarSource
-        )
-        SettingsDetail.IMPORT_EXPORT -> ImportExportScreen(
-            viewModel = viewModel,
-            onExportHprgm = onExportHprgm,
-            onImportHprgmPreview = onImportHprgmPreview,
-            onImportBacklogCsv = onImportBacklogCsv,
-            onExportBacklogCsvTemplate = onExportBacklogCsvTemplate,
-            onPlannerDataReplacing = onPlannerDataReplacing,
-            onReminderScheduleChanged = onReminderScheduleChanged,
-            innerBackRequest = innerBackRequest,
-            onInnerBackAvailableChange = onInnerBackAvailableChange
         )
         SettingsDetail.IMPORT -> ImportScreen(
             viewModel = viewModel,
@@ -305,7 +306,6 @@ internal fun SettingsScreen(
             innerBackRequest,
             onInnerBackAvailableChange
         )
-        SettingsDetail.STATS -> StatsScreen(viewModel)
         SettingsDetail.RESET -> ResetSettings(
             viewModel = viewModel,
             onOpenExport = { onDetail(SettingsDetail.EXPORT) },
@@ -314,7 +314,15 @@ internal fun SettingsScreen(
             innerBackRequest = innerBackRequest,
             onInnerBackAvailableChange = onInnerBackAvailableChange
         )
-        SettingsDetail.ABOUT -> AboutSettings(viewModel, innerBackRequest, onInnerBackAvailableChange, onHiddenGateReady)
+        SettingsDetail.ABOUT -> AboutSettings(
+            viewModel = viewModel,
+            innerBackRequest = innerBackRequest,
+            onInnerBackAvailableChange = onInnerBackAvailableChange,
+            onHiddenGateReady = onHiddenGateReady,
+            articleFontScale = articleFontScale,
+            onArticleOpenChange = onArticleOpenChange,
+            onArticleImageOpenChange = onArticleImageOpenChange
+        )
     }
 }
 
@@ -445,38 +453,6 @@ internal fun AppearanceSettings(
                 selectedValue = appearance,
                 onSelectedChange = onAppearanceChanged
             )
-        }
-    }
-}
-
-@Composable
-internal fun TodayDisplaySettings() {
-    HpList {
-        item {
-            HpSectionHeader("Today Display", null)
-            HpSettingsPanel {
-                Column(verticalArrangement = Arrangement.spacedBy(HpTheme.spacing.md)) {
-                    HpPlainRow(Icons.Outlined.CalendarMonth, "Date control", "Tap the date in Today to jump directly.")
-                    HpPlainRow(Icons.Outlined.CheckCircle, "Required tasks", "Calendar, recurring, backlog, and manual tasks stay together.")
-                    HpPlainRow(Icons.Outlined.Event, "Schedule first", "Schedule blocks and selected calendar events appear before tasks.")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun BacklogSettings(viewModel: HumanProgramViewModel) {
-    HpList {
-        item {
-            HpSectionHeader("Backlog", null)
-            HpSettingsPanel {
-                Column(verticalArrangement = Arrangement.spacedBy(HpTheme.spacing.md)) {
-                    HpPlainRow(Icons.Outlined.Folder, "Projects", "${viewModel.activeBacklogByProject.size} active project groups")
-                    HpPlainRow(Icons.AutoMirrored.Outlined.FormatListBulleted, "Tasks", "${viewModel.activeBacklogItems.size} active backlog tasks")
-                    HpPlainRow(Icons.Outlined.Tune, "Controls", "View, filter, and sort controls stay compact.")
-                }
-            }
         }
     }
 }
@@ -2023,133 +1999,119 @@ internal fun ExerciseSettings(
         }
     }
 
-    HpList(itemSpacing = 0.dp) {
+    HpList {
         item {
-            Text(
-                "Exercise",
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                color = HpColors.ink,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold
-            )
-        }
-        (1..7).forEach { weekday ->
-            val template = viewModel.exerciseTemplateForWeekday(weekday)
-            item {
-                ExerciseDayHeader(
-                    weekday = weekday,
-                    title = template.title,
-                    editing = editing,
-                    onEditLabel = {
-                        labelEditorWeekday = weekday
-                        labelDraft = template.title
-                    },
-                    onAdd = {
-                        commitItemEdit()
-                        commitNewItem()
-                        addingWeekday = weekday
-                        newItemDraft = ""
-                    }
-                )
-            }
-            if (template.items.isEmpty() && addingWeekday != weekday) {
-                item {
-                    Text(
-                        "No exercise routine set.",
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        color = HpColors.muted,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-            }
-            itemsIndexed(template.items, key = { _, item -> item.id }) { index, item ->
-                val isDragging = draggedItemId == item.id
-                val sameDraggedDay = draggedWeekday == weekday
-                ExerciseTemplateItemRow(
-                    item = item,
-                    editing = editing,
-                    isDragging = isDragging,
-                    rowOffsetY = if (sameDraggedDay) {
-                        scheduleDragRowOffset(
-                            index = index,
-                            draggedIndex = draggedItemIndex,
-                            targetIndex = dragTargetIndex,
-                            draggedOffsetY = draggedItemOffsetY,
-                            rowHeight = exerciseItemRowHeight
-                        )
-                    } else {
-                        0f
-                    },
-                    draft = if (editingItemId == item.id) itemDraft else null,
-                    onBeginEdit = {
-                        commitItemEdit()
-                        commitNewItem()
-                        editingItemId = item.id
-                        editingItemWeekday = weekday
-                        itemDraft = item.text
-                    },
-                    onDraftChange = { itemDraft = it },
-                    onCommitDraft = { commitItemEdit() },
-                    onPositioned = { height ->
-                        if (height > 0) exerciseItemRowHeight = height
-                    },
-                    onDragStart = {
-                        if (editing) {
+            HpSettingsListPage(title = "Exercise") {
+                (1..7).forEach { weekday ->
+                    val template = viewModel.exerciseTemplateForWeekday(weekday)
+                    HpSettingsActionHeader(
+                        title = exerciseSectionTitle(weekday, template.title),
+                        titleClickEnabled = editing,
+                        onTitleClick = {
+                            labelEditorWeekday = weekday
+                            labelDraft = template.title
+                        },
+                        actionIcon = Icons.Outlined.Add,
+                        actionContentDescription = "Add exercise item",
+                        actionEnabled = editing,
+                        onAction = {
                             commitItemEdit()
                             commitNewItem()
-                            draggedItemId = item.id
-                            draggedWeekday = weekday
-                            draggedItemIndex = index
-                            dragTargetIndex = index
-                            draggedItemOffsetY = 0f
+                            addingWeekday = weekday
+                            newItemDraft = ""
                         }
-                    },
-                    onDragCancel = {
-                        draggedItemId = null
-                        draggedWeekday = 0
-                        draggedItemIndex = -1
-                        dragTargetIndex = -1
-                        draggedItemOffsetY = 0f
-                    },
-                    onDragEnd = {
-                        val draggedId = draggedItemId
-                        val fromIndex = template.items.indexOfFirst { it.id == draggedId }
-                        if (draggedWeekday == weekday && fromIndex in template.items.indices && dragTargetIndex in template.items.indices && fromIndex != dragTargetIndex) {
-                            viewModel.moveExerciseTemplateItem(weekday, fromIndex, dragTargetIndex)
-                        }
-                        draggedItemId = null
-                        draggedWeekday = 0
-                        draggedItemIndex = -1
-                        dragTargetIndex = -1
-                        draggedItemOffsetY = 0f
-                    },
-                    onDrag = { dragAmount ->
-                        if (draggedWeekday == weekday && draggedItemIndex != -1 && template.items.isNotEmpty()) {
-                            draggedItemOffsetY += dragAmount
-                            dragTargetIndex = ((draggedItemIndex * exerciseItemRowHeight + exerciseItemRowHeight / 2f + draggedItemOffsetY) / exerciseItemRowHeight)
-                                .roundToInt()
-                                .coerceIn(0, template.items.lastIndex)
-                        }
-                    },
-                    onDelete = { viewModel.deleteExerciseTemplateItem(weekday, item.id) }
-                )
-            }
-            if (addingWeekday == weekday) {
-                item {
-                    ExerciseNewItemRow(
-                        draft = newItemDraft,
-                        onDraftChange = { newItemDraft = it },
-                        onCommit = { commitNewItem() }
                     )
+                    if (template.items.isEmpty() && addingWeekday != weekday) {
+                        Text(
+                            "No exercise routine set.",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = HpTheme.spacing.md),
+                            color = HpColors.muted,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    template.items.forEachIndexed { index, item ->
+                        val isDragging = draggedItemId == item.id
+                        val sameDraggedDay = draggedWeekday == weekday
+                        ExerciseTemplateItemRow(
+                            item = item,
+                            editing = editing,
+                            isDragging = isDragging,
+                            rowOffsetY = if (sameDraggedDay) {
+                                scheduleDragRowOffset(
+                                    index = index,
+                                    draggedIndex = draggedItemIndex,
+                                    targetIndex = dragTargetIndex,
+                                    draggedOffsetY = draggedItemOffsetY,
+                                    rowHeight = exerciseItemRowHeight
+                                )
+                            } else {
+                                0f
+                            },
+                            draft = if (editingItemId == item.id) itemDraft else null,
+                            onBeginEdit = {
+                                commitItemEdit()
+                                commitNewItem()
+                                editingItemId = item.id
+                                editingItemWeekday = weekday
+                                itemDraft = item.text
+                            },
+                            onDraftChange = { itemDraft = it },
+                            onCommitDraft = { commitItemEdit() },
+                            onPositioned = { height ->
+                                if (height > 0) exerciseItemRowHeight = height
+                            },
+                            onDragStart = {
+                                if (editing) {
+                                    commitItemEdit()
+                                    commitNewItem()
+                                    draggedItemId = item.id
+                                    draggedWeekday = weekday
+                                    draggedItemIndex = index
+                                    dragTargetIndex = index
+                                    draggedItemOffsetY = 0f
+                                }
+                            },
+                            onDragCancel = {
+                                draggedItemId = null
+                                draggedWeekday = 0
+                                draggedItemIndex = -1
+                                dragTargetIndex = -1
+                                draggedItemOffsetY = 0f
+                            },
+                            onDragEnd = {
+                                val draggedId = draggedItemId
+                                val fromIndex = template.items.indexOfFirst { it.id == draggedId }
+                                if (draggedWeekday == weekday && fromIndex in template.items.indices && dragTargetIndex in template.items.indices && fromIndex != dragTargetIndex) {
+                                    viewModel.moveExerciseTemplateItem(weekday, fromIndex, dragTargetIndex)
+                                }
+                                draggedItemId = null
+                                draggedWeekday = 0
+                                draggedItemIndex = -1
+                                dragTargetIndex = -1
+                                draggedItemOffsetY = 0f
+                            },
+                            onDrag = { dragAmount ->
+                                if (draggedWeekday == weekday && draggedItemIndex != -1 && template.items.isNotEmpty()) {
+                                    draggedItemOffsetY += dragAmount
+                                    dragTargetIndex = ((draggedItemIndex * exerciseItemRowHeight + exerciseItemRowHeight / 2f + draggedItemOffsetY) / exerciseItemRowHeight)
+                                        .roundToInt()
+                                        .coerceIn(0, template.items.lastIndex)
+                                }
+                            },
+                            onDelete = { viewModel.deleteExerciseTemplateItem(weekday, item.id) }
+                        )
+                    }
+                    if (addingWeekday == weekday) {
+                        ExerciseNewItemRow(
+                            draft = newItemDraft,
+                            onDraftChange = { newItemDraft = it },
+                            onCommit = { commitNewItem() }
+                        )
+                    }
                 }
-            }
-            item {
-                HorizontalDivider(color = HpColors.divider)
             }
         }
     }
@@ -2183,35 +2145,6 @@ internal fun ExerciseSettings(
                 }) { Text("Cancel") }
             }
         )
-    }
-}
-
-@Composable
-private fun ExerciseDayHeader(
-    weekday: Int,
-    title: String,
-    editing: Boolean,
-    onEditLabel: () -> Unit,
-    onAdd: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            exerciseSectionTitle(weekday, title),
-            modifier = Modifier
-                .weight(1f)
-                .clickable(enabled = editing, onClick = onEditLabel),
-            color = HpColors.ink,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold
-        )
-        if (editing) {
-            Icon(Icons.Outlined.Add, contentDescription = "Add exercise item", tint = HpColors.ink, modifier = Modifier.size(22.dp).clickable(onClick = onAdd))
-        }
     }
 }
 
@@ -2250,7 +2183,7 @@ private fun ExerciseTemplateItemRow(
             )
             .onGloballyPositioned { coordinates -> onPositioned(coordinates.size.height.toFloat()) }
             .heightIn(min = 42.dp)
-            .padding(horizontal = 16.dp, vertical = 2.dp),
+            .padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (draft != null) {
@@ -2307,13 +2240,23 @@ private fun ExerciseTemplateItemRow(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            if (editing) {
-                IconButton(modifier = Modifier.size(38.dp), onClick = onBeginEdit) {
-                    Icon(Icons.Outlined.Edit, contentDescription = "Edit exercise item", tint = HpColors.ink)
-                }
-                IconButton(modifier = Modifier.size(38.dp), onClick = onDelete) {
-                    Icon(Icons.Outlined.Delete, contentDescription = "Delete exercise item", tint = HpColors.ink)
-                }
+            IconButton(
+                modifier = Modifier
+                    .size(38.dp)
+                    .alpha(if (editing) 1f else 0f),
+                enabled = editing,
+                onClick = onBeginEdit
+            ) {
+                Icon(Icons.Outlined.Edit, contentDescription = if (editing) "Edit exercise item" else null, tint = HpColors.ink)
+            }
+            IconButton(
+                modifier = Modifier
+                    .size(38.dp)
+                    .alpha(if (editing) 1f else 0f),
+                enabled = editing,
+                onClick = onDelete
+            ) {
+                Icon(Icons.Outlined.Delete, contentDescription = if (editing) "Delete exercise item" else null, tint = HpColors.ink)
             }
         }
     }
@@ -2337,7 +2280,7 @@ private fun ExerciseNewItemRow(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 42.dp)
-            .padding(horizontal = 16.dp, vertical = 2.dp),
+            .padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         ExerciseItemTextField(
@@ -2435,20 +2378,48 @@ private fun ExerciseItemDetailPage(
 }
 
 @Composable
-internal fun NotificationSettings(
-    granted: Boolean,
-    onRequest: () -> Unit
+internal fun NotificationsSettings(
+    viewModel: HumanProgramViewModel,
+    notificationPermissionGranted: Boolean,
+    onRequestNotificationPermission: () -> Unit,
+    onReminderScheduleChanged: () -> Unit,
+    onReminderDeleted: (String) -> Unit
 ) {
     HpList {
         item {
-            HpSectionHeader("Notifications", null)
-            HpSettingsPanel {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (!granted) {
-                        HpSecondaryButton("Allow Notifications", onRequest)
-                    } else {
-                        HpPlainRow(Icons.Outlined.Notifications, "Notifications allowed", "")
-                    }
+            HpSettingsListPage(title = "Notifications") {
+                HpSettingsActionHeader(
+                    title = "${viewModel.reminders.count { it.isEnabled }} enabled reminders",
+                    actionIcon = Icons.Outlined.Notifications,
+                    actionContentDescription = "Allow notifications",
+                    actionEnabled = !notificationPermissionGranted,
+                    onAction = onRequestNotificationPermission
+                )
+                if (!notificationPermissionGranted) {
+                    Text("Notifications are off.", color = HpColors.muted)
+                }
+                if (viewModel.reminders.isEmpty()) {
+                    Text("No reminders yet.", color = HpColors.muted)
+                }
+                viewModel.reminders.forEach { reminder ->
+                    ReminderRow(
+                        reminder = reminder,
+                        mode = HpMode.READ,
+                        onTitleChange = { viewModel.renameReminder(reminder.id, it) },
+                        onTimeChange = {
+                            viewModel.updateReminderTime(reminder.id, it)
+                            onReminderScheduleChanged()
+                        },
+                        onToggle = {
+                            viewModel.toggleReminder(reminder.id)
+                            onReminderScheduleChanged()
+                        },
+                        onDelete = {
+                            onReminderDeleted(reminder.id)
+                            viewModel.deleteReminder(reminder.id)
+                            onReminderScheduleChanged()
+                        }
+                    )
                 }
             }
         }
@@ -2605,8 +2576,7 @@ internal fun ResetSettings(
     }
     HpList {
         item {
-            HpSectionHeader("Factory Reset", null)
-            HpSettingsPanel {
+            HpSettingsContentPage(title = "Factory Reset") {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Export a .hprgm backup first if you want to keep your data.", color = HpColors.ink, fontWeight = FontWeight.SemiBold)
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -2672,11 +2642,23 @@ internal fun AboutSettings(
     viewModel: HumanProgramViewModel,
     innerBackRequest: Int,
     onInnerBackAvailableChange: (Boolean) -> Unit,
-    onHiddenGateReady: () -> Unit
+    onHiddenGateReady: () -> Unit,
+    articleFontScale: Float,
+    onArticleOpenChange: (Boolean) -> Unit,
+    onArticleImageOpenChange: (Boolean) -> Unit
 ) {
     var showHiddenArticle by rememberSaveable { mutableStateOf(false) }
+    var selectedArticleImage by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(showHiddenArticle) {
         onInnerBackAvailableChange(showHiddenArticle)
+        onArticleOpenChange(showHiddenArticle)
+        if (!showHiddenArticle) {
+            selectedArticleImage = null
+            onArticleImageOpenChange(false)
+        }
+    }
+    LaunchedEffect(selectedArticleImage) {
+        onArticleImageOpenChange(selectedArticleImage != null)
     }
     LaunchedEffect(innerBackRequest) {
         if (innerBackRequest > 0) {
@@ -2684,100 +2666,136 @@ internal fun AboutSettings(
         }
     }
     if (showHiddenArticle) {
-        HpList {
-            item { HpTinyIconButton(Icons.AutoMirrored.Outlined.ArrowBack, "Back", onClick = { showHiddenArticle = false }) }
-            item {
-                HpSectionHeader("Habit", "Adapted from Wikipedia")
-                HpSettingsPanel {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(170.dp)
-                                .clip(RoundedCornerShape(18.dp))
-                                .background(HpColors.accentSoft),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Outlined.CheckCircle, contentDescription = null, tint = HpColors.accent, modifier = Modifier.size(44.dp))
-                        }
-                        Text("A habit is a routine behavior that is repeated regularly and can happen with little conscious thought.", color = HpColors.ink, fontWeight = FontWeight.SemiBold)
-                        Text("Habits have been studied in psychology and philosophy as learned patterns of thinking, feeling, and acting. Everyday routines can become automatic because repeated behavior strengthens the link between a situation and a response.", color = HpColors.muted)
-                        Text("Formation", color = HpColors.ink, fontWeight = FontWeight.SemiBold)
-                        Text("Habit formation happens when a behavior is repeated in a stable context. A cue, a repeated action, and a reward can make the behavior easier to repeat over time. Research often describes this as increasing automaticity.", color = HpColors.muted)
-                        Text("Goals", color = HpColors.ink, fontWeight = FontWeight.SemiBold)
-                        Text("Goals can start a habit by giving a reason to repeat an action. Once the habit is learned, the cue and context may be enough to trigger the behavior even when the original goal is no longer active.", color = HpColors.muted)
-                        Text("Nervous and unwanted habits", color = HpColors.ink, fontWeight = FontWeight.SemiBold)
-                        Text("Some habits are linked to stress or nervousness, such as nail biting or fidgeting. Unwanted habits can also include procrastination, overspending, or other repeated behaviors that work against a person's intentions.", color = HpColors.muted)
-                        Text("Changing habits", color = HpColors.ink, fontWeight = FontWeight.SemiBold)
-                        Text("Changing a habit usually means noticing the cue, changing the routine, and making the new response rewarding enough to repeat. Repetition, context, and environment all matter.", color = HpColors.muted)
-                        Text("Source: Wikipedia, Habit", color = HpColors.muted)
-                    }
-                }
+        Box(Modifier.fillMaxSize()) {
+            OfflineArticleWebView(
+                fontScale = articleFontScale,
+                onImageSelected = { selectedArticleImage = it }
+            )
+            selectedArticleImage?.let { imagePath ->
+                NativeArticleImageViewer(
+                    assetPath = imagePath,
+                    onDismiss = { selectedArticleImage = null }
+                )
             }
         }
         return
     }
-    HpList(itemSpacing = HpTheme.spacing.xl) {
-        item { HpSectionHeader("About", null) }
+    HpList {
         item {
-            AboutListRow(
-                icon = Icons.Outlined.Info,
-                title = "Version",
-                trailing = "0.1.0",
-                onClick = {},
-                onDoubleClick = { showHiddenArticle = true }
-            )
-        }
-        item {
-            AboutListRow(
-                icon = Icons.Outlined.Settings,
-                title = "Build",
-                trailing = "debug",
-                onClick = {}
-            )
-        }
-        item {
-            AboutListRow(
-                icon = Icons.Outlined.Info,
-                title = "David Jurek",
-                trailing = null,
-                onClick = {},
-                onDoubleClick = onHiddenGateReady
+            HpSettingsMenuPage(
+                sections = listOf(
+                    HpSettingsMenuSection(
+                        title = "About",
+                        items = listOf(
+                            HpSettingsMenuItem(
+                                icon = Icons.Outlined.Info,
+                                title = "Version",
+                                trailing = "0.1.0",
+                                onClick = {},
+                                onDoubleClick = { showHiddenArticle = true }
+                            ),
+                            HpSettingsMenuItem(
+                                icon = Icons.Outlined.Settings,
+                                title = "Build",
+                                trailing = "debug",
+                                onClick = {}
+                            ),
+                            HpSettingsMenuItem(
+                                icon = Icons.Outlined.Info,
+                                title = "David Jurek",
+                                onClick = {},
+                                onDoubleClick = onHiddenGateReady
+                            )
+                        )
+                    )
+                )
             )
         }
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun AboutListRow(
-    icon: ImageVector,
-    title: String,
-    trailing: String?,
-    onClick: () -> Unit,
-    onDoubleClick: (() -> Unit)? = null
+private fun OfflineArticleWebView(
+    fontScale: Float,
+    onImageSelected: (String) -> Unit
 ) {
-    Row(
+    AndroidView(
+        modifier = Modifier.fillMaxSize(),
+        factory = { context ->
+            WebView(context).apply {
+                addJavascriptInterface(
+                    ArticleJavascriptBridge(onImageSelected),
+                    "HumanProgramArticle"
+                )
+                webViewClient = WebViewClient()
+                setBackgroundColor(AndroidColor.TRANSPARENT)
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = false
+                settings.allowFileAccess = true
+                settings.allowContentAccess = false
+                settings.setSupportZoom(true)
+                settings.builtInZoomControls = true
+                settings.displayZoomControls = false
+                loadUrl("file:///android_asset/article/index.html")
+            }
+        },
+        update = { webView ->
+            webView.evaluateJavascript("window.hpSetFontScale && window.hpSetFontScale(${fontScale});", null)
+        }
+    )
+}
+
+private class ArticleJavascriptBridge(
+    private val onImageSelected: (String) -> Unit
+) {
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    @JavascriptInterface
+    fun openImage(relativePath: String) {
+        mainHandler.post {
+            val cleanPath = relativePath.substringBefore("?").substringBefore("#")
+            if (cleanPath.startsWith("images/")) {
+                onImageSelected("article/$cleanPath")
+            }
+        }
+    }
+}
+
+@Composable
+private fun NativeArticleImageViewer(
+    assetPath: String,
+    onDismiss: () -> Unit
+) {
+    val zoomableState = rememberZoomableState()
+    val imageState = rememberSubSamplingImageState(
+        imageSource = SubSamplingImageSource.asset(assetPath),
+        zoomableState = zoomableState
+    )
+
+    Box(
         modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(HpTheme.radii.row))
-            .combinedClickable(
-                onClick = onClick,
-                onDoubleClick = onDoubleClick
-            )
-            .padding(horizontal = HpTheme.spacing.md, vertical = HpTheme.spacing.md),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(HpTheme.spacing.md)
+            .fillMaxSize()
+            .background(Color.Black),
+        contentAlignment = Alignment.Center
     ) {
-        Icon(icon, contentDescription = null, tint = HpColors.accent)
-        Text(
-            text = title,
-            modifier = Modifier.weight(1f),
-            color = HpColors.ink,
-            fontWeight = FontWeight.Medium
+        SubSamplingImage(
+            state = imageState,
+            contentDescription = null,
+            modifier = Modifier
+                .fillMaxSize()
+                .zoomable(zoomableState)
         )
-        if (trailing != null) {
-            Text(text = trailing, color = HpColors.muted)
+        TextButton(
+            onClick = onDismiss,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .statusBarsPadding()
+                .padding(14.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(Color.White.copy(alpha = 0.14f))
+                .border(1.dp, Color.White.copy(alpha = 0.28f), RoundedCornerShape(999.dp))
+        ) {
+            Text("Close", color = Color.White, fontWeight = FontWeight.SemiBold)
         }
     }
 }

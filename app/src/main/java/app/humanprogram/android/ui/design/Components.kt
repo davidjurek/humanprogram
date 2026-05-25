@@ -103,6 +103,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -214,7 +215,9 @@ internal fun HpSectionHeader(title: String, subtitle: String?) {
 internal data class HpSettingsMenuItem(
     val title: String,
     val icon: ImageVector,
-    val onClick: () -> Unit
+    val trailing: String? = null,
+    val onClick: () -> Unit,
+    val onDoubleClick: (() -> Unit)? = null
 )
 
 internal data class HpSettingsMenuSection(
@@ -447,6 +450,46 @@ internal fun HpSettingsContentPage(
 }
 
 @Composable
+internal fun HpSettingsActionHeader(
+    title: String,
+    titleClickEnabled: Boolean = false,
+    onTitleClick: () -> Unit = {},
+    actionIcon: ImageVector? = null,
+    actionContentDescription: String? = null,
+    actionEnabled: Boolean = false,
+    onAction: () -> Unit = {}
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = HpSettingsPageMetrics.switchRowVerticalPadding),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(HpSettingsPageMetrics.rowItemGap)
+    ) {
+        Text(
+            text = title,
+            modifier = Modifier
+                .weight(1f)
+                .clickable(enabled = titleClickEnabled, onClick = onTitleClick),
+            color = HpColors.ink,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold
+        )
+        if (actionIcon != null) {
+            IconButton(
+                modifier = Modifier
+                    .size(38.dp)
+                    .alpha(if (actionEnabled) 1f else 0f),
+                enabled = actionEnabled,
+                onClick = onAction
+            ) {
+                Icon(actionIcon, contentDescription = if (actionEnabled) actionContentDescription else null, tint = HpColors.ink)
+            }
+        }
+    }
+}
+
+@Composable
 private fun HpToggleSettingRow(
     title: String,
     checked: Boolean,
@@ -586,7 +629,10 @@ private fun HpSettingsMenuRow(item: HpSettingsMenuItem) {
             .fillMaxWidth()
             .height(HpSettingsPageMetrics.menuRowHeight)
             .clip(RoundedCornerShape(HpTheme.radii.row))
-            .clickable(onClick = item.onClick)
+            .combinedClickable(
+                onClick = item.onClick,
+                onDoubleClick = item.onDoubleClick
+            )
             .padding(start = HpSettingsPageMetrics.titleStartPadding),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(HpTheme.spacing.md)
@@ -594,10 +640,18 @@ private fun HpSettingsMenuRow(item: HpSettingsMenuItem) {
         Icon(item.icon, contentDescription = null, tint = HpColors.accent)
         Text(
             item.title,
+            modifier = Modifier.weight(1f),
             style = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp),
             color = HpColors.ink,
             fontWeight = FontWeight.Medium
         )
+        if (item.trailing != null) {
+            Text(
+                text = item.trailing,
+                modifier = Modifier.padding(end = HpSettingsPageMetrics.titleStartPadding),
+                color = HpColors.muted
+            )
+        }
     }
 }
 

@@ -36,6 +36,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.automirrored.outlined.FormatListBulleted
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.automirrored.outlined.Redo
 import androidx.compose.material.icons.automirrored.outlined.ShowChart
 import androidx.compose.material.icons.automirrored.outlined.Sort
@@ -62,10 +63,12 @@ import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Repeat
+import androidx.compose.material.icons.outlined.Remove
 import androidx.compose.material.icons.outlined.RestartAlt
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Save
+import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.AlertDialog
@@ -107,6 +110,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -164,6 +168,7 @@ fun HumanProgramApp(
     onBacklogSortPreferenceChanged: (String) -> Unit = {},
     onRequestBiometricUnlock: () -> Unit = {}
 ) {
+    val uriHandler = LocalUriHandler.current
     var route by rememberSaveable { mutableStateOf(HpRoute.TODAY) }
     var selectedProject by rememberSaveable { mutableStateOf("") }
     var selectedTaskId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -197,6 +202,9 @@ fun HumanProgramApp(
     var settingsDetail by rememberSaveable { mutableStateOf<SettingsDetail?>(null) }
     var settingsInnerBackAvailable by rememberSaveable { mutableStateOf(false) }
     var settingsInnerBackRequest by rememberSaveable { mutableIntStateOf(0) }
+    var settingsArticleOpen by rememberSaveable { mutableStateOf(false) }
+    var settingsArticleImageOpen by rememberSaveable { mutableStateOf(false) }
+    var settingsArticleFontScale by rememberSaveable { mutableStateOf(1f) }
     var mode by rememberSaveable { mutableStateOf(HpMode.READ) }
     var undoRedoMode by rememberSaveable { mutableStateOf(false) }
     var undoRedoMessage by rememberSaveable { mutableStateOf<String?>(null) }
@@ -274,6 +282,11 @@ fun HumanProgramApp(
         }
         if (settingsDetail != SettingsDetail.EXERCISE) {
             exerciseTemplateEditing = false
+        }
+        if (route != HpRoute.SETTINGS || settingsDetail != SettingsDetail.ABOUT) {
+            settingsArticleOpen = false
+            settingsArticleImageOpen = false
+            settingsArticleFontScale = 1f
         }
     }
 
@@ -477,7 +490,6 @@ fun HumanProgramApp(
         HpRoute.ROUTINES -> "Routines"
         HpRoute.REMINDERS -> "Reminders"
         HpRoute.STATS -> "Stats"
-        HpRoute.IMPORT_EXPORT -> "Import / Export"
         HpRoute.SEARCH -> "Search"
         HpRoute.SETTINGS -> settingsDetail?.label ?: "Settings"
         HpRoute.BACKLOG_TASK_FORM -> ""
@@ -947,7 +959,24 @@ fun HumanProgramApp(
                 },
                 HpCommandAction(Icons.Outlined.RestartAlt, "Refresh calendar", onClick = onRefreshCalendarEvents)
             )
-            HpRoute.SETTINGS -> listOf(
+            HpRoute.SETTINGS -> if (settingsDetail == SettingsDetail.ABOUT && settingsArticleOpen) {
+                listOf(
+                    backSlot,
+                    null,
+                    HpCommandAction(Icons.Outlined.Remove, "Decrease article font", label = "A-") {
+                        settingsArticleFontScale = (settingsArticleFontScale - 0.1f).coerceAtLeast(0.75f)
+                    },
+                    HpCommandAction(Icons.Outlined.TextFields, "Reset article font", label = "A") {
+                        settingsArticleFontScale = 1f
+                    },
+                    HpCommandAction(Icons.Outlined.Add, "Increase article font", label = "A+") {
+                        settingsArticleFontScale = (settingsArticleFontScale + 0.1f).coerceAtMost(1.45f)
+                    },
+                    HpCommandAction(Icons.AutoMirrored.Outlined.OpenInNew, "Open Wikipedia article") {
+                        uriHandler.openUri("https://en.wikipedia.org/wiki/Human_rights")
+                    }
+                )
+            } else listOf(
                 if (settingsDetail == SettingsDetail.SCHEDULE && (scheduleTemplateCreating || selectedScheduleTemplateId != null)) {
                     HpCommandAction(Icons.AutoMirrored.Outlined.ArrowBack, "Back") {
                         scheduleEditorCloseRequest += 1
@@ -1096,6 +1125,7 @@ fun HumanProgramApp(
         primaryContentDescription = primaryContentDescription,
         onPrimaryAction = primaryAction,
         routeActions = routeActions,
+        commandCapsuleVisible = !settingsArticleImageOpen,
         overflowExpanded = undoRedoMode,
         undoRedoMessage = undoRedoMessage,
         canEdit = supportsEditMode,
@@ -1289,15 +1319,6 @@ fun HumanProgramApp(
                 onReminderDeleted = onReminderDeleted
             )
             HpRoute.STATS -> StatsScreen(viewModel)
-            HpRoute.IMPORT_EXPORT -> ImportExportScreen(
-                viewModel = viewModel,
-                onExportHprgm = onExportHprgm,
-                onImportHprgmPreview = onImportHprgmPreview,
-                onImportBacklogCsv = onImportBacklogCsv,
-                onExportBacklogCsvTemplate = onExportBacklogCsvTemplate,
-                onPlannerDataReplacing = onPlannerDataReplacing,
-                onReminderScheduleChanged = onReminderScheduleChanged
-            )
         HpRoute.SEARCH -> SearchScreen(
                 viewModel = viewModel,
                 onOpenRoute = {
@@ -1421,7 +1442,10 @@ fun HumanProgramApp(
                 onHiddenGateReady = {
                     viewModel.requestHiddenSudokuGate()
                     if (viewModel.hiddenSudokuGateVisible) route = HpRoute.HIDDEN_GATE
-                }
+                },
+                articleFontScale = settingsArticleFontScale,
+                onArticleOpenChange = { settingsArticleOpen = it },
+                onArticleImageOpenChange = { settingsArticleImageOpen = it }
             )
             HpRoute.HIDDEN_GATE -> Unit
         }
