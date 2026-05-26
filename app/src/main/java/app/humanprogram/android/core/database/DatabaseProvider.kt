@@ -21,6 +21,14 @@ object DatabaseProvider {
         }
     }
 
+    fun reset(context: Context) {
+        synchronized(this) {
+            instance?.close()
+            instance = null
+            removeRoomCache(context.applicationContext)
+        }
+    }
+
     private fun removeRoomCache(context: Context) {
         val databaseFile = context.getDatabasePath("human_program.db")
         databaseFile.delete()

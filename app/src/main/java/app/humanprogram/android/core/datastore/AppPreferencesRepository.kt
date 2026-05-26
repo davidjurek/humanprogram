@@ -58,6 +58,13 @@ class AppPreferencesRepository(context: Context) {
         sharedPreferences.edit().putBoolean(key, value).apply()
     }
 
+    suspend fun clearForFactoryReset() {
+        sharedPreferences.edit()
+            .clear()
+            .putBoolean(Keys.OnboardingComplete, true)
+            .apply()
+    }
+
     private fun SharedPreferences.toAppPreferences(): AppPreferences {
         return AppPreferences(
             appearance = getString(Keys.Appearance, "system") ?: "system",

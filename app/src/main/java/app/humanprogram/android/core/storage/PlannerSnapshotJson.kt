@@ -46,7 +46,10 @@ object PlannerSnapshotJson {
             routines = json.optJSONArray("routines")?.toStringList().orEmpty(),
             projectBuckets = json.optJSONArray("projectBuckets")?.toStringList().orEmpty(),
             calendarLocalStates = json.optJSONArray("calendarLocalStates")?.toCalendarLocalStates().orEmpty(),
-            dailyTaskPages = json.optJSONObject("dailyTaskPages")?.toDailyTaskPages().orEmpty()
+            dailyTaskPages = json.optJSONObject("dailyTaskPages")?.toDailyTaskPages().orEmpty(),
+            recurringTemplatesDefined = json.has("recurringTemplates"),
+            scheduleBlocksDefined = json.has("scheduleBlocks"),
+            scheduleTemplatesDefined = json.has("scheduleTemplates")
         )
     }
 }

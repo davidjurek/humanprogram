@@ -32,7 +32,10 @@ data class PlannerSnapshot(
     val routines: List<String>,
     val projectBuckets: List<String> = emptyList(),
     val calendarLocalStates: List<CalendarLocalState> = emptyList(),
-    val dailyTaskPages: Map<LocalDate, List<DailyTask>> = emptyMap()
+    val dailyTaskPages: Map<LocalDate, List<DailyTask>> = emptyMap(),
+    val recurringTemplatesDefined: Boolean = true,
+    val scheduleBlocksDefined: Boolean = true,
+    val scheduleTemplatesDefined: Boolean = true
 )
 
 class PlannerSnapshotStore(context: Context) {

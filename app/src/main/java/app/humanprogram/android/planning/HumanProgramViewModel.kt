@@ -12,6 +12,7 @@ import app.humanprogram.android.core.notifications.NotificationScheduleRequest
 import app.humanprogram.android.core.notifications.NotificationScheduleRecurrence
 import app.humanprogram.android.gamebridge.EasterEggGateService
 import app.humanprogram.android.gamebridge.EasterEggGateState
+import app.humanprogram.android.core.export.HprgmAppState
 import app.humanprogram.android.core.export.HprgmEncryptionService
 import app.humanprogram.android.core.security.EncryptedSecret
 import app.humanprogram.android.core.security.PinHash
@@ -66,6 +67,11 @@ import org.json.JSONObject
 data class AppLockRecoveryResetResult(
     val credentialHash: PinHash,
     val recoveryPhraseHash: PinHash
+)
+
+data class HprgmImportApplyResult(
+    val appState: HprgmAppState?,
+    val privateFiles: Map<String, String>
 )
 
 data class PendingBacklogImport(
@@ -289,6 +295,9 @@ class HumanProgramViewModel(
     var hprgmIncludeGameSave by mutableStateOf(false)
         private set
 
+    private var hprgmExportAppState: HprgmAppState = HprgmAppState()
+    private var hprgmExportPrivateFiles: Map<String, String> = emptyMap()
+
     var hasPendingHprgmImport by mutableStateOf(false)
         private set
 
@@ -319,6 +328,8 @@ class HumanProgramViewModel(
     private var failedPinUnlockAttempts: Int = 0
     private var pinUnlockBlockedUntil: Instant? = null
     private var pendingHprgmImportSnapshot: PlannerSnapshot? = null
+    private var pendingHprgmImportAppState: HprgmAppState? = null
+    private var pendingHprgmImportPrivateFiles: Map<String, String> = emptyMap()
     private var unlockedPastEditDate by mutableStateOf<LocalDate?>(null)
 
     init {
@@ -533,6 +544,14 @@ class HumanProgramViewModel(
         hprgmIncludeGameSave = value
     }
 
+    fun prepareHprgmExportAppState(appState: HprgmAppState) {
+        hprgmExportAppState = appState
+    }
+
+    fun prepareHprgmPrivateFiles(files: Map<String, String>) {
+        hprgmExportPrivateFiles = files
+    }
+
     fun updateNewReminderTitle(value: String) {
         newReminderTitle = value
     }
@@ -611,6 +630,27 @@ class HumanProgramViewModel(
         securitySettingsUnlocked = false
         securitySettingsUnlockInput = ""
         securitySettingsUnlockMessage = ""
+    }
+
+    fun clearAppSettingsForFactoryReset() {
+        onboardingComplete = true
+        appLockEnabled = false
+        biometricUnlockEnabled = false
+        appLockTimeoutMinutes = 0
+        appLockCredentialType = SecurityCredentialType.PIN
+        appLockPinHash = null
+        recoveryPhraseHash = null
+        encryptedRecoveryPhrase = null
+        recoveryPhraseInput = ""
+        generatedRecoveryPhrase = ""
+        recoveryPhraseMessage = ""
+        securitySettingsUnlocked = false
+        securitySettingsUnlockInput = ""
+        securitySettingsUnlockMessage = ""
+        appLocked = false
+        appUnlockPinInput = ""
+        appUnlockMessage = ""
+        dateFormatPreference = "month_day_year"
     }
 
     fun updateResetConfirmationInput(value: String) {
@@ -2305,6 +2345,8 @@ class HumanProgramViewModel(
     fun writeHprgmExport(outputStream: OutputStream) {
         val basePackage = hprgmExportBuilder.build(
             snapshot = snapshotForPersistence(),
+            appState = hprgmExportAppState,
+            privateFiles = hprgmExportPrivateFiles,
             includeGameData = hprgmIncludeGameSave
         )
         val exportPackage = if (hprgmExportPassword.isNotBlank()) {
@@ -2334,9 +2376,11 @@ class HumanProgramViewModel(
 
     fun previewHprgmImport(inputStream: InputStream) {
         val preview = hprgmZipReader.preview(inputStream)
-        val planningJson = if (preview.encryptedPayloadJson != null) {
+        val packageFiles = if (preview.encryptedPayloadJson != null) {
             if (hprgmExportPassword.isBlank()) {
                 pendingHprgmImportSnapshot = null
+                pendingHprgmImportAppState = null
+                pendingHprgmImportPrivateFiles = emptyMap()
                 hasPendingHprgmImport = false
                 hprgmMessage = "Import preview needs the export password."
                 return
@@ -2345,51 +2389,74 @@ class HumanProgramViewModel(
                 hprgmEncryptionService.decryptPackageFiles(
                     encryptedPayloadJson = preview.encryptedPayloadJson,
                     password = hprgmExportPassword
-                )["planning.json"]
+                )
             }.getOrElse {
                 pendingHprgmImportSnapshot = null
+                pendingHprgmImportAppState = null
+                pendingHprgmImportPrivateFiles = emptyMap()
                 hasPendingHprgmImport = false
                 hprgmMessage = "Import preview failed: password was not accepted."
                 return
             }
         } else {
-            preview.planningJson
+            preview.packageFiles.ifEmpty {
+                mapOf(
+                    "planning.json" to preview.planningJson.orEmpty(),
+                    "app_state.json" to preview.appStateJson.orEmpty()
+                )
+            }
         }
+        val planningJson = packageFiles["planning.json"]
+        val appStateJson = packageFiles["app_state.json"]?.takeIf { it.isNotBlank() }
         hprgmMessage = if (preview.valid && planningJson != null) {
             runCatching {
                 PlannerSnapshotJson.decode(JSONObject(planningJson))
             }.fold(
                 onSuccess = { snapshot ->
                     pendingHprgmImportSnapshot = snapshot
+                    pendingHprgmImportAppState = appStateJson?.let { runCatching { HprgmAppState.fromJson(it) }.getOrNull() }
+                    pendingHprgmImportPrivateFiles = packageFiles.filterKeys { it.startsWith("private_files/") }
                     hasPendingHprgmImport = true
-                    "Import preview ready: ${snapshot.todayTasks.size} tasks and ${snapshot.backlogItems.size} backlog items. Apply to replace current planner data."
+                    val appStateMessage = if (pendingHprgmImportAppState != null) " App settings will also be restored." else ""
+                    "Import preview ready: ${snapshot.todayTasks.size} tasks and ${snapshot.backlogItems.size} backlog items. Apply to replace current planner data.$appStateMessage"
                 },
                 onFailure = {
                     pendingHprgmImportSnapshot = null
+                    pendingHprgmImportAppState = null
+                    pendingHprgmImportPrivateFiles = emptyMap()
                     hasPendingHprgmImport = false
                     "Import preview failed: planning data could not be read."
                 }
             )
         } else {
             pendingHprgmImportSnapshot = null
+            pendingHprgmImportAppState = null
+            pendingHprgmImportPrivateFiles = emptyMap()
             hasPendingHprgmImport = false
             "Import preview failed: ${preview.message}"
         }
     }
 
-    fun applyPendingHprgmImport(): Boolean {
+    fun applyPendingHprgmImport(): HprgmImportApplyResult? {
         val snapshot = pendingHprgmImportSnapshot
         if (snapshot == null) {
             hprgmMessage = "Preview an import file first."
-            return false
+            return null
         }
+        val appState = pendingHprgmImportAppState
+        val privateFiles = pendingHprgmImportPrivateFiles
 
         applySnapshot(snapshot)
         saveSnapshot()
         pendingHprgmImportSnapshot = null
+        pendingHprgmImportAppState = null
+        pendingHprgmImportPrivateFiles = emptyMap()
         hasPendingHprgmImport = false
         hprgmMessage = "Import applied: ${snapshot.todayTasks.size} tasks and ${snapshot.backlogItems.size} backlog items loaded."
-        return true
+        return HprgmImportApplyResult(
+            appState = appState,
+            privateFiles = privateFiles
+        )
     }
 
     fun reportHprgmError(message: String) {
@@ -2423,6 +2490,7 @@ class HumanProgramViewModel(
         scheduleTemplates.clear()
         reminders.clear()
         routines.clear()
+        projectBuckets.clear()
         calendarEvents.clear()
         calendarSources.clear()
         selectedCalendarSourceIds.clear()
@@ -2431,6 +2499,8 @@ class HumanProgramViewModel(
         undoStack.clear()
         redoStack.clear()
         pendingHprgmImportSnapshot = null
+        pendingHprgmImportAppState = null
+        pendingHprgmImportPrivateFiles = emptyMap()
         hasPendingHprgmImport = false
         hiddenSudokuGateVisible = false
         hiddenGameUnlocked = false
@@ -2439,9 +2509,6 @@ class HumanProgramViewModel(
         selectedDate = today
         unlockedPastEditDate = null
 
-        recurringTemplates.addAll(defaultRecurringTemplates())
-        scheduleTemplates.addAll(defaultScheduleTemplates())
-        refreshScheduleBlocksForSelectedDate()
         exerciseRoutine = ExerciseRoutine(
             title = "Today routine",
             items = emptyList()
@@ -2969,6 +3036,7 @@ class HumanProgramViewModel(
         backlogItems.clear()
         recurringTemplates.clear()
         scheduleBlocks.clear()
+        scheduleTemplates.clear()
         reminders.clear()
         routines.clear()
         projectBuckets.clear()
@@ -2983,18 +3051,10 @@ class HumanProgramViewModel(
                 .distinct()
                 .sorted()
         )
-        recurringTemplates.addAll(snapshot.recurringTemplates.ifEmpty { defaultRecurringTemplates() })
-        scheduleTemplates.addAll(
-            snapshot.scheduleTemplates.ifEmpty {
-                listOf(
-                    ScheduleTemplate(
-                        name = "Daily Schedule",
-                        assignedWeekdays = setOf(1, 2, 3, 4, 5, 6, 7),
-                        blocks = snapshot.scheduleBlocks.ifEmpty { defaultScheduleBlocks() }
-                    )
-                )
-            }
+        recurringTemplates.addAll(
+            if (snapshot.recurringTemplatesDefined) snapshot.recurringTemplates else defaultRecurringTemplates()
         )
+        scheduleTemplates.addAll(scheduleTemplatesFromSnapshot(snapshot))
         refreshScheduleBlocksForSelectedDate()
         exerciseRoutine = snapshot.exerciseRoutine
         reminders.addAll(snapshot.reminders)
@@ -3023,6 +3083,20 @@ class HumanProgramViewModel(
             calendarLocalStates = calendarLocalStates,
             dailyTaskPages = pages
         )
+    }
+
+    private fun scheduleTemplatesFromSnapshot(snapshot: PlannerSnapshot): List<ScheduleTemplate> {
+        return when {
+            snapshot.scheduleTemplatesDefined -> snapshot.scheduleTemplates
+            snapshot.scheduleBlocksDefined -> listOf(
+                ScheduleTemplate(
+                    name = "Daily Schedule",
+                    assignedWeekdays = setOf(1, 2, 3, 4, 5, 6, 7),
+                    blocks = snapshot.scheduleBlocks.ifEmpty { defaultScheduleBlocks() }
+                )
+            )
+            else -> defaultScheduleTemplates()
+        }
     }
 
     private fun completionSnapshots(): List<DailyCompletionSnapshot> {

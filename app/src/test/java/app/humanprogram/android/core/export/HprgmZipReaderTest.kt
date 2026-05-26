@@ -33,8 +33,11 @@ class HprgmZipReaderTest {
         val preview = reader.preview(ByteArrayInputStream(bytes.toByteArray()))
 
         assertTrue(preview.valid)
-        assertEquals(setOf("manifest.json", "planning.json"), preview.files)
+        assertEquals(setOf("app_state.json", "manifest.json", "planning.json"), preview.files)
         assertTrue(preview.planningJson?.contains("\"todayTasks\"") == true)
+        assertTrue(preview.appStateJson?.contains("\"appearance\"") == true)
+        assertEquals(preview.planningJson, preview.packageFiles["planning.json"])
+        assertEquals(preview.appStateJson, preview.packageFiles["app_state.json"])
     }
 
     @Test

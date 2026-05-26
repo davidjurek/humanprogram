@@ -8,7 +8,9 @@ data class HprgmImportPreview(
     val files: Set<String>,
     val message: String,
     val planningJson: String? = null,
-    val encryptedPayloadJson: String? = null
+    val appStateJson: String? = null,
+    val encryptedPayloadJson: String? = null,
+    val packageFiles: Map<String, String> = emptyMap()
 )
 
 class HprgmZipReader {
@@ -72,7 +74,9 @@ class HprgmZipReader {
             } else {
                 "Planning data could not be read."
             },
-            planningJson = planning
+            planningJson = planning,
+            appStateJson = contents["app_state.json"],
+            packageFiles = contents
         )
     }
 }

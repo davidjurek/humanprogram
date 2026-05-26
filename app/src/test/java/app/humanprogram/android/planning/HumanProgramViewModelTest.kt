@@ -1215,10 +1215,19 @@ class HumanProgramViewModelTest {
         val viewModel = HumanProgramViewModel()
         viewModel.updateNewTaskTitle("Reset target")
         viewModel.addManualTask()
+        viewModel.updateNewBacklogProject("Reset project")
+        viewModel.addProjectBucket()
+        viewModel.addNotificationReminder(NotificationReminder(title = "Reset reminder", reminderAt = "7:00 AM"))
+
+        assertTrue(viewModel.recurringTemplates.isNotEmpty())
+        assertTrue(viewModel.scheduleTemplates.isNotEmpty())
+        assertTrue(viewModel.scheduleBlocks.isNotEmpty())
 
         viewModel.factoryResetLocalPlannerData()
 
         assertTrue(viewModel.todayTasks.any { it.title == "Reset target" })
+        assertTrue("Reset project" in viewModel.projectBuckets)
+        assertTrue(viewModel.reminders.any { it.title == "Reset reminder" })
         assertEquals("Start reset first.", viewModel.resetMessage)
 
         viewModel.beginResetSequence()
@@ -1239,6 +1248,16 @@ class HumanProgramViewModelTest {
         assertTrue(viewModel.factoryResetLocalPlannerData())
 
         assertFalse(viewModel.todayTasks.any { it.title == "Reset target" })
+        assertFalse("Reset project" in viewModel.projectBuckets)
+        assertTrue(viewModel.todayTasks.isEmpty())
+        assertTrue(viewModel.recurringTemplates.isEmpty())
+        assertTrue(viewModel.scheduleTemplates.isEmpty())
+        assertTrue(viewModel.scheduleBlocks.isEmpty())
+        assertTrue(viewModel.reminders.isEmpty())
+        assertTrue(viewModel.snapshotForPersistence().recurringTemplates.isEmpty())
+        assertTrue(viewModel.snapshotForPersistence().scheduleTemplates.isEmpty())
+        assertTrue(viewModel.snapshotForPersistence().scheduleBlocks.isEmpty())
+        assertTrue(viewModel.snapshotForPersistence().dailyTaskPages.values.all { it.isEmpty() })
         assertEquals("Local planner data reset.", viewModel.resetMessage)
         assertFalse(viewModel.resetSequenceStarted)
     }

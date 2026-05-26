@@ -151,6 +151,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.viewmodel.compose.viewModel
+import app.humanprogram.android.core.export.HprgmAppState
 import app.humanprogram.android.core.security.PinHash
 import app.humanprogram.android.core.security.SecurityCredentialType
 import app.humanprogram.android.planning.AppLockRecoveryResetResult
@@ -167,6 +168,7 @@ import app.humanprogram.android.planning.model.ReminderRecurrence
 import app.humanprogram.android.planning.model.ScheduleBlock
 import app.humanprogram.android.planning.model.ScheduleTemplate
 import dev.darkokoa.datetimewheelpicker.WheelTimePicker
+import dev.darkokoa.datetimewheelpicker.core.WheelTextPicker
 import dev.darkokoa.datetimewheelpicker.core.format.TimeFormat
 import dev.darkokoa.datetimewheelpicker.core.format.timeFormatter
 import kotlinx.datetime.LocalTime as KotlinxLocalTime
@@ -215,12 +217,15 @@ internal fun SettingsScreen(
     onImportBacklogCsv: () -> Unit,
     onExportBacklogCsvTemplate: () -> Unit,
     onReminderDeleted: (String) -> Unit,
+    onHprgmAppStateImported: (HprgmAppState) -> Unit,
+    onHprgmPrivateFilesImported: (Map<String, String>) -> Unit,
     notificationCreateRequest: Int,
     notificationSaveRequest: Int,
     onNotificationCreatePageChange: (Boolean) -> Unit,
     importConfirmRequest: Int,
     onImportConfirmPageChange: (Boolean) -> Unit,
     onPlannerDataReplacing: () -> Unit,
+    onFactoryResetStateCleared: () -> Unit,
     onReminderScheduleChanged: () -> Unit,
     onAppLockPinSet: (PinHash) -> Unit,
     onRecoveryPhraseSet: (PinHash) -> Unit,
@@ -233,7 +238,8 @@ internal fun SettingsScreen(
     onHiddenGateReady: () -> Unit,
     articleFontScale: Float,
     onArticleOpenChange: (Boolean) -> Unit,
-    onArticleImageOpenChange: (Boolean) -> Unit
+    onArticleImageOpenChange: (Boolean) -> Unit,
+    onResetContinueToToday: () -> Unit
 ) {
     LaunchedEffect(detail) {
         onInnerBackAvailableChange(false)
@@ -313,6 +319,8 @@ internal fun SettingsScreen(
             onImportBacklogCsv = onImportBacklogCsv,
             onExportBacklogCsvTemplate = onExportBacklogCsvTemplate,
             onPlannerDataReplacing = onPlannerDataReplacing,
+            onHprgmAppStateImported = onHprgmAppStateImported,
+            onHprgmPrivateFilesImported = onHprgmPrivateFilesImported,
             onReminderScheduleChanged = onReminderScheduleChanged,
             innerBackRequest = innerBackRequest,
             onInnerBackAvailableChange = onInnerBackAvailableChange,
@@ -348,9 +356,11 @@ internal fun SettingsScreen(
             viewModel = viewModel,
             onOpenExport = { onDetail(SettingsDetail.EXPORT) },
             onPlannerDataReplacing = onPlannerDataReplacing,
+            onFactoryResetStateCleared = onFactoryResetStateCleared,
             onReminderScheduleChanged = onReminderScheduleChanged,
             innerBackRequest = innerBackRequest,
-            onInnerBackAvailableChange = onInnerBackAvailableChange
+            onInnerBackAvailableChange = onInnerBackAvailableChange,
+            onResetContinueToToday = onResetContinueToToday
         )
         SettingsDetail.ABOUT -> AboutSettings(
             viewModel = viewModel,
@@ -1793,32 +1803,39 @@ private fun ScheduleSleepTimeInputDialog(
     onDismiss: () -> Unit,
     onSave: (String) -> Unit
 ) {
-    val cleanInitial = initialTime.filter { it.isDigit() }.padStart(4, '0').takeLast(4)
-    var input by rememberSaveable(title, initialTime) { mutableStateOf(cleanInitial) }
-    val parsedTime = normalizeTimeInput(input)
+    val startTime = remember(initialTime) { initialTime.toScheduleWheelTime() }
+    var selectedTime by rememberSaveable(title, initialTime) { mutableStateOf(startTime.toScheduleTimeLabel()) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        title = { Text(title) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                ScheduleTimeInputBox(
-                    value = input,
-                    onValueChange = { input = it.filter { char -> char.isDigit() }.take(4) }
-                )
-                if (parsedTime == null) {
-                    Text(
-                        "Invalid time",
-                        color = Color(0xFFB3261E),
-                        style = MaterialTheme.typography.bodyLarge
+            WheelTimePicker(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(156.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .border(1.dp, HpColors.divider, RoundedCornerShape(18.dp))
+                    .padding(vertical = 6.dp),
+                startTime = startTime,
+                timeFormatter = remember {
+                    timeFormatter(
+                        timeFormat = TimeFormat.HOUR_24,
+                        formatHour = { hour -> hour.toString().padStart(2, '0') },
+                        formatMinute = { minute -> minute.toString().padStart(2, '0') }
                     )
+                },
+                size = DpSize(260.dp, 132.dp),
+                rowCount = 3,
+                textStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                textColor = HpColors.ink,
+                onSnappedTimeChanged = { snappedTime ->
+                    selectedTime = snappedTime.toScheduleTimeLabel()
                 }
-            }
+            )
         },
         confirmButton = {
-            TextButton(
-                enabled = parsedTime != null,
-                onClick = { parsedTime?.let(onSave) }
-            ) {
+            TextButton(onClick = { onSave(selectedTime) }) {
                 Text("Save")
             }
         },
@@ -1984,7 +2001,6 @@ private fun ScheduleDurationButton(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ScheduleDurationPickerSheet(
     title: String,
@@ -1993,51 +2009,46 @@ private fun ScheduleDurationPickerSheet(
     onDurationSelected: (Int) -> Unit
 ) {
     val options = remember { (5..720 step 5).toList() }
-    val selectedIndex = options.indexOf(selectedMinutes.coerceIn(5, 720)).coerceAtLeast(0)
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = (selectedIndex - 2).coerceAtLeast(0))
+    var selected by rememberSaveable(title, selectedMinutes) {
+        mutableIntStateOf(selectedMinutes.coerceIn(5, 720))
+    }
+    val initialIndex = remember(title, selectedMinutes) {
+        options.indexOf(selectedMinutes.coerceIn(5, 720)).coerceAtLeast(0)
+    }
 
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = HpColors.canvas) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                title,
-                color = HpColors.ink,
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(Modifier.height(24.dp))
-            LazyColumn(
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            WheelTextPicker(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(236.dp),
-                state = listState,
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                items(options) { minutes ->
-                    val selected = minutes == selectedMinutes
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(42.dp)
-                            .background(if (selected) HpColors.divider else Color.Transparent)
-                            .clickable { onDurationSelected(minutes) },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            durationPickerLabel(minutes),
-                            color = if (selected) HpColors.ink else HpColors.muted.copy(alpha = 0.55f),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal
-                        )
-                    }
+                    .height(156.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .border(1.dp, HpColors.divider, RoundedCornerShape(18.dp))
+                    .padding(vertical = 6.dp),
+                startIndex = initialIndex,
+                texts = options.map(::durationClockLabel),
+                rowCount = 3,
+                size = DpSize(220.dp, 132.dp),
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = HpColors.ink,
+                onScrollChanged = { index ->
+                    selected = options.getOrElse(index) { selected }
                 }
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onDurationSelected(selected) }) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
             }
         }
-    }
+    )
 }
 
 private fun defaultScheduleEditorBlocks(): List<ScheduleBlock> {
@@ -2182,6 +2193,16 @@ private fun normalizeTimeInput(raw: String): String? {
     val hour = padded.take(2).toIntOrNull() ?: return null
     val minute = padded.takeLast(2).toIntOrNull() ?: return null
     if (hour !in 0..23 || minute !in 0..59) return null
+    return "%02d:%02d".format(hour, minute)
+}
+
+private fun String.toScheduleWheelTime(): KotlinxLocalTime {
+    val normalized = normalizeTimeInput(this) ?: return KotlinxLocalTime(0, 0)
+    val parsed = runCatching { LocalTime.parse(normalized) }.getOrNull() ?: LocalTime.MIDNIGHT
+    return KotlinxLocalTime(parsed.hour, parsed.minute)
+}
+
+private fun KotlinxLocalTime.toScheduleTimeLabel(): String {
     return "%02d:%02d".format(hour, minute)
 }
 
@@ -3765,7 +3786,8 @@ private fun CredentialUnlockForm(
     onForgot: () -> Unit,
     onUnlock: () -> Unit,
     instruction: String? = null,
-    primaryLabel: String = "Unlock"
+    primaryLabel: String = "Unlock",
+    showForgotButton: Boolean = true
 ) {
     val credentialLabel = if (credentialType == SecurityCredentialType.PIN) "PIN" else "Password"
 
@@ -3813,12 +3835,14 @@ private fun CredentialUnlockForm(
             ) {
                 Text(primaryLabel)
             }
-            OutlinedButton(
-                onClick = onForgot,
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(HpTheme.radii.row)
-            ) {
-                Text("Forgot $credentialLabel")
+            if (showForgotButton) {
+                OutlinedButton(
+                    onClick = onForgot,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(HpTheme.radii.row)
+                ) {
+                    Text("Forgot $credentialLabel")
+                }
             }
         }
     }
@@ -4340,28 +4364,68 @@ internal fun ResetSettings(
     viewModel: HumanProgramViewModel,
     onOpenExport: () -> Unit,
     onPlannerDataReplacing: () -> Unit,
+    onFactoryResetStateCleared: () -> Unit,
     onReminderScheduleChanged: () -> Unit,
     innerBackRequest: Int,
-    onInnerBackAvailableChange: (Boolean) -> Unit
+    onInnerBackAvailableChange: (Boolean) -> Unit,
+    onResetContinueToToday: () -> Unit
 ) {
     var showConfirmDialog by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        onInnerBackAvailableChange(false)
+    var resetStep by rememberSaveable { mutableStateOf(FactoryResetStep.WARNING) }
+    LaunchedEffect(resetStep) {
+        onInnerBackAvailableChange(resetStep != FactoryResetStep.WARNING)
+    }
+    LaunchedEffect(innerBackRequest) {
+        if (innerBackRequest > 0 && resetStep == FactoryResetStep.UNLOCK) {
+            resetStep = FactoryResetStep.WARNING
+            viewModel.cancelResetSequence()
+            viewModel.clearSecuritySettingsUnlock()
+        }
+    }
+    if (resetStep == FactoryResetStep.SUCCESS) {
+        FactoryResetSuccessScreen(onContinue = onResetContinueToToday)
+        return
     }
     HpList {
         item {
             HpSettingsContentPage(title = "Factory Reset") {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Export a .hprgm backup first if you want to keep your data.", color = HpColors.ink, fontWeight = FontWeight.SemiBold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        HpSecondaryButton("Go to Export Backup", onOpenExport)
-                        HpSecondaryButton("Continue Factory Reset") {
+                when (resetStep) {
+                    FactoryResetStep.WARNING -> Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Text(
+                            "Factory reset will erase all content and settings in Human Program. Please ensure that you have backed up your data to prevent data loss.",
+                            color = HpColors.ink,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        FactoryResetCapsuleButton("Go to Backup Export", primary = false, onClick = onOpenExport)
+                        FactoryResetCapsuleButton("Continue with Factory Reset", primary = false) {
                             viewModel.beginResetSequence()
                             viewModel.acknowledgeResetExportReminder()
-                            showConfirmDialog = true
+                            viewModel.clearSecuritySettingsUnlock()
+                            resetStep = FactoryResetStep.UNLOCK
+                        }
+                        if (viewModel.resetMessage.isNotBlank()) Text(viewModel.resetMessage, color = HpColors.ink)
+                    }
+                    FactoryResetStep.UNLOCK -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        CredentialUnlockForm(
+                            credentialType = viewModel.appLockCredentialType,
+                            value = viewModel.securitySettingsUnlockInput,
+                            onValueChange = viewModel::updateSecuritySettingsUnlockInput,
+                            onForgot = {},
+                            onUnlock = {
+                                viewModel.unlockSecuritySettingsWithCredential()
+                                if (viewModel.securitySettingsUnlocked) {
+                                    showConfirmDialog = true
+                                }
+                            },
+                            instruction = "Enter your PIN or password to continue.",
+                            primaryLabel = "Continue",
+                            showForgotButton = false
+                        )
+                        if (viewModel.securitySettingsUnlockMessage.isNotBlank()) {
+                            Text(viewModel.securitySettingsUnlockMessage, color = HpColors.muted)
                         }
                     }
-                    if (viewModel.resetMessage.isNotBlank()) Text(viewModel.resetMessage, color = HpColors.ink)
+                    FactoryResetStep.SUCCESS -> Unit
                 }
             }
         }
@@ -4375,7 +4439,7 @@ internal fun ResetSettings(
             title = { Text("Confirm Factory Reset") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Type reset below to confirm the factory reset. You cannot undo this action.")
+                    Text("Type the word \"reset\" in the box below to confirm the factory reset. This action cannot be undone.")
                     HpFormTextField("Confirmation", viewModel.resetConfirmationInput, viewModel::updateResetConfirmationInput)
                 }
             },
@@ -4388,8 +4452,11 @@ internal fun ResetSettings(
                             onPlannerDataReplacing()
                         }
                         if (viewModel.factoryResetLocalPlannerData()) {
+                            viewModel.clearAppSettingsForFactoryReset()
+                            onFactoryResetStateCleared()
                             onReminderScheduleChanged()
                             showConfirmDialog = false
+                            resetStep = FactoryResetStep.SUCCESS
                         }
                     }
                 ) {
@@ -4407,6 +4474,74 @@ internal fun ResetSettings(
                 }
             }
         )
+    }
+}
+
+private enum class FactoryResetStep {
+    WARNING,
+    UNLOCK,
+    SUCCESS
+}
+
+@Composable
+private fun FactoryResetCapsuleButton(
+    label: String,
+    primary: Boolean,
+    onClick: () -> Unit
+) {
+    val modifier = Modifier
+        .fillMaxWidth()
+        .height(56.dp)
+    if (primary) {
+        Button(
+            onClick = onClick,
+            modifier = modifier,
+            shape = RoundedCornerShape(28.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = HpColors.accent, contentColor = Color.White)
+        ) {
+            Text(label, fontWeight = FontWeight.SemiBold)
+        }
+    } else {
+        OutlinedButton(
+            onClick = onClick,
+            modifier = modifier,
+            shape = RoundedCornerShape(28.dp)
+        ) {
+            Text(label, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+        }
+    }
+}
+
+@Composable
+private fun FactoryResetSuccessScreen(onContinue: () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = Color.White
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.RestartAlt,
+                contentDescription = null,
+                modifier = Modifier.size(96.dp),
+                tint = Color.Black
+            )
+            Spacer(Modifier.height(38.dp))
+            Text(
+                "Human Program has been reset back to its factory state.",
+                color = Color.Black,
+                fontWeight = FontWeight.Bold,
+                fontSize = 24.sp,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(34.dp))
+            FactoryResetCapsuleButton("Continue", primary = true, onClick = onContinue)
+        }
     }
 }
 

@@ -119,6 +119,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import app.humanprogram.android.core.export.HprgmAppState
 import app.humanprogram.android.core.security.PinHash
 import app.humanprogram.android.planning.HumanProgramViewModel
 import app.humanprogram.android.planning.calendar.DeviceCalendarEvent
@@ -151,9 +152,13 @@ fun HumanProgramApp(
     onImportHprgmPreview: () -> Unit = {},
     onImportBacklogCsv: () -> Unit = {},
     onExportBacklogCsvTemplate: () -> Unit = {},
+    onPrepareHprgmExport: () -> Unit = {},
     onReminderScheduleChanged: () -> Unit = {},
     onReminderDeleted: (String) -> Unit = {},
     onPlannerDataReplacing: () -> Unit = {},
+    onFactoryResetStateCleared: () -> Unit = {},
+    onHprgmAppStateImported: (HprgmAppState) -> Unit = {},
+    onHprgmPrivateFilesImported: (Map<String, String>) -> Unit = {},
     onRefreshCalendarEvents: () -> Unit = {},
     onToggleCalendarSource: (String) -> Unit = {},
     onOnboardingComplete: () -> Unit = {},
@@ -1476,17 +1481,23 @@ fun HumanProgramApp(
                 calendarPermissionGranted = calendarPermissionGranted,
                 onRequestCalendarPermission = onRequestCalendarPermission,
                 onToggleCalendarSource = onToggleCalendarSource,
-                onExportHprgm = onExportHprgm,
+                onExportHprgm = {
+                    onPrepareHprgmExport()
+                    onExportHprgm()
+                },
                 onImportHprgmPreview = onImportHprgmPreview,
                 onImportBacklogCsv = onImportBacklogCsv,
                 onExportBacklogCsvTemplate = onExportBacklogCsvTemplate,
                 onReminderDeleted = onReminderDeleted,
+                onHprgmAppStateImported = onHprgmAppStateImported,
+                onHprgmPrivateFilesImported = onHprgmPrivateFilesImported,
                 notificationCreateRequest = notificationCreateRequest,
                 notificationSaveRequest = notificationSaveRequest,
                 onNotificationCreatePageChange = { notificationCreateActive = it },
                 importConfirmRequest = importConfirmRequest,
                 onImportConfirmPageChange = { importConfirmActive = it },
                 onPlannerDataReplacing = onPlannerDataReplacing,
+                onFactoryResetStateCleared = onFactoryResetStateCleared,
                 onReminderScheduleChanged = onReminderScheduleChanged,
                 onAppLockPinSet = onAppLockPinSet,
                 onRecoveryPhraseSet = onRecoveryPhraseSet,
@@ -1502,7 +1513,12 @@ fun HumanProgramApp(
                 },
                 articleFontScale = settingsArticleFontScale,
                 onArticleOpenChange = { settingsArticleOpen = it },
-                onArticleImageOpenChange = { settingsArticleImageOpen = it }
+                onArticleImageOpenChange = { settingsArticleImageOpen = it },
+                onResetContinueToToday = {
+                    route = HpRoute.TODAY
+                    settingsDetail = null
+                    viewModel.goToToday()
+                }
             )
             HpRoute.HIDDEN_GATE -> Unit
         }

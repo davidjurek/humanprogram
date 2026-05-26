@@ -20,7 +20,11 @@ import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.ViewModelProvider
+import app.humanprogram.android.core.database.DatabaseProvider
+import app.humanprogram.android.core.datastore.AppPreferences
 import app.humanprogram.android.core.datastore.AppPreferencesRepository
+import app.humanprogram.android.core.export.HPRGM_NOTIFICATION_IMAGE_PREFIX
+import app.humanprogram.android.core.export.HprgmAppState
 import app.humanprogram.android.core.notifications.AndroidReminderScheduler
 import app.humanprogram.android.core.notifications.NotificationSchedulePlanner
 import app.humanprogram.android.core.security.AndroidKeystoreSecretEncryptor
@@ -31,6 +35,9 @@ import app.humanprogram.android.planning.calendar.AndroidCalendarEventReader
 import app.humanprogram.android.ui.HumanProgramApp
 import app.humanprogram.android.ui.theme.HumanProgramTheme
 import kotlinx.coroutines.launch
+import java.io.File
+import java.time.LocalDate
+import java.util.Base64
 import java.util.concurrent.Executor
 
 class MainActivity : ComponentActivity() {
@@ -45,6 +52,14 @@ class MainActivity : ComponentActivity() {
     private var dateFormatPreference by mutableStateOf("month_day_year")
     private var backlogViewPreference by mutableStateOf("tasks")
     private var backlogSortPreference by mutableStateOf("creation")
+    private var latestAppPreferences = AppPreferences(
+        appearance = "system",
+        fontChoice = "serif",
+        metadataVisibleByDefault = false,
+        showProjectBucket = false,
+        showTaskSource = true,
+        calendarViewMode = "month"
+    )
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -182,7 +197,7 @@ class MainActivity : ComponentActivity() {
                     onRequestCalendarPermission = ::requestCalendarPermission,
                     onExportHprgm = {
                         plannerViewModel.skipNextAppLockCheckForInternalFilePicker()
-                        exportHprgmLauncher.launch("human-program-export.hprgm")
+                        exportHprgmLauncher.launch("${LocalDate.now()}backup.hprgm")
                     },
                     onImportHprgmPreview = {
                         plannerViewModel.skipNextAppLockCheckForInternalFilePicker()
@@ -209,9 +224,30 @@ class MainActivity : ComponentActivity() {
                         plannerViewModel.skipNextAppLockCheckForInternalFilePicker()
                         exportBacklogTemplateLauncher.launch("human-program-backlog-import-template.csv")
                     },
+                    onPrepareHprgmExport = {
+                        plannerViewModel.prepareHprgmExportAppState(
+                            latestAppPreferences.toHprgmAppState(
+                                recoveryPhrasePlainTextOverride = plannerViewModel.generatedRecoveryPhrase
+                            )
+                        )
+                        plannerViewModel.prepareHprgmPrivateFiles(readHprgmPrivateFiles())
+                    },
                     onReminderScheduleChanged = ::syncReminderSchedule,
                     onReminderDeleted = reminderScheduler::cancel,
                     onPlannerDataReplacing = ::cancelCurrentReminderSchedules,
+                    onFactoryResetStateCleared = {
+                        appearancePreference = "system"
+                        dateFormatPreference = "month_day_year"
+                        backlogViewPreference = "tasks"
+                        backlogSortPreference = "creation"
+                        restoreHprgmPrivateFiles(emptyMap())
+                        DatabaseProvider.reset(applicationContext)
+                        lifecycleScope.launch {
+                            appPreferencesRepository.clearForFactoryReset()
+                        }
+                    },
+                    onHprgmAppStateImported = ::applyImportedHprgmAppState,
+                    onHprgmPrivateFilesImported = ::restoreHprgmPrivateFiles,
                     onRefreshCalendarEvents = ::refreshCalendarEvents,
                     onToggleCalendarSource = ::toggleCalendarSource,
                     onOnboardingComplete = {
@@ -431,9 +467,71 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun applyImportedHprgmAppState(appState: HprgmAppState) {
+        appearancePreference = appState.appearance
+        dateFormatPreference = appState.dateFormat
+        backlogViewPreference = appState.backlogView
+        backlogSortPreference = appState.backlogSort
+        lifecycleScope.launch {
+            appPreferencesRepository.setString(AppPreferencesRepository.Keys.Appearance, appState.appearance)
+            appPreferencesRepository.setString(AppPreferencesRepository.Keys.DateFormat, appState.dateFormat)
+            appPreferencesRepository.setString(AppPreferencesRepository.Keys.FontChoice, appState.fontChoice)
+            appPreferencesRepository.setBoolean(AppPreferencesRepository.Keys.MetadataVisibleByDefault, appState.metadataVisibleByDefault)
+            appPreferencesRepository.setBoolean(AppPreferencesRepository.Keys.ShowProjectBucket, appState.showProjectBucket)
+            appPreferencesRepository.setBoolean(AppPreferencesRepository.Keys.ShowTaskSource, appState.showTaskSource)
+            appPreferencesRepository.setString(AppPreferencesRepository.Keys.CalendarViewMode, appState.calendarViewMode)
+            appPreferencesRepository.setBoolean(AppPreferencesRepository.Keys.OnboardingComplete, appState.onboardingComplete)
+            appPreferencesRepository.setString(AppPreferencesRepository.Keys.SelectedCalendarIdsCsv, appState.selectedCalendarIdsCsv)
+            appPreferencesRepository.setBoolean(AppPreferencesRepository.Keys.AppLockEnabled, appState.appLockEnabled)
+            appPreferencesRepository.setBoolean(AppPreferencesRepository.Keys.BiometricUnlockEnabled, appState.biometricUnlockEnabled)
+            appPreferencesRepository.setString(AppPreferencesRepository.Keys.AppLockTimeoutMinutes, appState.appLockTimeoutMinutes.toString())
+            appPreferencesRepository.setString(AppPreferencesRepository.Keys.AppLockCredentialType, appState.appLockCredentialType)
+            appPreferencesRepository.setString(AppPreferencesRepository.Keys.AppLockVerifierScheme, appState.appLockVerifierScheme)
+            appPreferencesRepository.setString(AppPreferencesRepository.Keys.AppLockPinSaltBase64, appState.appLockPinSaltBase64)
+            appPreferencesRepository.setString(AppPreferencesRepository.Keys.AppLockPinHashBase64, appState.appLockPinHashBase64)
+            appPreferencesRepository.setString(AppPreferencesRepository.Keys.RecoveryPhraseEncryptionScheme, appState.recoveryPhraseEncryptionScheme)
+            appPreferencesRepository.setString(AppPreferencesRepository.Keys.RecoveryPhraseKeyAlias, appState.recoveryPhraseKeyAlias)
+            appPreferencesRepository.setString(AppPreferencesRepository.Keys.RecoveryPhraseNonceBase64, appState.recoveryPhraseNonceBase64)
+            appPreferencesRepository.setString(AppPreferencesRepository.Keys.RecoveryPhraseCiphertextBase64, appState.recoveryPhraseCiphertextBase64)
+            appPreferencesRepository.setString(AppPreferencesRepository.Keys.RecoveryPhraseFormat, appState.recoveryPhraseFormat)
+            appPreferencesRepository.setString(AppPreferencesRepository.Keys.RecoveryPhraseVerifierScheme, appState.recoveryPhraseVerifierScheme)
+            appPreferencesRepository.setString(AppPreferencesRepository.Keys.RecoveryPhraseSaltBase64, appState.recoveryPhraseSaltBase64)
+            appPreferencesRepository.setString(AppPreferencesRepository.Keys.RecoveryPhraseHashBase64, appState.recoveryPhraseHashBase64)
+            appPreferencesRepository.setString(AppPreferencesRepository.Keys.RecoveryPhrasePlainText, appState.recoveryPhrasePlainText)
+            appPreferencesRepository.setString(AppPreferencesRepository.Keys.BacklogView, appState.backlogView)
+            appPreferencesRepository.setString(AppPreferencesRepository.Keys.BacklogSort, appState.backlogSort)
+        }
+    }
+
+    private fun readHprgmPrivateFiles(): Map<String, String> {
+        val imageDir = File(filesDir, "notification_images")
+        val files = imageDir.listFiles()
+            ?.filter { it.isFile }
+            .orEmpty()
+        return files.associate { file ->
+            HPRGM_NOTIFICATION_IMAGE_PREFIX + file.name to Base64.getEncoder().encodeToString(file.readBytes())
+        }
+    }
+
+    private fun restoreHprgmPrivateFiles(privateFiles: Map<String, String>) {
+        val imageDir = File(filesDir, "notification_images")
+        imageDir.deleteRecursively()
+        imageDir.mkdirs()
+
+        privateFiles.forEach { (path, contentBase64) ->
+            if (!path.startsWith(HPRGM_NOTIFICATION_IMAGE_PREFIX)) return@forEach
+            val fileName = path.removePrefix(HPRGM_NOTIFICATION_IMAGE_PREFIX)
+            if (fileName.isBlank() || fileName.contains("/") || fileName.contains("\\")) return@forEach
+            runCatching {
+                File(imageDir, fileName).writeBytes(Base64.getDecoder().decode(contentBase64))
+            }
+        }
+    }
+
     private fun observeAppPreferences() {
         lifecycleScope.launch {
             appPreferencesRepository.preferences.collect { preferences ->
+                latestAppPreferences = preferences
                 appearancePreference = preferences.appearance
                 dateFormatPreference = preferences.dateFormat
                 plannerViewModel.updateDateFormatPreference(preferences.dateFormat)
@@ -510,4 +608,36 @@ class MainActivity : ComponentActivity() {
                 }
             )
     }
+}
+
+private fun AppPreferences.toHprgmAppState(recoveryPhrasePlainTextOverride: String): HprgmAppState {
+    return HprgmAppState(
+        appearance = appearance,
+        dateFormat = dateFormat,
+        fontChoice = fontChoice,
+        metadataVisibleByDefault = metadataVisibleByDefault,
+        showProjectBucket = showProjectBucket,
+        showTaskSource = showTaskSource,
+        calendarViewMode = calendarViewMode,
+        onboardingComplete = onboardingComplete,
+        selectedCalendarIdsCsv = selectedCalendarIdsCsv,
+        appLockEnabled = appLockEnabled,
+        biometricUnlockEnabled = biometricUnlockEnabled,
+        appLockTimeoutMinutes = appLockTimeoutMinutes,
+        appLockCredentialType = appLockCredentialType,
+        appLockVerifierScheme = appLockVerifierScheme,
+        appLockPinSaltBase64 = appLockPinSaltBase64,
+        appLockPinHashBase64 = appLockPinHashBase64,
+        recoveryPhraseEncryptionScheme = recoveryPhraseEncryptionScheme,
+        recoveryPhraseKeyAlias = recoveryPhraseKeyAlias,
+        recoveryPhraseNonceBase64 = recoveryPhraseNonceBase64,
+        recoveryPhraseCiphertextBase64 = recoveryPhraseCiphertextBase64,
+        recoveryPhraseFormat = recoveryPhraseFormat,
+        recoveryPhraseVerifierScheme = recoveryPhraseVerifierScheme,
+        recoveryPhraseSaltBase64 = recoveryPhraseSaltBase64,
+        recoveryPhraseHashBase64 = recoveryPhraseHashBase64,
+        recoveryPhrasePlainText = recoveryPhrasePlainTextOverride.ifBlank { recoveryPhrasePlainText },
+        backlogView = backlogView,
+        backlogSort = backlogSort
+    )
 }

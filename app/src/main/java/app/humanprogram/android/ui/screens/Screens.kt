@@ -140,6 +140,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import kotlin.math.roundToInt
 import androidx.lifecycle.viewmodel.compose.viewModel
+import app.humanprogram.android.core.export.HprgmAppState
 import app.humanprogram.android.core.security.PinHash
 import app.humanprogram.android.planning.HumanProgramViewModel
 import app.humanprogram.android.planning.calendar.DeviceCalendarEvent
@@ -530,17 +531,14 @@ internal fun ScheduleTimeline(
         TimelineEvent(
             time = event.timeLabel,
             title = event.title.ifBlank { "Untitled event" },
-            color = HpColors.calendarSoft,
+            color = Color(0xFF6879D0),
             startMinute = start,
             endMinute = end,
+            opaque = true,
             calendarEvent = event
         )
     }
     HpSoftPanel(contentPadding = 14.dp) {
-        if (events.isEmpty()) {
-            HpEmptyState("No schedule blocks or events loaded.", null, null)
-            return@HpSoftPanel
-        }
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
@@ -586,7 +584,16 @@ internal fun ScheduleTimeline(
                         .weight(1f)
                         .height(timelineHeight)
                 ) {
-                    timelineEventSegments(events).forEach { segment ->
+                    val eventSegments = timelineEventSegments(events)
+                    eventSegments.filter { it.event.calendarEvent == null }.forEach { segment ->
+                        TimelineEventBox(
+                            segment = segment,
+                            railWidth = railWidth,
+                            yForMinute = ::yForMinute,
+                            heightForMinutes = ::heightForMinutes
+                        )
+                    }
+                    eventSegments.filter { it.event.calendarEvent != null }.forEach { segment ->
                         TimelineEventBox(
                             segment = segment,
                             railWidth = railWidth,
@@ -608,7 +615,7 @@ internal fun ScheduleTimeline(
                             event = event,
                             modifier = Modifier.offset(
                                 x = railWidth + 10.dp,
-                                y = yForMinute(event.labelMinute()) - 10.dp
+                                y = yForMinute(event.startMinute.coerceIn(timelineStartHour * 60, timelineEndHour * 60))
                             )
                         )
                     }
@@ -667,14 +674,6 @@ private fun timelineEventSegments(events: List<TimelineEvent>): List<TimelineEve
         }
         .filter { it.endMinute > it.startMinute }
         .sortedBy { it.startMinute }
-}
-
-private fun TimelineEvent.labelMinute(): Int {
-    return if (wrapsMidnight) {
-        (startMinute + timelineEndHour * 60) / 2
-    } else {
-        (startMinute + endMinute) / 2
-    }
 }
 
 @Composable
@@ -741,13 +740,24 @@ private fun TimelineEventBox(
     val clippedStart = segment.startMinute.coerceIn(timelineStartHour * 60, timelineEndHour * 60)
     val clippedEnd = segment.endMinute.coerceAtLeast(segment.startMinute + 30).coerceIn(timelineStartHour * 60, timelineEndHour * 60)
     val backgroundColor = if (event.opaque) event.color else event.color.copy(alpha = 0.24f)
+    val shape = RoundedCornerShape(10.dp)
+    val calendarOutlineColor = Color.Black
+    val laneWidth = railWidth / 2f
+    val laneOffsetX = if (event.calendarEvent != null) laneWidth else 0.dp
     Row(
         modifier = Modifier
-            .width(railWidth)
-            .offset(y = yForMinute(clippedStart))
+            .width(laneWidth)
+            .offset(x = laneOffsetX, y = yForMinute(clippedStart))
             .height(heightForMinutes((clippedEnd - clippedStart).coerceAtLeast(30)))
-            .clip(RoundedCornerShape(10.dp))
+            .clip(shape)
             .background(backgroundColor)
+            .then(
+                if (event.calendarEvent != null) {
+                    Modifier.border(1.dp, calendarOutlineColor, shape)
+                } else {
+                    Modifier
+                }
+            )
             .padding(horizontal = 8.dp, vertical = 7.dp),
         verticalAlignment = Alignment.Top
     ) {}
@@ -2481,6 +2491,8 @@ internal fun ImportScreen(
     onImportBacklogCsv: () -> Unit,
     onExportBacklogCsvTemplate: () -> Unit,
     onPlannerDataReplacing: () -> Unit,
+    onHprgmAppStateImported: (HprgmAppState) -> Unit,
+    onHprgmPrivateFilesImported: (Map<String, String>) -> Unit,
     onReminderScheduleChanged: () -> Unit,
     innerBackRequest: Int,
     onInnerBackAvailableChange: (Boolean) -> Unit,
@@ -2516,36 +2528,69 @@ internal fun ImportScreen(
     }
 
     if (page == "text") {
-        HpList {
-            item {
-                HpSettingsContentPage(title = "Import from Text") {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        HpFormTextField(
-                            label = "Backlog items",
-                            value = textImportDraft,
-                            onValueChange = { textImportDraft = it },
-                            minLines = 6
-                        )
-                        HpSecondaryButton("Import Text", textImportDraft.isNotBlank()) {
-                            viewModel.previewBacklogTextImport(textImportDraft)
+        Box(Modifier.fillMaxSize()) {
+            HpList(
+                modifier = Modifier.padding(bottom = 96.dp)
+            ) {
+                item {
+                    HpSettingsContentPage(title = "Import from Text") {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            HpFormTextField(
+                                label = "Backlog items",
+                                value = textImportDraft,
+                                onValueChange = { textImportDraft = it },
+                                minLines = 6
+                            )
+                            if (viewModel.backlogCsvMessage.isNotBlank()) Text(viewModel.backlogCsvMessage, color = HpColors.muted)
                         }
-                        if (viewModel.backlogCsvMessage.isNotBlank()) Text(viewModel.backlogCsvMessage, color = HpColors.muted)
                     }
                 }
+            }
+            Button(
+                onClick = {
+                    viewModel.previewBacklogTextImport(textImportDraft)
+                },
+                enabled = textImportDraft.isNotBlank(),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = HpTheme.spacing.xl, vertical = HpTheme.spacing.md)
+                    .height(56.dp),
+                shape = RoundedCornerShape(HpTheme.radii.row),
+                colors = ButtonDefaults.buttonColors(containerColor = HpColors.accent, contentColor = Color.White)
+            ) {
+                Text("Import Text", fontWeight = FontWeight.SemiBold)
             }
         }
         return
     }
     if (page == "csv") {
-        HpList {
-            item {
-                HpSettingsContentPage(title = "Import from CSV") {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        HpSecondaryButton("Save CSV Import Template", onExportBacklogCsvTemplate)
-                        HpPrimaryButton("Choose CSV", onImportBacklogCsv)
-                        if (viewModel.backlogCsvMessage.isNotBlank()) Text(viewModel.backlogCsvMessage, color = HpColors.muted)
+        Box(Modifier.fillMaxSize()) {
+            HpList(
+                modifier = Modifier.padding(bottom = 96.dp)
+            ) {
+                item {
+                    HpSettingsContentPage(title = "Import from CSV") {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            HpSecondaryButton("Save CSV Import Template", onExportBacklogCsvTemplate)
+                            if (viewModel.backlogCsvMessage.isNotBlank()) Text(viewModel.backlogCsvMessage, color = HpColors.muted)
+                        }
                     }
                 }
+            }
+            Button(
+                onClick = onImportBacklogCsv,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = HpTheme.spacing.xl, vertical = HpTheme.spacing.md)
+                    .height(56.dp),
+                shape = RoundedCornerShape(HpTheme.radii.row),
+                colors = ButtonDefaults.buttonColors(containerColor = HpColors.accent, contentColor = Color.White)
+            ) {
+                Text("Choose CSV", fontWeight = FontWeight.SemiBold)
             }
         }
         return
@@ -2579,23 +2624,46 @@ internal fun ImportScreen(
         return
     }
     if (page == "backup") {
-        HpList {
-            item {
-                HpSettingsContentPage(title = "Import Backup") {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        HpFormTextField("Backup password", viewModel.hprgmExportPassword, viewModel::updateHprgmExportPassword)
-                        HpPrimaryButton("Choose Backup", onImportHprgmPreview)
-                        if (viewModel.hasPendingHprgmImport) {
-                            HpPrimaryButton("Apply Import") {
-                                onPlannerDataReplacing()
-                                if (viewModel.applyPendingHprgmImport()) {
-                                    onReminderScheduleChanged()
-                                }
-                            }
+        Box(Modifier.fillMaxSize()) {
+            HpList(
+                modifier = Modifier.padding(bottom = 96.dp)
+            ) {
+                item {
+                    HpSettingsContentPage(title = "Import Backup") {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            HpFormTextField("Backup password", viewModel.hprgmExportPassword, viewModel::updateHprgmExportPassword)
+                            if (viewModel.hprgmMessage.isNotBlank()) Text(viewModel.hprgmMessage, color = HpColors.muted)
                         }
-                        if (viewModel.hprgmMessage.isNotBlank()) Text(viewModel.hprgmMessage, color = HpColors.muted)
                     }
                 }
+            }
+            Button(
+                onClick = {
+                    if (viewModel.hasPendingHprgmImport) {
+                        onPlannerDataReplacing()
+                        val result = viewModel.applyPendingHprgmImport()
+                        if (result != null) {
+                            onHprgmPrivateFilesImported(result.privateFiles)
+                            result.appState?.let(onHprgmAppStateImported)
+                            onReminderScheduleChanged()
+                        }
+                    } else {
+                        onImportHprgmPreview()
+                    }
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = HpTheme.spacing.xl, vertical = HpTheme.spacing.md)
+                    .height(56.dp),
+                shape = RoundedCornerShape(HpTheme.radii.row),
+                colors = ButtonDefaults.buttonColors(containerColor = HpColors.accent, contentColor = Color.White)
+            ) {
+                Text(
+                    if (viewModel.hasPendingHprgmImport) "Apply Import" else "Choose Backup",
+                    fontWeight = FontWeight.SemiBold
+                )
             }
         }
         return
@@ -2735,18 +2803,62 @@ internal fun ExportScreen(
     viewModel: HumanProgramViewModel,
     onExportHprgm: () -> Unit
 ) {
-    HpList {
-        item {
-            HpSettingsContentPage(title = "Export") {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    HpPrimaryButton("Export Backup") {
-                        viewModel.updateHprgmExportPassword("")
-                        onExportHprgm()
+    Box(Modifier.fillMaxSize()) {
+        HpList(
+            modifier = Modifier.padding(bottom = 96.dp)
+        ) {
+            item {
+                HpSettingsContentPage(title = "Export") {
+                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Text(
+                            "Create a .hprgm backup that can restore Human Program data and settings.",
+                            color = HpColors.muted,
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            ExportBullet("Tasks, backlog, routines, and daily pages")
+                            ExportBullet("Recurring tasks, schedules, and exercise plans")
+                            ExportBullet("Reminders, notification attachments, and calendar state")
+                            ExportBullet("App settings, lock settings, and backup metadata")
+                        }
+                        if (viewModel.hprgmMessage.isNotBlank()) Text(viewModel.hprgmMessage, color = HpColors.muted)
                     }
-                    if (viewModel.hprgmMessage.isNotBlank()) Text(viewModel.hprgmMessage, color = HpColors.muted)
                 }
             }
         }
+        Button(
+            onClick = {
+                viewModel.updateHprgmExportPassword("")
+                onExportHprgm()
+            },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = HpTheme.spacing.xl, vertical = HpTheme.spacing.md)
+                .height(56.dp),
+            shape = RoundedCornerShape(HpTheme.radii.row),
+            colors = ButtonDefaults.buttonColors(containerColor = HpColors.accent, contentColor = Color.White)
+        ) {
+            Text("Export Backup", fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+@Composable
+private fun ExportBullet(text: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Text("•", color = HpColors.ink, style = MaterialTheme.typography.bodyLarge)
+        Text(
+            text,
+            modifier = Modifier.weight(1f),
+            color = HpColors.ink,
+            style = MaterialTheme.typography.bodyLarge
+        )
     }
 }
 
