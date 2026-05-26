@@ -159,7 +159,6 @@ fun HumanProgramApp(
     onOnboardingComplete: () -> Unit = {},
     onAppLockPinSet: (PinHash) -> Unit = {},
     onRecoveryPhraseSet: (PinHash) -> Unit = {},
-    onRecoveryPhraseRevoked: () -> Unit = {},
     onAppLockTimeoutChanged: (Int) -> Unit = {},
     onBiometricUnlockChanged: (Boolean) -> Unit = {},
     onAppearanceChanged: (String) -> Unit = {},
@@ -205,6 +204,11 @@ fun HumanProgramApp(
     var settingsArticleOpen by rememberSaveable { mutableStateOf(false) }
     var settingsArticleImageOpen by rememberSaveable { mutableStateOf(false) }
     var settingsArticleFontScale by rememberSaveable { mutableStateOf(1f) }
+    var notificationCreateRequest by rememberSaveable { mutableIntStateOf(0) }
+    var notificationCreateActive by rememberSaveable { mutableStateOf(false) }
+    var notificationSaveRequest by rememberSaveable { mutableIntStateOf(0) }
+    var importConfirmActive by rememberSaveable { mutableStateOf(false) }
+    var importConfirmRequest by rememberSaveable { mutableIntStateOf(0) }
     var mode by rememberSaveable { mutableStateOf(HpMode.READ) }
     var undoRedoMode by rememberSaveable { mutableStateOf(false) }
     var undoRedoMessage by rememberSaveable { mutableStateOf<String?>(null) }
@@ -288,6 +292,9 @@ fun HumanProgramApp(
             settingsArticleImageOpen = false
             settingsArticleFontScale = 1f
         }
+        if (route != HpRoute.SETTINGS || settingsDetail != SettingsDetail.IMPORT) {
+            importConfirmActive = false
+        }
     }
 
     LaunchedEffect(undoRedoMessage) {
@@ -307,6 +314,8 @@ fun HumanProgramApp(
         if (viewModel.appLocked) {
             AppLockScreen(
                 viewModel = viewModel,
+                onAppLockPinSet = onAppLockPinSet,
+                onRecoveryPhraseSet = onRecoveryPhraseSet,
                 onRequestBiometricUnlock = onRequestBiometricUnlock
             )
             return@CompositionLocalProvider
@@ -519,7 +528,6 @@ fun HumanProgramApp(
             HpRoute.REMINDERS -> ({ showReminderSheet = true })
             HpRoute.SETTINGS -> when (settingsDetail) {
                 SettingsDetail.EXERCISE -> ({ showExerciseSheet = true })
-                SettingsDetail.NOTIFICATIONS -> ({ showReminderSheet = true })
                 else -> null
             }
             else -> null
@@ -599,6 +607,13 @@ fun HumanProgramApp(
                 assignedDateInput = backlogEditAssignedDateDraft
             )
             backlogTaskEditing = false
+        }
+        fun deleteBacklogTaskEdit() {
+            val itemId = selectedBacklogItemId ?: return
+            viewModel.deleteBacklogItem(itemId)
+            selectedBacklogItemId = null
+            backlogTaskEditing = false
+            route = HpRoute.BACKLOG
         }
         fun selectedRecurringTemplate(): RecurringTaskTemplate? {
             return viewModel.recurringTemplates.firstOrNull { it.id == selectedRecurringTemplateId }
@@ -930,7 +945,12 @@ fun HumanProgramApp(
                 null,
                 null,
                 null,
-                null,
+                HpCommandAction(
+                    icon = Icons.Outlined.Delete,
+                    contentDescription = "Delete task",
+                    enabled = selectedBacklogItemId != null,
+                    onClick = { deleteBacklogTaskEdit() }
+                ),
                 if (backlogTaskEditing) {
                     HpCommandAction(
                         icon = Icons.Outlined.Check,
@@ -976,6 +996,31 @@ fun HumanProgramApp(
                         uriHandler.openUri("https://en.wikipedia.org/wiki/Human_rights")
                     }
                 )
+            } else if (settingsDetail == SettingsDetail.NOTIFICATIONS && notificationCreateActive) {
+                listOf(
+                    backSlot,
+                    null,
+                    null,
+                    null,
+                    null,
+                    HpCommandAction(Icons.Outlined.Save, "Save notification") {
+                        notificationSaveRequest += 1
+                    }
+                )
+            } else if (settingsDetail == SettingsDetail.IMPORT && importConfirmActive) {
+                listOf(
+                    backSlot,
+                    null,
+                    null,
+                    null,
+                    null,
+                    HpCommandAction(
+                        icon = Icons.Outlined.Check,
+                        contentDescription = "Import selected backlog items",
+                        enabled = viewModel.pendingBacklogImport != null,
+                        onClick = { importConfirmRequest += 1 }
+                    )
+                )
             } else listOf(
                 if (settingsDetail == SettingsDetail.SCHEDULE && (scheduleTemplateCreating || selectedScheduleTemplateId != null)) {
                     HpCommandAction(Icons.AutoMirrored.Outlined.ArrowBack, "Back") {
@@ -994,7 +1039,11 @@ fun HumanProgramApp(
                 null,
                 null,
                 null,
-                if (settingsDetail == SettingsDetail.RECURRING && recurringTaskSelectMode) {
+                if (settingsDetail == SettingsDetail.NOTIFICATIONS) {
+                    HpCommandAction(Icons.Outlined.Add, "Create notification") {
+                        notificationCreateRequest += 1
+                    }
+                } else if (settingsDetail == SettingsDetail.RECURRING && recurringTaskSelectMode) {
                     HpCommandAction(
                         icon = Icons.Outlined.Delete,
                         contentDescription = "Delete selected recurring tasks",
@@ -1030,7 +1079,11 @@ fun HumanProgramApp(
                 } else {
                     null
                 },
-                if (settingsDetail == SettingsDetail.SCHEDULE && (scheduleTemplateCreating || selectedScheduleTemplateId != null)) {
+                if (settingsDetail == SettingsDetail.NOTIFICATIONS) {
+                    HpCommandAction(Icons.Outlined.MoreHoriz, "Notification actions") {
+                        undoRedoMode = true
+                    }
+                } else if (settingsDetail == SettingsDetail.SCHEDULE && (scheduleTemplateCreating || selectedScheduleTemplateId != null)) {
                     if (scheduleTemplateEditing) {
                         HpCommandAction(
                             icon = Icons.Outlined.Save,
@@ -1428,11 +1481,15 @@ fun HumanProgramApp(
                 onImportBacklogCsv = onImportBacklogCsv,
                 onExportBacklogCsvTemplate = onExportBacklogCsvTemplate,
                 onReminderDeleted = onReminderDeleted,
+                notificationCreateRequest = notificationCreateRequest,
+                notificationSaveRequest = notificationSaveRequest,
+                onNotificationCreatePageChange = { notificationCreateActive = it },
+                importConfirmRequest = importConfirmRequest,
+                onImportConfirmPageChange = { importConfirmActive = it },
                 onPlannerDataReplacing = onPlannerDataReplacing,
                 onReminderScheduleChanged = onReminderScheduleChanged,
                 onAppLockPinSet = onAppLockPinSet,
                 onRecoveryPhraseSet = onRecoveryPhraseSet,
-                onRecoveryPhraseRevoked = onRecoveryPhraseRevoked,
                 onAppLockTimeoutChanged = onAppLockTimeoutChanged,
                 onBiometricUnlockChanged = onBiometricUnlockChanged,
                 onAppearanceChanged = onAppearanceChanged,

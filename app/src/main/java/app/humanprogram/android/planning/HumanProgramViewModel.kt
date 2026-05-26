@@ -9,11 +9,15 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import app.humanprogram.android.core.notifications.NotificationScheduleRequest
+import app.humanprogram.android.core.notifications.NotificationScheduleRecurrence
 import app.humanprogram.android.gamebridge.EasterEggGateService
 import app.humanprogram.android.gamebridge.EasterEggGateState
 import app.humanprogram.android.core.export.HprgmEncryptionService
+import app.humanprogram.android.core.security.EncryptedSecret
 import app.humanprogram.android.core.security.PinHash
 import app.humanprogram.android.core.security.PinHashService
+import app.humanprogram.android.core.security.SecretEncryptor
+import app.humanprogram.android.core.security.SecurityCredentialType
 import app.humanprogram.android.core.export.HprgmExportBuilder
 import app.humanprogram.android.core.export.HprgmZipReader
 import app.humanprogram.android.core.export.HprgmZipWriter
@@ -22,6 +26,7 @@ import app.humanprogram.android.core.storage.PlannerSnapshotJson
 import app.humanprogram.android.core.storage.PlannerSnapshotStore
 import app.humanprogram.android.planning.backlog.BacklogCsvExporter
 import app.humanprogram.android.planning.backlog.BacklogCsvImporter
+import app.humanprogram.android.planning.backlog.BacklogImportPreview
 import app.humanprogram.android.planning.backlog.ProjectBucketService
 import app.humanprogram.android.planning.backlog.ProjectDeleteMode
 import app.humanprogram.android.planning.calendar.CalendarLocalState
@@ -48,6 +53,7 @@ import app.humanprogram.android.planning.stats.StreakCalculator
 import java.io.InputStream
 import java.io.OutputStream
 import java.security.SecureRandom
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -57,8 +63,25 @@ import java.time.format.DateTimeParseException
 import java.util.UUID
 import org.json.JSONObject
 
+data class AppLockRecoveryResetResult(
+    val credentialHash: PinHash,
+    val recoveryPhraseHash: PinHash
+)
+
+data class PendingBacklogImport(
+    val sourceLabel: String,
+    val preview: BacklogImportPreview
+)
+
+data class BacklogImportResult(
+    val importedCount: Int,
+    val notImportedCount: Int,
+    val rejectedRows: List<app.humanprogram.android.planning.backlog.BacklogImportRejection>
+)
+
 class HumanProgramViewModel(
-    private val snapshotStore: PlannerSnapshotStore? = null
+    private val snapshotStore: PlannerSnapshotStore? = null,
+    private val secretEncryptor: SecretEncryptor? = null
 ) : ViewModel() {
     private val today = LocalDate.now()
     private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
@@ -151,6 +174,15 @@ class HumanProgramViewModel(
     var backlogCsvMessage by mutableStateOf("")
         private set
 
+    var pendingBacklogImport by mutableStateOf<PendingBacklogImport?>(null)
+        private set
+
+    var pendingBacklogImportSelectedIds by mutableStateOf<Set<String>>(emptySet())
+        private set
+
+    var lastBacklogImportResult by mutableStateOf<BacklogImportResult?>(null)
+        private set
+
     var backlogCsvExportPreview by mutableStateOf("")
         private set
 
@@ -183,13 +215,27 @@ class HumanProgramViewModel(
     var biometricUnlockAvailable by mutableStateOf(false)
         private set
 
+    var appLockCredentialType by mutableStateOf(SecurityCredentialType.PIN)
+        private set
+
     var appLockPinInput by mutableStateOf("")
+        private set
+
+    var appLockPinConfirmInput by mutableStateOf("")
+        private set
+
+    var appLockCurrentCredentialInput by mutableStateOf("")
         private set
 
     var appLockPinMessage by mutableStateOf("")
         private set
 
     var appLocked by mutableStateOf(false)
+        private set
+
+    private var skipNextAppLockCheckForInternalFilePicker: Boolean = false
+
+    var recoveryCredentialResetRequired by mutableStateOf(false)
         private set
 
     var appUnlockPinInput by mutableStateOf("")
@@ -205,6 +251,18 @@ class HumanProgramViewModel(
         private set
 
     var recoveryPhraseMessage by mutableStateOf("")
+        private set
+
+    val recoveryPhraseEncryptedSecret: EncryptedSecret?
+        get() = encryptedRecoveryPhrase
+
+    var securitySettingsUnlockInput by mutableStateOf("")
+        private set
+
+    var securitySettingsUnlockMessage by mutableStateOf("")
+        private set
+
+    var securitySettingsUnlocked by mutableStateOf(false)
         private set
 
     var resetConfirmationInput by mutableStateOf("")
@@ -256,6 +314,7 @@ class HumanProgramViewModel(
 
     private var appLockPinHash: PinHash? = null
     private var recoveryPhraseHash: PinHash? = null
+    private var encryptedRecoveryPhrase: EncryptedSecret? = null
     private var lastUnlockedAt: Instant? = null
     private var failedPinUnlockAttempts: Int = 0
     private var pinUnlockBlockedUntil: Instant? = null
@@ -453,6 +512,19 @@ class HumanProgramViewModel(
         backlogCsvInput = value
     }
 
+    fun clearPendingBacklogImport() {
+        pendingBacklogImport = null
+        pendingBacklogImportSelectedIds = emptySet()
+    }
+
+    fun togglePendingBacklogImportSelection(itemId: String) {
+        pendingBacklogImportSelectedIds = if (itemId in pendingBacklogImportSelectedIds) {
+            pendingBacklogImportSelectedIds - itemId
+        } else {
+            pendingBacklogImportSelectedIds + itemId
+        }
+    }
+
     fun updateHprgmExportPassword(value: String) {
         hprgmExportPassword = value
     }
@@ -489,15 +561,56 @@ class HumanProgramViewModel(
     }
 
     fun updateAppLockPinInput(value: String) {
-        appLockPinInput = value.take(128)
+        appLockPinInput = when (appLockCredentialType) {
+            SecurityCredentialType.PIN -> value.filter { it.isDigit() }.take(20)
+            SecurityCredentialType.PASSWORD -> value.take(128)
+        }
+    }
+
+    fun updateAppLockPinConfirmInput(value: String) {
+        appLockPinConfirmInput = when (appLockCredentialType) {
+            SecurityCredentialType.PIN -> value.filter { it.isDigit() }.take(20)
+            SecurityCredentialType.PASSWORD -> value.take(128)
+        }
+    }
+
+    fun updateAppLockCurrentCredentialInput(value: String) {
+        appLockCurrentCredentialInput = when (appLockCredentialType) {
+            SecurityCredentialType.PIN -> value.filter { it.isDigit() }.take(20)
+            SecurityCredentialType.PASSWORD -> value.take(128)
+        }
+    }
+
+    fun updateAppLockCredentialType(type: SecurityCredentialType) {
+        appLockCredentialType = type
+        appLockPinInput = ""
+        appLockPinConfirmInput = ""
+        appLockCurrentCredentialInput = ""
+        appLockPinMessage = ""
     }
 
     fun updateAppUnlockPinInput(value: String) {
-        appUnlockPinInput = value.take(128)
+        appUnlockPinInput = when (appLockCredentialType) {
+            SecurityCredentialType.PIN -> value.filter { it.isDigit() }.take(20)
+            SecurityCredentialType.PASSWORD -> value.take(128)
+        }
     }
 
     fun updateRecoveryPhraseInput(value: String) {
         recoveryPhraseInput = value.lowercase().take(120)
+    }
+
+    fun updateSecuritySettingsUnlockInput(value: String) {
+        securitySettingsUnlockInput = when (appLockCredentialType) {
+            SecurityCredentialType.PIN -> value.filter { it.isDigit() }.take(20)
+            SecurityCredentialType.PASSWORD -> value.take(128)
+        }
+    }
+
+    fun clearSecuritySettingsUnlock() {
+        securitySettingsUnlocked = false
+        securitySettingsUnlockInput = ""
+        securitySettingsUnlockMessage = ""
     }
 
     fun updateResetConfirmationInput(value: String) {
@@ -553,9 +666,16 @@ class HumanProgramViewModel(
         biometricEnabled: Boolean,
         saltBase64: String,
         hashBase64: String,
+        credentialType: String = "",
+        verifierScheme: String = "",
         timeoutMinutes: Int,
         recoverySaltBase64: String = "",
         recoveryHashBase64: String = "",
+        recoveryVerifierScheme: String = "",
+        recoveryPhraseEncryptionScheme: String = "",
+        recoveryPhraseKeyAlias: String = "",
+        recoveryPhraseNonceBase64: String = "",
+        recoveryPhraseCiphertextBase64: String = "",
         recoveryPhrasePlainText: String = ""
     ) {
         appLockTimeoutMinutes = timeoutMinutes.coerceAtLeast(-1)
@@ -563,26 +683,52 @@ class HumanProgramViewModel(
         recoveryPhraseHash = if (recoverySaltBase64.isNotBlank() && recoveryHashBase64.isNotBlank()) {
             PinHash(
                 saltBase64 = recoverySaltBase64,
-                hashBase64 = recoveryHashBase64
+                hashBase64 = recoveryHashBase64,
+                credentialType = SecurityCredentialType.PASSWORD.name,
+                verifierScheme = recoveryVerifierScheme
+            )
+        } else {
+            null
+        }
+        encryptedRecoveryPhrase = if (
+            recoveryPhraseEncryptionScheme.isNotBlank() &&
+            recoveryPhraseKeyAlias.isNotBlank() &&
+            recoveryPhraseNonceBase64.isNotBlank() &&
+            recoveryPhraseCiphertextBase64.isNotBlank()
+        ) {
+            EncryptedSecret(
+                ciphertextBase64 = recoveryPhraseCiphertextBase64,
+                nonceBase64 = recoveryPhraseNonceBase64,
+                keyAlias = recoveryPhraseKeyAlias,
+                scheme = recoveryPhraseEncryptionScheme
             )
         } else {
             null
         }
         if (generatedRecoveryPhrase.isBlank()) {
-            generatedRecoveryPhrase = recoveryPhrasePlainText
+            val loadedPhrase = decryptRecoveryPhrase().orEmpty().ifBlank { recoveryPhrasePlainText }
+            if (loadedPhrase.isBlank() || loadedPhrase.isFourWordRecoveryPhrase()) {
+                generatedRecoveryPhrase = loadedPhrase
+            } else {
+                generatedRecoveryPhrase = ""
+                recoveryPhraseHash = null
+                encryptedRecoveryPhrase = null
+                recoveryPhraseMessage = "Old recovery phrase format was removed. Generate a new recovery phrase."
+            }
         }
         if (enabled && saltBase64.isNotBlank() && hashBase64.isNotBlank()) {
             val wasAlreadyEnabled = appLockEnabled
             appLockEnabled = true
+            val storedCredentialType = credentialType.toSecurityCredentialTypeOrDefault()
+            appLockCredentialType = storedCredentialType
             appLockPinHash = PinHash(
                 saltBase64 = saltBase64,
-                hashBase64 = hashBase64
+                hashBase64 = hashBase64,
+                credentialType = storedCredentialType.name,
+                verifierScheme = verifierScheme
             )
             if (!wasAlreadyEnabled && appLockTimeoutMinutes != -1) {
                 appLocked = true
-            }
-            if (appLockPinMessage.isBlank()) {
-                appLockPinMessage = "App lock PIN is saved on this device."
             }
         }
     }
@@ -1471,22 +1617,12 @@ class HumanProgramViewModel(
             backlogCsvMessage = ""
             return
         }
-        val preview = backlogCsvImporter.preview(backlogCsvInput)
-        if (preview.accepted.isNotEmpty()) {
-            backlogItems.addAll(preview.accepted)
-            refreshSelectedGeneratedTasks()
-            saveSnapshot()
-        }
-
-        backlogCsvMessage = "${preview.accepted.size} imported, ${preview.rejected.size} rejected"
-        if (preview.accepted.isNotEmpty()) {
-            backlogCsvInput = ""
-        }
+        previewBacklogTextImport(backlogCsvInput)
     }
 
     fun importBacklogCsv(csv: String) {
         backlogCsvInput = csv
-        importBacklogCsvPreviewAcceptedRows()
+        previewBacklogCsvImport(csv)
     }
 
     fun reportBacklogImportMessage(message: String) {
@@ -1494,6 +1630,22 @@ class HumanProgramViewModel(
     }
 
     fun importBacklogPlainText(text: String) {
+        previewBacklogTextImport(text)
+    }
+
+    fun previewBacklogCsvImport(csv: String) {
+        val preview = backlogCsvImporter.preview(csv)
+        pendingBacklogImport = PendingBacklogImport("CSV", preview)
+        pendingBacklogImportSelectedIds = preview.accepted.map { it.id }.toSet()
+        lastBacklogImportResult = null
+        backlogCsvMessage = if (preview.fatalError != null) {
+            "CSV rejected: ${preview.fatalError}"
+        } else {
+            "${preview.accepted.size} ready, ${preview.rejected.size} rejected"
+        }
+    }
+
+    fun previewBacklogTextImport(text: String) {
         val items = text
             .lines()
             .map { it.trim() }
@@ -1501,14 +1653,45 @@ class HumanProgramViewModel(
             .map { BacklogItem(title = it) }
 
         if (items.isEmpty()) {
+            pendingBacklogImport = PendingBacklogImport(
+                sourceLabel = "Text",
+                preview = BacklogImportPreview(emptyList(), emptyList(), fatalError = "No backlog items found.")
+            )
+            pendingBacklogImportSelectedIds = emptySet()
+            lastBacklogImportResult = null
             backlogCsvMessage = "No backlog items found."
             return
         }
 
-        backlogItems.addAll(items)
-        refreshSelectedGeneratedTasks()
-        saveSnapshot()
-        backlogCsvMessage = "${items.size} backlog items imported from text."
+        pendingBacklogImport = PendingBacklogImport(
+            sourceLabel = "Text",
+            preview = BacklogImportPreview(items, emptyList())
+        )
+        pendingBacklogImportSelectedIds = items.map { it.id }.toSet()
+        lastBacklogImportResult = null
+        backlogCsvMessage = "${items.size} ready, 0 rejected"
+    }
+
+    fun confirmPendingBacklogImport(): Boolean {
+        val pending = pendingBacklogImport ?: return false
+        val selectedItems = pending.preview.accepted.filter { it.id in pendingBacklogImportSelectedIds }
+        if (selectedItems.isNotEmpty()) {
+            backlogItems.addAll(selectedItems)
+            refreshSelectedGeneratedTasks()
+            saveSnapshot()
+        }
+
+        val notImported = pending.preview.rejected.size + pending.preview.accepted.count { it.id !in pendingBacklogImportSelectedIds }
+        backlogCsvMessage = "${selectedItems.size} imported, $notImported not imported"
+        lastBacklogImportResult = BacklogImportResult(
+            importedCount = selectedItems.size,
+            notImportedCount = notImported,
+            rejectedRows = pending.preview.rejected
+        )
+        pendingBacklogImport = null
+        pendingBacklogImportSelectedIds = emptySet()
+        backlogCsvInput = ""
+        return true
     }
 
     fun refreshBacklogCsvExportPreview() {
@@ -1564,6 +1747,25 @@ class HumanProgramViewModel(
         saveSnapshot()
     }
 
+    fun addNotificationReminder(reminder: NotificationReminder) {
+        if (reminder.title.trim().isEmpty() || reminder.reminderAt.trim().isEmpty()) return
+
+        val previous = reminders.toList()
+        reminders.add(reminder.copy(title = reminder.title.trim(), reminderAt = reminder.reminderAt.trim()))
+        recordEdit(PlannerEdit.ReplaceReminders(previous, reminders.toList()))
+        saveSnapshot()
+    }
+
+    fun updateNotificationReminder(reminder: NotificationReminder) {
+        val index = reminders.indexOfFirst { it.id == reminder.id }
+        if (index == -1 || reminder.title.trim().isEmpty() || reminder.reminderAt.trim().isEmpty()) return
+
+        val previous = reminders.toList()
+        reminders[index] = reminder.copy(title = reminder.title.trim(), reminderAt = reminder.reminderAt.trim())
+        recordEdit(PlannerEdit.ReplaceReminders(previous, reminders.toList()))
+        saveSnapshot()
+    }
+
     fun toggleReminder(reminderId: String) {
         val index = reminders.indexOfFirst { it.id == reminderId }
         if (index == -1) return
@@ -1615,18 +1817,163 @@ class HumanProgramViewModel(
     }
 
     fun setupAppLockPin(): PinHash? {
-        val pin = appLockPinInput
-        if (pin.length < 4) {
-            appLockPinMessage = "Use at least 4 characters."
+        if (recoveryCredentialResetRequired) {
+            appLockPinMessage = "Finish recovery reset from the lock screen."
+            return null
+        }
+        val credential = appLockPinInput
+        pinHashService.validateCredential(credential, appLockCredentialType)?.let { message ->
+            appLockPinMessage = message
             return null
         }
 
-        appLockPinHash = pinHashService.hash(pin)
+        appLockPinHash = pinHashService.hash(credential, appLockCredentialType)
         appLockEnabled = true
+        securitySettingsUnlocked = true
         lastUnlockedAt = Instant.now()
         appLockPinInput = ""
-        appLockPinMessage = "App lock PIN is saved on this device."
+        appLockPinMessage = ""
         return appLockPinHash
+    }
+
+    fun setupAppLockCredentialWithConfirmation(): AppLockRecoveryResetResult? {
+        if (appLockEnabled) {
+            appLockPinMessage = "Use Change PIN / Password to update your lock."
+            return null
+        }
+        return saveCredentialAndRotateRecovery(requireCurrentCredential = false)
+    }
+
+    fun changeAppLockCredentialWithConfirmation(): AppLockRecoveryResetResult? {
+        if (!appLockEnabled) {
+            appLockPinMessage = "Set a PIN or password first."
+            return null
+        }
+        return saveCredentialAndRotateRecovery(requireCurrentCredential = true)
+    }
+
+    fun verifyCurrentAppLockCredentialForChange(): Boolean {
+        val hash = appLockPinHash
+        if (!appLockEnabled || hash == null) {
+            appLockPinMessage = "Set a PIN or password first."
+            return false
+        }
+        return if (pinHashService.verify(appLockCurrentCredentialInput, hash)) {
+            appLockCurrentCredentialInput = ""
+            appLockPinMessage = ""
+            true
+        } else {
+            appLockCurrentCredentialInput = ""
+            appLockPinMessage = if (appLockCredentialType == SecurityCredentialType.PIN) {
+                "PIN rejected."
+            } else {
+                "Password rejected."
+            }
+            false
+        }
+    }
+
+    fun validateAppLockCredentialDraft(): Boolean {
+        pinHashService.validateCredential(appLockPinInput, appLockCredentialType)?.let { message ->
+            appLockPinMessage = message
+            return false
+        }
+        appLockPinMessage = ""
+        return true
+    }
+
+    fun changeAppLockCredentialAfterPriorVerified(): AppLockRecoveryResetResult? {
+        if (!appLockEnabled) {
+            appLockPinMessage = "Set a PIN or password first."
+            return null
+        }
+        return saveCredentialAndRotateRecovery(requireCurrentCredential = false)
+    }
+
+    private fun saveCredentialAndRotateRecovery(requireCurrentCredential: Boolean): AppLockRecoveryResetResult? {
+        if (requireCurrentCredential) {
+            val hash = appLockPinHash
+            if (hash == null || !pinHashService.verify(appLockCurrentCredentialInput, hash)) {
+                clearCredentialDrafts(clearCurrent = false)
+                appLockCurrentCredentialInput = ""
+                appLockPinMessage = if (appLockCredentialType == SecurityCredentialType.PIN) {
+                    "Current PIN rejected."
+                } else {
+                    "Current password rejected."
+                }
+                return null
+            }
+        }
+
+        val credential = appLockPinInput
+        pinHashService.validateCredential(credential, appLockCredentialType)?.let { message ->
+            appLockPinMessage = message
+            return null
+        }
+        if (credential != appLockPinConfirmInput) {
+            appLockPinMessage = if (appLockCredentialType == SecurityCredentialType.PIN) {
+                "PIN entries do not match."
+            } else {
+                "Password entries do not match."
+            }
+            return null
+        }
+
+        val recovery = createRecoveryPhraseHash() ?: return null
+        val credentialHash = pinHashService.hash(credential, appLockCredentialType)
+
+        appLockPinHash = credentialHash
+        appLockEnabled = true
+        securitySettingsUnlocked = true
+        lastUnlockedAt = Instant.now()
+        appLocked = false
+        clearCredentialDrafts(clearCurrent = true)
+        appLockPinMessage = ""
+
+        return AppLockRecoveryResetResult(
+            credentialHash = credentialHash,
+            recoveryPhraseHash = recovery
+        )
+    }
+
+    fun completeRecoveryCredentialReset(): AppLockRecoveryResetResult? {
+        if (!recoveryCredentialResetRequired) {
+            appLockPinMessage = "Enter your recovery phrase first."
+            return null
+        }
+
+        val credential = appLockPinInput
+        pinHashService.validateCredential(credential, appLockCredentialType)?.let { message ->
+            appLockPinMessage = message
+            return null
+        }
+        if (credential != appLockPinConfirmInput) {
+            appLockPinMessage = if (appLockCredentialType == SecurityCredentialType.PIN) {
+                "PIN entries do not match."
+            } else {
+                "Password entries do not match."
+            }
+            return null
+        }
+
+        val credentialHash = pinHashService.hash(credential, appLockCredentialType)
+        val phraseHash = createRecoveryPhraseHash() ?: return null
+
+        appLockPinHash = credentialHash
+        appLockEnabled = true
+        appLocked = false
+        securitySettingsUnlocked = true
+        lastUnlockedAt = Instant.now()
+        recoveryCredentialResetRequired = false
+        recoveryPhraseInput = ""
+        appUnlockMessage = ""
+        clearCredentialDrafts(clearCurrent = true)
+        appLockPinMessage = ""
+
+        return AppLockRecoveryResetResult(
+            credentialHash = credentialHash,
+            recoveryPhraseHash = phraseHash
+        )
     }
 
     fun generateRecoveryPhrase(): PinHash? {
@@ -1634,18 +1981,42 @@ class HumanProgramViewModel(
             recoveryPhraseMessage = "Set a PIN first."
             return null
         }
+        val encryptor = secretEncryptor
+        if (encryptor == null) {
+            recoveryPhraseMessage = "Recovery phrase encryption is not available."
+            return null
+        }
 
-        val phrase = buildRecoveryPhrase()
+        return createRecoveryPhraseHash()
+    }
+
+    private fun createRecoveryPhraseHash(): PinHash? {
+        val encryptedPhrase = runCatching {
+            val encryptor = secretEncryptor ?: error("Recovery phrase encryption is not available.")
+            val phrase = buildRecoveryPhrase()
+            val encrypted = encryptor.encrypt(
+                plaintext = phrase.toByteArray(Charsets.UTF_8),
+                associatedData = RecoveryPhraseAssociatedData
+            )
+            phrase to encrypted
+        }.getOrElse {
+            recoveryPhraseMessage = it.message ?: "Recovery phrase encryption failed."
+            return null
+        }
+        val phrase = encryptedPhrase.first
         generatedRecoveryPhrase = phrase
-        recoveryPhraseHash = pinHashService.hash(phrase)
+        recoveryPhraseHash = pinHashService.hashSecret(phrase, SecurityCredentialType.PASSWORD)
+        encryptedRecoveryPhrase = encryptedPhrase.second
         recoveryPhraseMessage = "Recovery phrase generated. Store it somewhere safe."
         return recoveryPhraseHash
     }
 
-    fun revokeRecoveryPhrase() {
-        generatedRecoveryPhrase = ""
-        recoveryPhraseHash = null
-        recoveryPhraseMessage = "Recovery phrase revoked."
+    private fun clearCredentialDrafts(clearCurrent: Boolean) {
+        appLockPinInput = ""
+        appLockPinConfirmInput = ""
+        if (clearCurrent) {
+            appLockCurrentCredentialInput = ""
+        }
     }
 
     fun testAppLockPin() {
@@ -1664,6 +2035,10 @@ class HumanProgramViewModel(
     }
 
     fun lockAppIfEnabled(now: Instant = Instant.now()) {
+        if (skipNextAppLockCheckForInternalFilePicker) {
+            skipNextAppLockCheckForInternalFilePicker = false
+            return
+        }
         if (!appLockEnabled) return
         if (appLockTimeoutMinutes == -1) return
 
@@ -1687,6 +2062,10 @@ class HumanProgramViewModel(
         appLocked = true
         appUnlockPinInput = ""
         appUnlockMessage = ""
+    }
+
+    fun skipNextAppLockCheckForInternalFilePicker() {
+        skipNextAppLockCheckForInternalFilePicker = true
     }
 
     fun unlockApp(now: Instant = Instant.now()) {
@@ -1721,6 +2100,30 @@ class HumanProgramViewModel(
         }
     }
 
+    fun unlockSecuritySettingsWithCredential() {
+        val hash = appLockPinHash
+        if (!appLockEnabled || hash == null) {
+            securitySettingsUnlocked = true
+            securitySettingsUnlockInput = ""
+            securitySettingsUnlockMessage = ""
+            return
+        }
+
+        if (pinHashService.verify(securitySettingsUnlockInput, hash)) {
+            securitySettingsUnlocked = true
+            securitySettingsUnlockInput = ""
+            securitySettingsUnlockMessage = ""
+        } else {
+            securitySettingsUnlocked = false
+            securitySettingsUnlockInput = ""
+            securitySettingsUnlockMessage = if (appLockCredentialType == SecurityCredentialType.PIN) {
+                "PIN rejected."
+            } else {
+                "Password rejected."
+            }
+        }
+    }
+
     fun unlockAppWithRecoveryPhrase() {
         val hash = recoveryPhraseHash
         if (hash == null) {
@@ -1729,10 +2132,9 @@ class HumanProgramViewModel(
         }
 
         if (pinHashService.verify(recoveryPhraseInput.trim().lowercase(), hash)) {
-            appLocked = false
-            lastUnlockedAt = Instant.now()
+            recoveryCredentialResetRequired = true
             recoveryPhraseInput = ""
-            appUnlockMessage = ""
+            appUnlockMessage = "Recovery phrase accepted. Set a new PIN or password."
         } else {
             recoveryPhraseInput = ""
             appUnlockMessage = "Recovery phrase rejected."
@@ -2065,37 +2467,98 @@ class HumanProgramViewModel(
         zoneId: ZoneId = ZoneId.systemDefault()
     ): List<NotificationScheduleRequest> {
         val currentDateTime = now.atZone(zoneId)
+        val currentLocalDateTime = currentDateTime.toLocalDateTime()
         val today = currentDateTime.toLocalDate()
         val currentTime = currentDateTime.toLocalTime()
 
         return reminders.mapNotNull { reminder ->
             val localTime = reminder.reminderAt.toLocalTimeOrNull() ?: return@mapNotNull null
-            val date = nextReminderDate(
-                recurrence = reminder.recurrence,
-                customWeekdays = reminder.customWeekdays,
-                today = today,
-                currentTime = currentTime,
-                reminderTime = localTime
-            )
+            val reminderDateTime = if (reminder.timeRule == "Every interval") {
+                nextIntervalReminderDateTime(
+                    reminder = reminder,
+                    today = today,
+                    currentTime = currentTime,
+                    fallbackStartTime = localTime
+                )
+            } else {
+                nextReminderDateTime(
+                    reminder = reminder,
+                    today = today,
+                    currentLocalDateTime = currentLocalDateTime,
+                    reminderTime = localTime
+                )
+            } ?: return@mapNotNull null
             NotificationScheduleRequest(
                 id = reminder.id,
                 title = reminder.title,
-                reminderAt = date.atTime(localTime).atZone(zoneId).toInstant(),
-                isEnabled = reminder.isEnabled
+                reminderAt = reminderDateTime.atZone(zoneId).toInstant(),
+                isEnabled = reminder.isEnabled,
+                repeatIntervalMillis = reminder.repeatIntervalMillis(),
+                message = reminder.message,
+                imageUri = reminder.imageUri,
+                recurrenceMode = reminder.scheduleRecurrenceMode(),
+                allowedWeekdays = reminder.allowedJavaWeekdays()
             )
         }
     }
 
-    private fun nextReminderDate(
-        recurrence: ReminderRecurrence,
-        customWeekdays: Set<Int>,
+    private fun nextIntervalReminderDateTime(
+        reminder: NotificationReminder,
         today: LocalDate,
         currentTime: LocalTime,
-        reminderTime: LocalTime
-    ): LocalDate {
-        val firstCandidate = if (reminderTime.isAfter(currentTime)) today else today.plusDays(1)
+        fallbackStartTime: LocalTime
+    ): java.time.LocalDateTime? {
+        val interval = reminder.intervalDuration()
+        val startTime = reminder.intervalStartTime.toLocalTimeOrNull() ?: fallbackStartTime
+        val firstDate = generateSequence(today) { it.plusDays(1) }
+            .first { date -> reminder.runsOnDate(date, today) }
+        if (firstDate != today || startTime.isAfter(currentTime)) return firstDate.atTime(startTime)
+
+        val minutesSinceStart = Duration.between(startTime, currentTime).toMinutes().coerceAtLeast(0)
+        val intervalMinutes = interval.toMinutes().coerceAtLeast(1)
+        val intervalsToAdd = (minutesSinceStart / intervalMinutes) + 1
+        return today.atTime(startTime).plusMinutes(intervalMinutes * intervalsToAdd)
+    }
+
+    private fun NotificationReminder.runsOnDate(date: LocalDate, today: LocalDate): Boolean {
         return when (recurrence) {
-            ReminderRecurrence.ONCE,
+            ReminderRecurrence.ONCE -> date == today
+            ReminderRecurrence.DAILY -> true
+            ReminderRecurrence.WEEKDAYS -> date.dayOfWeek.value in 1..5
+            ReminderRecurrence.CUSTOM -> {
+                val selectedDays = allowedJavaWeekdays().ifEmpty { setOf(1, 2, 3, 4, 5, 6, 7) }
+                date.dayOfWeek.value in selectedDays
+            }
+        }
+    }
+
+    private fun NotificationReminder.intervalDuration(): Duration {
+        val amount = intervalAmount.coerceAtLeast(1).toLong()
+        return when (intervalUnit) {
+            "hours" -> Duration.ofHours(amount)
+            else -> Duration.ofMinutes(amount)
+        }
+    }
+
+    private fun NotificationReminder.repeatIntervalMillis(): Long? {
+        if (timeRule != "Every interval") return null
+        return intervalDuration().toMillis().takeIf { it > 0 }
+    }
+
+    private fun nextReminderDateTime(
+        reminder: NotificationReminder,
+        today: LocalDate,
+        currentLocalDateTime: java.time.LocalDateTime,
+        reminderTime: LocalTime
+    ): java.time.LocalDateTime? {
+        if (reminder.recurrence == ReminderRecurrence.ONCE) {
+            val date = reminder.notificationDate.toLocalDateOrNull() ?: today
+            return date.atTime(reminderTime).takeIf { it.isAfter(currentLocalDateTime) }
+        }
+
+        val firstCandidate = if (today.atTime(reminderTime).isAfter(currentLocalDateTime)) today else today.plusDays(1)
+        val date = when (reminder.recurrence) {
+            ReminderRecurrence.ONCE -> firstCandidate
             ReminderRecurrence.DAILY -> firstCandidate
             ReminderRecurrence.WEEKDAYS -> generateSequence(firstCandidate) { it.plusDays(1) }
                 .first { date ->
@@ -2103,10 +2566,48 @@ class HumanProgramViewModel(
                     weekday in 1..5
                 }
             ReminderRecurrence.CUSTOM -> {
-                val selectedDays = customWeekdays.ifEmpty { setOf(1, 2, 3, 4, 5, 6, 7) }
+                val selectedDays = reminder.allowedJavaWeekdays().ifEmpty { setOf(1, 2, 3, 4, 5, 6, 7) }
                 generateSequence(firstCandidate) { it.plusDays(1) }
                     .first { date -> date.dayOfWeek.value in selectedDays }
             }
+        }
+        return date.atTime(reminderTime)
+    }
+
+    private fun NotificationReminder.scheduleRecurrenceMode(): NotificationScheduleRecurrence {
+        if (timeRule == "Every interval") return NotificationScheduleRecurrence.INTERVAL
+        return when (recurrence) {
+            ReminderRecurrence.ONCE -> NotificationScheduleRecurrence.NONE
+            ReminderRecurrence.DAILY -> NotificationScheduleRecurrence.DAILY
+            ReminderRecurrence.WEEKDAYS -> NotificationScheduleRecurrence.WEEKDAYS
+            ReminderRecurrence.CUSTOM -> NotificationScheduleRecurrence.CUSTOM_DAYS
+        }
+    }
+
+    private fun NotificationReminder.allowedJavaWeekdays(): Set<Int> {
+        return when (recurrence) {
+            ReminderRecurrence.WEEKDAYS -> setOf(1, 2, 3, 4, 5)
+            ReminderRecurrence.CUSTOM -> normalizedCustomWeekdays()
+            else -> emptySet()
+        }
+    }
+
+    private fun NotificationReminder.normalizedCustomWeekdays(): Set<Int> {
+        val selectedDays = customWeekdays.filter { it in 1..7 }.toSet()
+        if (selectedDays.isEmpty()) return emptySet()
+        val usesSettingsWeekdayNumbers = repeatType == "Weekly" || repeatType == "Custom"
+        return if (usesSettingsWeekdayNumbers) {
+            selectedDays.map { appWeekday -> if (appWeekday == 1) 7 else appWeekday - 1 }.toSet()
+        } else {
+            selectedDays
+        }
+    }
+
+    private fun String.toLocalDateOrNull(): LocalDate? {
+        return try {
+            LocalDate.parse(trim())
+        } catch (_: DateTimeParseException) {
+            null
         }
     }
 
@@ -2698,7 +3199,7 @@ class HumanProgramViewModel(
 
     private fun defaultScheduleBlocks(): List<ScheduleBlock> {
         return listOf(
-            ScheduleBlock("Sleep", "21:30-05:30"),
+            ScheduleBlock("Sleep", "21:30-05:30", colorHex = "#475C6C"),
             ScheduleBlock("Rise, gym, and ready", "05:30-07:30"),
             ScheduleBlock("Work", "07:30-15:30"),
             ScheduleBlock("Study", "16:30-20:30")
@@ -2769,7 +3270,7 @@ class HumanProgramViewModel(
         val withSleep = if (cleanBlocks.firstOrNull()?.title.equals("Sleep", ignoreCase = true)) {
             cleanBlocks
         } else {
-            listOf(ScheduleBlock("Sleep", "21:30-05:30")) + cleanBlocks
+            listOf(ScheduleBlock("Sleep", "21:30-05:30", colorHex = "#475C6C")) + cleanBlocks
         }
         var currentStart = withSleep.first().timeRange.substringAfter("-", "05:30").trim()
         return withSleep.mapIndexed { index, block ->
@@ -2825,11 +3326,20 @@ class HumanProgramViewModel(
     }
 
     private fun String.toLocalTimeOrNull(): LocalTime? {
-        return try {
-            LocalTime.parse(trim())
-        } catch (_: DateTimeParseException) {
-            null
+        val clean = trim()
+        val formatters = listOf(
+            DateTimeFormatter.ISO_LOCAL_TIME,
+            DateTimeFormatter.ofPattern("h:mm a"),
+            DateTimeFormatter.ofPattern("hh:mm a")
+        )
+        for (formatter in formatters) {
+            try {
+                return LocalTime.parse(clean.uppercase(), formatter)
+            } catch (_: DateTimeParseException) {
+                // Try the next supported notification time format.
+            }
         }
+        return null
     }
 
     private fun String.toCsvCell(): String {
@@ -2840,9 +3350,20 @@ class HumanProgramViewModel(
 
     private fun buildRecoveryPhrase(): String {
         val random = SecureRandom()
-        return (1..6)
+        return (1..4)
             .map { recoveryWords[random.nextInt(recoveryWords.size)] }
             .joinToString("-")
+    }
+
+    private fun decryptRecoveryPhrase(): String? {
+        val encryptedSecret = encryptedRecoveryPhrase ?: return null
+        val encryptor = secretEncryptor ?: return null
+        return runCatching {
+            encryptor.decrypt(
+                encryptedSecret = encryptedSecret,
+                associatedData = RecoveryPhraseAssociatedData
+            ).toString(Charsets.UTF_8)
+        }.getOrNull()
     }
 
     private val recoveryWords = listOf(
@@ -3018,6 +3539,8 @@ private val generatedTodaySourceTypes = setOf(
     DailyTaskSourceType.BACKLOG
 )
 
+private val RecoveryPhraseAssociatedData = "human-program-recovery-phrase-v1".toByteArray(Charsets.UTF_8)
+
 private fun DailyTask.generatedSourceKey(): String {
     return "${sourceType.name}:${sourceId ?: title}"
 }
@@ -3031,13 +3554,26 @@ private fun DailyTask.defaultSortPriority(): Int {
     }
 }
 
+private fun String.toSecurityCredentialTypeOrDefault(): SecurityCredentialType {
+    return runCatching { SecurityCredentialType.valueOf(ifBlank { SecurityCredentialType.PIN.name }) }
+        .getOrDefault(SecurityCredentialType.PIN)
+}
+
+private fun String.isFourWordRecoveryPhrase(): Boolean {
+    val parts = split("-")
+    return parts.size == 4 && parts.all { part ->
+        part.isNotBlank() && part.all { it.isLowerCase() }
+    }
+}
+
 class HumanProgramViewModelFactory(
-    private val snapshotStore: PlannerSnapshotStore
+    private val snapshotStore: PlannerSnapshotStore,
+    private val secretEncryptor: SecretEncryptor? = null
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(HumanProgramViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return HumanProgramViewModel(snapshotStore) as T
+            return HumanProgramViewModel(snapshotStore, secretEncryptor) as T
         }
 
         throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")

@@ -20,19 +20,14 @@ import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.ViewModelProvider
-import app.humanprogram.android.core.database.DatabaseProvider
 import app.humanprogram.android.core.datastore.AppPreferencesRepository
-import app.humanprogram.android.core.migration.SnapshotToRoomMigration
 import app.humanprogram.android.core.notifications.AndroidReminderScheduler
 import app.humanprogram.android.core.notifications.NotificationSchedulePlanner
+import app.humanprogram.android.core.security.AndroidKeystoreSecretEncryptor
 import app.humanprogram.android.core.storage.PlannerSnapshotStore
 import app.humanprogram.android.planning.HumanProgramViewModel
 import app.humanprogram.android.planning.HumanProgramViewModelFactory
 import app.humanprogram.android.planning.calendar.AndroidCalendarEventReader
-import app.humanprogram.android.planning.repository.BacklogRepository
-import app.humanprogram.android.planning.repository.DailyPageRepository
-import app.humanprogram.android.planning.repository.RecurringTaskRepository
-import app.humanprogram.android.planning.repository.ReminderRepository
 import app.humanprogram.android.ui.HumanProgramApp
 import app.humanprogram.android.ui.theme.HumanProgramTheme
 import kotlinx.coroutines.launch
@@ -140,15 +135,16 @@ class MainActivity : ComponentActivity() {
         plannerViewModel = ViewModelProvider(
             this,
             HumanProgramViewModelFactory(
-                snapshotStore = PlannerSnapshotStore(applicationContext)
+                snapshotStore = PlannerSnapshotStore(applicationContext),
+                secretEncryptor = AndroidKeystoreSecretEncryptor()
             )
         )[HumanProgramViewModel::class.java]
         plannerViewModel.updateNotificationPermissionStatus(hasNotificationPermission())
         plannerViewModel.updateCalendarPermissionStatus(hasCalendarPermission())
         refreshCalendarSources()
         refreshCalendarEvents()
-        migrateSnapshotToRoom()
         observeAppPreferences()
+        syncReminderSchedule()
 
         setContent {
             val darkTheme = when (appearancePreference) {
@@ -185,9 +181,11 @@ class MainActivity : ComponentActivity() {
                     onRequestNotificationPermission = ::requestNotificationPermission,
                     onRequestCalendarPermission = ::requestCalendarPermission,
                     onExportHprgm = {
+                        plannerViewModel.skipNextAppLockCheckForInternalFilePicker()
                         exportHprgmLauncher.launch("human-program-export.hprgm")
                     },
                     onImportHprgmPreview = {
+                        plannerViewModel.skipNextAppLockCheckForInternalFilePicker()
                         importHprgmLauncher.launch(
                             arrayOf(
                                 "application/octet-stream",
@@ -197,6 +195,7 @@ class MainActivity : ComponentActivity() {
                         )
                     },
                     onImportBacklogCsv = {
+                        plannerViewModel.skipNextAppLockCheckForInternalFilePicker()
                         importBacklogCsvLauncher.launch(
                             arrayOf(
                                 "text/csv",
@@ -207,6 +206,7 @@ class MainActivity : ComponentActivity() {
                         )
                     },
                     onExportBacklogCsvTemplate = {
+                        plannerViewModel.skipNextAppLockCheckForInternalFilePicker()
                         exportBacklogTemplateLauncher.launch("human-program-backlog-import-template.csv")
                     },
                     onReminderScheduleChanged = ::syncReminderSchedule,
@@ -230,6 +230,14 @@ class MainActivity : ComponentActivity() {
                                 true
                             )
                             appPreferencesRepository.setString(
+                                AppPreferencesRepository.Keys.AppLockCredentialType,
+                                pinHash.credentialType
+                            )
+                            appPreferencesRepository.setString(
+                                AppPreferencesRepository.Keys.AppLockVerifierScheme,
+                                pinHash.verifierScheme
+                            )
+                            appPreferencesRepository.setString(
                                 AppPreferencesRepository.Keys.AppLockPinSaltBase64,
                                 pinHash.saltBase64
                             )
@@ -241,6 +249,33 @@ class MainActivity : ComponentActivity() {
                     },
                     onRecoveryPhraseSet = { phraseHash ->
                         lifecycleScope.launch {
+                            val encryptedPhrase = plannerViewModel.recoveryPhraseEncryptedSecret
+                            if (encryptedPhrase != null) {
+                                appPreferencesRepository.setString(
+                                    AppPreferencesRepository.Keys.RecoveryPhraseEncryptionScheme,
+                                    encryptedPhrase.scheme
+                                )
+                                appPreferencesRepository.setString(
+                                    AppPreferencesRepository.Keys.RecoveryPhraseKeyAlias,
+                                    encryptedPhrase.keyAlias
+                                )
+                                appPreferencesRepository.setString(
+                                    AppPreferencesRepository.Keys.RecoveryPhraseNonceBase64,
+                                    encryptedPhrase.nonceBase64
+                                )
+                                appPreferencesRepository.setString(
+                                    AppPreferencesRepository.Keys.RecoveryPhraseCiphertextBase64,
+                                    encryptedPhrase.ciphertextBase64
+                                )
+                                appPreferencesRepository.setString(
+                                    AppPreferencesRepository.Keys.RecoveryPhraseFormat,
+                                    "four-words-dash-v1"
+                                )
+                            }
+                            appPreferencesRepository.setString(
+                                AppPreferencesRepository.Keys.RecoveryPhraseVerifierScheme,
+                                phraseHash.verifierScheme
+                            )
                             appPreferencesRepository.setString(
                                 AppPreferencesRepository.Keys.RecoveryPhraseSaltBase64,
                                 phraseHash.saltBase64
@@ -248,23 +283,6 @@ class MainActivity : ComponentActivity() {
                             appPreferencesRepository.setString(
                                 AppPreferencesRepository.Keys.RecoveryPhraseHashBase64,
                                 phraseHash.hashBase64
-                            )
-                            appPreferencesRepository.setString(
-                                AppPreferencesRepository.Keys.RecoveryPhrasePlainText,
-                                plannerViewModel.generatedRecoveryPhrase
-                            )
-                        }
-                    },
-                    onRecoveryPhraseRevoked = {
-                        plannerViewModel.revokeRecoveryPhrase()
-                        lifecycleScope.launch {
-                            appPreferencesRepository.setString(
-                                AppPreferencesRepository.Keys.RecoveryPhraseSaltBase64,
-                                ""
-                            )
-                            appPreferencesRepository.setString(
-                                AppPreferencesRepository.Keys.RecoveryPhraseHashBase64,
-                                ""
                             )
                             appPreferencesRepository.setString(
                                 AppPreferencesRepository.Keys.RecoveryPhrasePlainText,
@@ -399,6 +417,8 @@ class MainActivity : ComponentActivity() {
             reminderScheduler.cancel(reminder.id)
         }
 
+        if (!hasNotificationPermission()) return
+
         notificationSchedulePlanner.pendingRequests(
             requests = plannerViewModel.reminderScheduleRequests(),
             now = java.time.Instant.now()
@@ -408,23 +428,6 @@ class MainActivity : ComponentActivity() {
     private fun cancelCurrentReminderSchedules() {
         plannerViewModel.reminders.forEach { reminder ->
             reminderScheduler.cancel(reminder.id)
-        }
-    }
-
-    private fun migrateSnapshotToRoom() {
-        val database = DatabaseProvider.get(applicationContext)
-        val migration = SnapshotToRoomMigration(
-            backlogRepository = BacklogRepository(database.backlogDao()),
-            dailyPageRepository = DailyPageRepository(database.dailyPageDao()),
-            recurringTaskRepository = RecurringTaskRepository(database.recurringTaskDao()),
-            reminderRepository = ReminderRepository(database.notificationReminderDao())
-        )
-
-        lifecycleScope.launch {
-            migration.migrateTodaySnapshot(
-                snapshot = plannerViewModel.snapshotForPersistence(),
-                today = plannerViewModel.selectedDate
-            )
         }
     }
 
@@ -441,9 +444,16 @@ class MainActivity : ComponentActivity() {
                     biometricEnabled = preferences.biometricUnlockEnabled,
                     saltBase64 = preferences.appLockPinSaltBase64,
                     hashBase64 = preferences.appLockPinHashBase64,
+                    credentialType = preferences.appLockCredentialType,
+                    verifierScheme = preferences.appLockVerifierScheme,
                     timeoutMinutes = preferences.appLockTimeoutMinutes,
                     recoverySaltBase64 = preferences.recoveryPhraseSaltBase64,
                     recoveryHashBase64 = preferences.recoveryPhraseHashBase64,
+                    recoveryVerifierScheme = preferences.recoveryPhraseVerifierScheme,
+                    recoveryPhraseEncryptionScheme = preferences.recoveryPhraseEncryptionScheme,
+                    recoveryPhraseKeyAlias = preferences.recoveryPhraseKeyAlias,
+                    recoveryPhraseNonceBase64 = preferences.recoveryPhraseNonceBase64,
+                    recoveryPhraseCiphertextBase64 = preferences.recoveryPhraseCiphertextBase64,
                     recoveryPhrasePlainText = preferences.recoveryPhrasePlainText
                 )
                 plannerViewModel.loadSelectedCalendarSources(

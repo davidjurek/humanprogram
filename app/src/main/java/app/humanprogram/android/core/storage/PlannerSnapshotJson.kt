@@ -67,6 +67,27 @@ private fun List<NotificationReminder>.toRemindersJson(): JSONArray {
                 .put("id", reminder.id)
                 .put("title", reminder.title)
                 .put("reminderAt", reminder.reminderAt)
+                .put("message", reminder.message)
+                .put("sound", reminder.sound)
+                .put("imageUri", reminder.imageUri)
+                .put("repeatType", reminder.repeatType)
+                .put("runDays", reminder.runDays)
+                .put("timeRule", reminder.timeRule)
+                .put("notificationDate", reminder.notificationDate)
+                .put("selectedWeekdays", JSONArray(reminder.selectedWeekdays.sorted()))
+                .put("everyNDays", reminder.everyNDays)
+                .put("startDate", reminder.startDate)
+                .put("intervalAmount", reminder.intervalAmount)
+                .put("intervalUnit", reminder.intervalUnit)
+                .put("intervalStartTime", reminder.intervalStartTime)
+                .put("intervalWindowEnabled", reminder.intervalWindowEnabled)
+                .put("hourlyMinute", reminder.hourlyMinute)
+                .put("hourlyWindowEnabled", reminder.hourlyWindowEnabled)
+                .put("windowStartTime", reminder.windowStartTime)
+                .put("windowEndTime", reminder.windowEndTime)
+                .put("endsMode", reminder.endsMode)
+                .put("endDate", reminder.endDate)
+                .put("endAfterRings", reminder.endAfterRings)
                 .put("recurrence", reminder.recurrence.name)
                 .put("customWeekdays", JSONArray(reminder.customWeekdays.sorted()))
                 .put("isEnabled", reminder.isEnabled)
@@ -114,6 +135,7 @@ private fun List<ScheduleBlock>.toScheduleBlocksJson(): JSONArray {
             JSONObject()
                 .put("title", block.title)
                 .put("timeRange", block.timeRange)
+                .put("colorHex", block.colorHex)
         )
     }
     return array
@@ -233,7 +255,8 @@ private fun JSONArray.toScheduleBlocks(): List<ScheduleBlock> {
         val item = getJSONObject(index)
         ScheduleBlock(
             title = item.getString("title"),
-            timeRange = item.getString("timeRange")
+            timeRange = item.getString("timeRange"),
+            colorHex = item.optString("colorHex").takeIf { it.isNotBlank() && it != "null" }
         )
     }
 }
@@ -274,6 +297,27 @@ private fun JSONArray.toReminders(): List<NotificationReminder> {
             id = item.getString("id"),
             title = item.getString("title"),
             reminderAt = item.getString("reminderAt"),
+            message = item.optString("message"),
+            sound = item.optString("sound").ifBlank { "Default chime" },
+            imageUri = item.optString("imageUri").takeIf { it.isNotBlank() && it != "null" },
+            repeatType = item.optString("repeatType").ifBlank { "None" },
+            runDays = item.optString("runDays").ifBlank { "Every day" },
+            timeRule = item.optString("timeRule").ifBlank { "At one time" },
+            notificationDate = item.optString("notificationDate"),
+            selectedWeekdays = item.optJSONArray("selectedWeekdays")?.toIntSet().orEmpty(),
+            everyNDays = item.optInt("everyNDays", 3),
+            startDate = item.optString("startDate"),
+            intervalAmount = item.optInt("intervalAmount", 18),
+            intervalUnit = item.optString("intervalUnit").ifBlank { "minutes" },
+            intervalStartTime = item.optString("intervalStartTime"),
+            intervalWindowEnabled = item.optBoolean("intervalWindowEnabled", false),
+            hourlyMinute = item.optInt("hourlyMinute", 0),
+            hourlyWindowEnabled = item.optBoolean("hourlyWindowEnabled", false),
+            windowStartTime = item.optString("windowStartTime"),
+            windowEndTime = item.optString("windowEndTime"),
+            endsMode = item.optString("endsMode").ifBlank { "Never" },
+            endDate = item.optString("endDate"),
+            endAfterRings = item.optInt("endAfterRings", 10),
             recurrence = item.optString("recurrence")
                 .takeIf { it.isNotBlank() }
                 ?.let(ReminderRecurrence::valueOf)

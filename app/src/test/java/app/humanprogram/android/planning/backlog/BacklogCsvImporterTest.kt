@@ -44,13 +44,27 @@ class BacklogCsvImporterTest {
         val preview = importer.preview(
             """
             title,date,project_bucket,note
-            Bad date,05/13/2026,Health,Wrong format
+            Bad date,not-a-date,Health,Wrong format
             """.trimIndent()
         )
 
         assertTrue(preview.accepted.isEmpty())
         assertEquals(1, preview.rejected.size)
         assertEquals("Invalid date", preview.rejected.first().reason)
+    }
+
+    @Test
+    fun previewAcceptsSlashDates() {
+        val preview = importer.preview(
+            """
+            title,date,project_bucket,note
+            Call dentist,5/25/2026,Health,Bring insurance card
+            """.trimIndent()
+        )
+
+        assertEquals(1, preview.accepted.size)
+        assertTrue(preview.rejected.isEmpty())
+        assertEquals(LocalDate.of(2026, 5, 25), preview.accepted.first().assignedDate)
     }
 
     @Test
@@ -65,5 +79,20 @@ class BacklogCsvImporterTest {
         assertEquals(1, preview.accepted.size)
         assertEquals("Call doctor, ask questions", preview.accepted.first().title)
         assertEquals("Bring \"records\"", preview.accepted.first().notes)
+    }
+
+    @Test
+    fun previewRejectsWholeCsvWhenCsvIsMalformed() {
+        val preview = importer.preview(
+            """
+            title,date,project_bucket,note
+            "Broken quote,2026-05-13,Health,Wrong format
+            Valid row,2026-05-14,Health,Should not import
+            """.trimIndent()
+        )
+
+        assertTrue(preview.accepted.isEmpty())
+        assertEquals("CSV format error", preview.fatalError)
+        assertEquals(2, preview.rejected.size)
     }
 }

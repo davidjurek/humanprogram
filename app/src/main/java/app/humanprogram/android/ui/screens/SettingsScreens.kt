@@ -1,11 +1,16 @@
 package app.humanprogram.android.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.graphics.BitmapFactory
 import android.graphics.Color as AndroidColor
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -124,9 +129,12 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontFamily
@@ -136,6 +144,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -143,6 +152,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.humanprogram.android.core.security.PinHash
+import app.humanprogram.android.core.security.SecurityCredentialType
+import app.humanprogram.android.planning.AppLockRecoveryResetResult
 import app.humanprogram.android.planning.HumanProgramViewModel
 import app.humanprogram.android.planning.calendar.DeviceCalendarEvent
 import app.humanprogram.android.planning.model.BacklogItem
@@ -155,16 +166,16 @@ import app.humanprogram.android.planning.model.RecurringTaskTemplate
 import app.humanprogram.android.planning.model.ReminderRecurrence
 import app.humanprogram.android.planning.model.ScheduleBlock
 import app.humanprogram.android.planning.model.ScheduleTemplate
-import me.saket.telephoto.subsamplingimage.SubSamplingImage
-import me.saket.telephoto.subsamplingimage.SubSamplingImageSource
-import me.saket.telephoto.subsamplingimage.rememberSubSamplingImageState
-import me.saket.telephoto.zoomable.rememberZoomableState
-import me.saket.telephoto.zoomable.zoomable
+import dev.darkokoa.datetimewheelpicker.WheelTimePicker
+import dev.darkokoa.datetimewheelpicker.core.format.TimeFormat
+import dev.darkokoa.datetimewheelpicker.core.format.timeFormatter
+import kotlinx.datetime.LocalTime as KotlinxLocalTime
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import java.io.File
 import java.util.UUID
 import kotlin.math.roundToInt
 
@@ -204,11 +215,15 @@ internal fun SettingsScreen(
     onImportBacklogCsv: () -> Unit,
     onExportBacklogCsvTemplate: () -> Unit,
     onReminderDeleted: (String) -> Unit,
+    notificationCreateRequest: Int,
+    notificationSaveRequest: Int,
+    onNotificationCreatePageChange: (Boolean) -> Unit,
+    importConfirmRequest: Int,
+    onImportConfirmPageChange: (Boolean) -> Unit,
     onPlannerDataReplacing: () -> Unit,
     onReminderScheduleChanged: () -> Unit,
     onAppLockPinSet: (PinHash) -> Unit,
     onRecoveryPhraseSet: (PinHash) -> Unit,
-    onRecoveryPhraseRevoked: () -> Unit,
     onAppLockTimeoutChanged: (Int) -> Unit,
     onBiometricUnlockChanged: (Boolean) -> Unit,
     onAppearanceChanged: (String) -> Unit,
@@ -222,6 +237,9 @@ internal fun SettingsScreen(
 ) {
     LaunchedEffect(detail) {
         onInnerBackAvailableChange(false)
+        if (detail != SettingsDetail.SECURITY) {
+            viewModel.clearSecuritySettingsUnlock()
+        }
     }
     if (detail == null) {
         SettingsRoot(viewModel, onDetail)
@@ -274,13 +292,20 @@ internal fun SettingsScreen(
             notificationPermissionGranted = notificationPermissionGranted,
             onRequestNotificationPermission = onRequestNotificationPermission,
             onReminderScheduleChanged = onReminderScheduleChanged,
-            onReminderDeleted = onReminderDeleted
+            onReminderDeleted = onReminderDeleted,
+            createRequest = notificationCreateRequest,
+            saveRequest = notificationSaveRequest,
+            innerBackRequest = innerBackRequest,
+            onInnerBackAvailableChange = onInnerBackAvailableChange,
+            onCreatePageChange = onNotificationCreatePageChange
         )
         SettingsDetail.CALENDAR -> CalendarSettings(
             viewModel = viewModel,
             granted = calendarPermissionGranted,
             onRequest = onRequestCalendarPermission,
-            onToggleCalendarSource = onToggleCalendarSource
+            onToggleCalendarSource = onToggleCalendarSource,
+            innerBackRequest = innerBackRequest,
+            onInnerBackAvailableChange = onInnerBackAvailableChange
         )
         SettingsDetail.IMPORT -> ImportScreen(
             viewModel = viewModel,
@@ -290,22 +315,35 @@ internal fun SettingsScreen(
             onPlannerDataReplacing = onPlannerDataReplacing,
             onReminderScheduleChanged = onReminderScheduleChanged,
             innerBackRequest = innerBackRequest,
-            onInnerBackAvailableChange = onInnerBackAvailableChange
+            onInnerBackAvailableChange = onInnerBackAvailableChange,
+            confirmRequest = importConfirmRequest,
+            onConfirmPageChange = onImportConfirmPageChange
         )
         SettingsDetail.EXPORT -> ExportScreen(
             viewModel = viewModel,
             onExportHprgm = onExportHprgm
         )
-        SettingsDetail.SECURITY -> SecuritySettings(
-            viewModel,
-            onAppLockPinSet,
-            onRecoveryPhraseSet,
-            onRecoveryPhraseRevoked,
-            onAppLockTimeoutChanged,
-            onBiometricUnlockChanged,
-            innerBackRequest,
-            onInnerBackAvailableChange
-        )
+        SettingsDetail.SECURITY -> {
+            if (viewModel.appLockEnabled && !viewModel.securitySettingsUnlocked) {
+                SecuritySettingsUnlockScreen(
+                    viewModel = viewModel,
+                    onAppLockPinSet = onAppLockPinSet,
+                    onRecoveryPhraseSet = onRecoveryPhraseSet,
+                    innerBackRequest = innerBackRequest,
+                    onInnerBackAvailableChange = onInnerBackAvailableChange
+                )
+            } else {
+                SecuritySettings(
+                    viewModel,
+                    onAppLockPinSet,
+                    onRecoveryPhraseSet,
+                    onAppLockTimeoutChanged,
+                    onBiometricUnlockChanged,
+                    innerBackRequest,
+                    onInnerBackAvailableChange
+                )
+            }
+        }
         SettingsDetail.RESET -> ResetSettings(
             viewModel = viewModel,
             onOpenExport = { onDetail(SettingsDetail.EXPORT) },
@@ -462,34 +500,114 @@ internal fun CalendarSettings(
     viewModel: HumanProgramViewModel,
     granted: Boolean,
     onRequest: () -> Unit,
+    onToggleCalendarSource: (String) -> Unit,
+    innerBackRequest: Int,
+    onInnerBackAvailableChange: (Boolean) -> Unit
+) {
+    var page by rememberSaveable { mutableStateOf("root") }
+    val googleSources = viewModel.calendarSources.filter { it.accountType == GoogleCalendarAccountType }
+    val googleSourceIds = googleSources.map { it.calendarId }.toSet()
+    val googleCalendarConnected = granted && googleSources.isNotEmpty()
+    val googleCalendarEnabled = googleSourceIds.any { it in viewModel.selectedCalendarSourceIds }
+    LaunchedEffect(page) {
+        onInnerBackAvailableChange(page != "root")
+    }
+    LaunchedEffect(innerBackRequest) {
+        if (innerBackRequest > 0 && page != "root") page = "root"
+    }
+    if (page == GoogleCalendarSettingsPage) {
+        GoogleCalendarSettings(
+            connected = googleCalendarConnected,
+            enabled = googleCalendarEnabled,
+            sourceIds = googleSourceIds,
+            selectedSourceIds = viewModel.selectedCalendarSourceIds.toSet(),
+            onRequest = onRequest,
+            onToggleCalendarSource = onToggleCalendarSource
+        )
+        return
+    }
+    HpList {
+        item {
+            HpSettingsMixedListPage(
+                title = "Calendar Sources",
+                menuItems = listOf(
+                    HpSettingsMenuItem(
+                        title = "Calendar Sources",
+                        icon = Icons.Outlined.CalendarMonth,
+                        onClick = { page = GoogleCalendarSettingsPage }
+                    )
+                )
+            ) {
+                googleSources.forEach { source ->
+                    HpSettingsSwitchActionRow(
+                        title = source.displayName,
+                        checked = source.calendarId in viewModel.selectedCalendarSourceIds,
+                        onCheckedChange = { checked ->
+                            val selected = source.calendarId in viewModel.selectedCalendarSourceIds
+                            if (selected != checked) onToggleCalendarSource(source.calendarId)
+                        },
+                        onClick = {
+                            onToggleCalendarSource(source.calendarId)
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GoogleCalendarSettings(
+    connected: Boolean,
+    enabled: Boolean,
+    sourceIds: Set<String>,
+    selectedSourceIds: Set<String>,
+    onRequest: () -> Unit,
     onToggleCalendarSource: (String) -> Unit
 ) {
     HpList {
         item {
-            if (!granted) {
-                HpSettingsMessagePage(title = "Calendar Sources") {
-                    HpPrimaryButton("Allow Calendar", onRequest)
-                }
-            } else if (viewModel.calendarSources.isEmpty()) {
-                HpSettingsMessagePage(title = "Calendar Sources") {
-                    Text("No calendars", color = HpColors.ink, fontWeight = FontWeight.SemiBold)
-                }
-            } else {
+            if (connected) {
                 HpToggleSettingsList(
-                    title = "Calendar Sources",
-                    items = viewModel.calendarSources.map { source ->
+                    title = "Google Calendar",
+                    items = listOf(
                         HpToggleSettingItem(
-                            value = source.calendarId,
-                            title = source.displayName,
-                            checked = source.calendarId in viewModel.selectedCalendarSourceIds
+                            value = GoogleCalendarSettingsSourceId,
+                            title = "Google Calendar",
+                            checked = enabled
                         )
-                    },
-                    onCheckedChange = { sourceId, _ -> onToggleCalendarSource(sourceId) }
+                    ),
+                    onCheckedChange = { _, checked ->
+                        sourceIds.forEach { sourceId ->
+                            val selected = sourceId in selectedSourceIds
+                            if (selected != checked) onToggleCalendarSource(sourceId)
+                        }
+                    }
+                )
+            } else {
+                HpSettingsMenuPage(
+                    sections = listOf(
+                        HpSettingsMenuSection(
+                            title = "Google Calendar",
+                            items = listOf(
+                                HpSettingsMenuItem(
+                                    title = "Google Calendar",
+                                    icon = Icons.Outlined.CalendarMonth,
+                                    trailing = "Connect",
+                                    onClick = onRequest
+                                )
+                            )
+                        )
+                    )
                 )
             }
         }
     }
 }
+
+private const val GoogleCalendarAccountType = "com.google"
+private const val GoogleCalendarSettingsSourceId = "google_calendar"
+private const val GoogleCalendarSettingsPage = "google_calendar"
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -917,6 +1035,7 @@ private fun ScheduleTemplateEditor(
     var newBlockTitle by rememberSaveable(template?.id) { mutableStateOf("") }
     var newBlockDurationMinutes by rememberSaveable(template?.id) { mutableIntStateOf(60) }
     var durationPickerBlockIndex by rememberSaveable(template?.id) { mutableStateOf<Int?>(null) }
+    var colorPickerBlockIndex by rememberSaveable(template?.id) { mutableIntStateOf(-1) }
     var customDatePickerTarget by rememberSaveable(template?.id) { mutableStateOf<String?>(null) }
     var sleepTimePickerTarget by rememberSaveable(template?.id) { mutableStateOf<String?>(null) }
     var draggedBlockIndex by remember { mutableIntStateOf(-1) }
@@ -1089,7 +1208,7 @@ private fun ScheduleTemplateEditor(
         }
         item {
             ScheduleSleepSettingsSection(
-                sleep = blocks.firstOrNull() ?: ScheduleBlock("Sleep", "21:30-05:30"),
+                sleep = blocks.firstOrNull() ?: ScheduleBlock("Sleep", "21:30-05:30", colorHex = "#475C6C"),
                 editing = editing,
                 onSleepStartClick = { sleepTimePickerTarget = "start" },
                 onWakeClick = { sleepTimePickerTarget = "wake" }
@@ -1122,6 +1241,7 @@ private fun ScheduleTemplateEditor(
                 editorRootTop = editorRootTop,
                 onTitleChange = { title -> blocks = blocks.updateBlock(index, block.copy(title = title)) },
                 onDurationClick = { durationPickerBlockIndex = index },
+                onColorClick = { colorPickerBlockIndex = index },
                 onPositioned = { _, height ->
                     if (height > 0) scheduleRowHeight = height
                 },
@@ -1277,6 +1397,18 @@ private fun ScheduleTemplateEditor(
             }
         )
     }
+    if (colorPickerBlockIndex in blocks.indices) {
+        val blockIndex = colorPickerBlockIndex
+        val block = blocks[blockIndex]
+        ScheduleBlockColorDialog(
+            block = block,
+            onDismiss = { colorPickerBlockIndex = -1 },
+            onSave = { colorHex ->
+                blocks = blocks.updateBlock(blockIndex, block.copy(colorHex = colorHex))
+                colorPickerBlockIndex = -1
+            }
+        )
+    }
     durationPickerBlockIndex?.let { blockIndex ->
         val selectedMinutes = if (blockIndex == -1) {
             newBlockDurationMinutes
@@ -1319,7 +1451,7 @@ private fun ScheduleTemplateEditor(
         )
     }
     sleepTimePickerTarget?.let { target ->
-        val sleep = blocks.firstOrNull() ?: ScheduleBlock("Sleep", "21:30-05:30")
+        val sleep = blocks.firstOrNull() ?: ScheduleBlock("Sleep", "21:30-05:30", colorHex = "#475C6C")
         val initialTime = if (target == "start") {
             sleep.timeRange.substringBefore("-").trim()
         } else {
@@ -1396,6 +1528,7 @@ private fun ScheduleEditorBlockRow(
     editorRootTop: Float,
     onTitleChange: (String) -> Unit,
     onDurationClick: () -> Unit,
+    onColorClick: () -> Unit,
     onPositioned: (Float, Float) -> Unit,
     onDragStart: () -> Unit,
     onDragCancel: () -> Unit,
@@ -1413,6 +1546,7 @@ private fun ScheduleEditorBlockRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .height(58.dp)
                 .zIndex(if (isDragging) 1f else 0f)
                 .offset { IntOffset(0, displayedOffsetY.roundToInt()) }
                 .background(
@@ -1430,7 +1564,7 @@ private fun ScheduleEditorBlockRow(
         ) {
             Column(
                 modifier = Modifier
-                    .width(94.dp)
+                    .width(82.dp)
                     .clickable(enabled = editing, onClick = onDurationClick),
                 verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
@@ -1445,41 +1579,40 @@ private fun ScheduleEditorBlockRow(
                     style = MaterialTheme.typography.bodySmall
                 )
             }
-            Box(
-                modifier = Modifier
-                    .size(width = 32.dp, height = 44.dp)
-                    .then(
-                        if (editing) {
-                            Modifier.pointerInput(Unit) {
-                                detectDragGesturesAfterLongPress(
-                                    onDragStart = { onDragStart() },
-                                    onDragCancel = onDragCancel,
-                                    onDragEnd = onDragEnd,
-                                    onDrag = { change, dragAmount ->
-                                        change.consume()
-                                        onDrag(dragAmount.y)
-                                    }
-                                )
-                            }
-                        } else {
-                            Modifier
-                        }
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                if (editing) ScheduleDragHandle()
-            }
-            Spacer(Modifier.width(14.dp))
+            BasicTextField(
+                value = block.title,
+                onValueChange = { if (editing) onTitleChange(it) },
+                modifier = Modifier.weight(1f),
+                readOnly = !editing,
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyMedium.copy(
+                    color = HpColors.ink,
+                    fontWeight = FontWeight.Medium
+                )
+            )
             if (editing) {
-                BasicTextField(
-                    value = block.title,
-                    onValueChange = onTitleChange,
-                    modifier = Modifier.weight(1f),
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodyMedium.copy(
-                        color = HpColors.ink,
-                        fontWeight = FontWeight.Medium
-                    )
+                Box(
+                    modifier = Modifier
+                        .size(width = 32.dp, height = 44.dp)
+                        .pointerInput(Unit) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = { onDragStart() },
+                                onDragCancel = onDragCancel,
+                                onDragEnd = onDragEnd,
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    onDrag(dragAmount.y)
+                                }
+                            )
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    ScheduleDragHandle()
+                }
+                ScheduleBlockColorButton(
+                    color = scheduleBlockColorOrDefault(block),
+                    enabled = true,
+                    onClick = onColorClick
                 )
                 IconButton(
                     modifier = Modifier.size(38.dp),
@@ -1487,21 +1620,110 @@ private fun ScheduleEditorBlockRow(
                 ) {
                     Icon(Icons.Outlined.Delete, contentDescription = "Delete block", tint = HpColors.ink)
                 }
-            } else {
-                Text(
-                    block.title,
-                    modifier = Modifier.weight(1f),
-                    color = HpColors.ink,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(Modifier.size(38.dp))
             }
         }
         HorizontalDivider(color = HpColors.divider)
     }
+}
+
+@Composable
+private fun ScheduleBlockColorButton(
+    color: Color,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    IconButton(
+        modifier = Modifier.size(38.dp),
+        enabled = enabled,
+        onClick = onClick
+    ) {
+        Box(
+            modifier = Modifier
+                .size(22.dp)
+                .clip(CircleShape)
+                .background(color)
+                .border(1.dp, HpColors.divider, CircleShape)
+        )
+    }
+}
+
+@Composable
+private fun ScheduleBlockColorDialog(
+    block: ScheduleBlock,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit
+) {
+    var hexDraft by rememberSaveable(block.title, block.timeRange, block.colorHex) {
+        mutableStateOf(sanitizeScheduleColorDraft(block.colorHex ?: scheduleBlockDefaultColorHex(block)))
+    }
+    val normalized = normalizeScheduleColorHex(hexDraft)
+    val previewColor = normalized?.let(::scheduleColorFromHex) ?: scheduleBlockColorOrDefault(block)
+    val showInvalidMessage = hexDraft.isNotEmpty() && normalized == null
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        text = {
+            Column {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(77.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(previewColor)
+                )
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "#",
+                        color = HpColors.ink,
+                        style = MaterialTheme.typography.headlineMedium.copy(fontSize = 24.sp),
+                        fontWeight = FontWeight.Medium
+                    )
+                    OutlinedTextField(
+                        modifier = Modifier.weight(1f),
+                        value = hexDraft,
+                        onValueChange = { hexDraft = sanitizeScheduleColorDraft(it) },
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodyLarge.copy(
+                            color = HpColors.ink,
+                            fontSize = 24.sp
+                        ),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                        isError = showInvalidMessage,
+                        colors = scheduleTextFieldColors()
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(18.dp)
+                ) {
+                    Text(
+                        "Enter a valid hex color.",
+                        modifier = Modifier.alpha(if (showInvalidMessage) 1f else 0f),
+                        color = HpColors.muted,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = normalized != null,
+                onClick = { normalized?.let(onSave) }
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
 }
 
 @Composable
@@ -1819,7 +2041,34 @@ private fun ScheduleDurationPickerSheet(
 }
 
 private fun defaultScheduleEditorBlocks(): List<ScheduleBlock> {
-    return listOf(ScheduleBlock("Sleep", "21:30-05:30"))
+    return listOf(ScheduleBlock("Sleep", "21:30-05:30", colorHex = "#475C6C"))
+}
+
+private fun scheduleBlockDefaultColorHex(block: ScheduleBlock): String {
+    return if (block.title.equals("Sleep", ignoreCase = true)) "#475C6C" else "#9EA9FF"
+}
+
+private fun scheduleBlockColorOrDefault(block: ScheduleBlock): Color {
+    return normalizeScheduleColorHex(block.colorHex)
+        ?.let(::scheduleColorFromHex)
+        ?: scheduleColorFromHex(scheduleBlockDefaultColorHex(block))
+}
+
+private fun sanitizeScheduleColorDraft(value: String): String {
+    return value
+        .removePrefix("#")
+        .filter { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }
+        .take(6)
+        .uppercase()
+}
+
+private fun normalizeScheduleColorHex(value: String?): String? {
+    val clean = sanitizeScheduleColorDraft(value.orEmpty())
+    return "#$clean".takeIf { clean.length == 6 }
+}
+
+private fun scheduleColorFromHex(value: String): Color {
+    return Color(0xFF000000 or value.removePrefix("#").toLong(16))
 }
 
 private fun List<ScheduleBlock>.replaceFirstBlock(block: ScheduleBlock): List<ScheduleBlock> {
@@ -2383,18 +2632,116 @@ internal fun NotificationsSettings(
     notificationPermissionGranted: Boolean,
     onRequestNotificationPermission: () -> Unit,
     onReminderScheduleChanged: () -> Unit,
-    onReminderDeleted: (String) -> Unit
+    onReminderDeleted: (String) -> Unit,
+    createRequest: Int,
+    saveRequest: Int,
+    innerBackRequest: Int,
+    onInnerBackAvailableChange: (Boolean) -> Unit,
+    onCreatePageChange: (Boolean) -> Unit
 ) {
+    var page by rememberSaveable { mutableStateOf("list") }
+    var editingReminderId by rememberSaveable { mutableStateOf<String?>(null) }
+    var createDirty by rememberSaveable { mutableStateOf(false) }
+    var showDiscardDialog by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(createRequest) {
+        if (createRequest > 0) {
+            editingReminderId = null
+            page = "create"
+        }
+    }
+    LaunchedEffect(page) {
+        onInnerBackAvailableChange(page != "list")
+        onCreatePageChange(page != "list")
+        if (page == "list") createDirty = false
+    }
+    LaunchedEffect(innerBackRequest) {
+        if (innerBackRequest > 0 && page != "list") {
+            if (createDirty) {
+                showDiscardDialog = true
+            } else {
+                page = "list"
+            }
+        }
+    }
+    if (page == "create") {
+        CreateNotificationSettings(
+            viewModel = viewModel,
+            saveRequest = saveRequest,
+            onDirtyChange = { createDirty = it },
+            onSaved = {
+                onReminderScheduleChanged()
+                page = "list"
+            }
+        )
+        if (showDiscardDialog) {
+            AlertDialog(
+                onDismissRequest = { showDiscardDialog = false },
+                title = { Text("Discard notification?") },
+                text = { Text("You have unsaved changes.") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showDiscardDialog = false
+                            createDirty = false
+                            editingReminderId = null
+                            page = "list"
+                        }
+                    ) { Text("Discard") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDiscardDialog = false }) { Text("Cancel") }
+                }
+            )
+        }
+        return
+    }
+    if (page == "edit") {
+        val reminder = viewModel.reminders.firstOrNull { it.id == editingReminderId }
+        if (reminder == null) {
+            LaunchedEffect(Unit) {
+                createDirty = false
+                editingReminderId = null
+                page = "list"
+            }
+        } else {
+            CreateNotificationSettings(
+                viewModel = viewModel,
+                existingReminder = reminder,
+                saveRequest = saveRequest,
+                onDirtyChange = { createDirty = it },
+                onSaved = {
+                    onReminderScheduleChanged()
+                    createDirty = false
+                    editingReminderId = null
+                    page = "list"
+                }
+            )
+            if (showDiscardDialog) {
+                AlertDialog(
+                    onDismissRequest = { showDiscardDialog = false },
+                    title = { Text("Discard notification?") },
+                    text = { Text("You have unsaved changes.") },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                showDiscardDialog = false
+                                createDirty = false
+                                editingReminderId = null
+                                page = "list"
+                            }
+                        ) { Text("Discard") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showDiscardDialog = false }) { Text("Cancel") }
+                    }
+                )
+            }
+        }
+        return
+    }
     HpList {
         item {
             HpSettingsListPage(title = "Notifications") {
-                HpSettingsActionHeader(
-                    title = "${viewModel.reminders.count { it.isEnabled }} enabled reminders",
-                    actionIcon = Icons.Outlined.Notifications,
-                    actionContentDescription = "Allow notifications",
-                    actionEnabled = !notificationPermissionGranted,
-                    onAction = onRequestNotificationPermission
-                )
                 if (!notificationPermissionGranted) {
                     Text("Notifications are off.", color = HpColors.muted)
                 }
@@ -2402,21 +2749,14 @@ internal fun NotificationsSettings(
                     Text("No reminders yet.", color = HpColors.muted)
                 }
                 viewModel.reminders.forEach { reminder ->
-                    ReminderRow(
+                    NotificationSettingsRow(
                         reminder = reminder,
-                        mode = HpMode.READ,
-                        onTitleChange = { viewModel.renameReminder(reminder.id, it) },
-                        onTimeChange = {
-                            viewModel.updateReminderTime(reminder.id, it)
-                            onReminderScheduleChanged()
+                        onOpen = {
+                            editingReminderId = reminder.id
+                            page = "edit"
                         },
                         onToggle = {
                             viewModel.toggleReminder(reminder.id)
-                            onReminderScheduleChanged()
-                        },
-                        onDelete = {
-                            onReminderDeleted(reminder.id)
-                            viewModel.deleteReminder(reminder.id)
                             onReminderScheduleChanged()
                         }
                     )
@@ -2427,17 +2767,1331 @@ internal fun NotificationsSettings(
 }
 
 @Composable
+private fun NotificationSettingsRow(
+    reminder: NotificationReminder,
+    onOpen: () -> Unit,
+    onToggle: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onOpen)
+            .padding(vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = reminder.title,
+                color = HpColors.ink,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = notificationScheduleSummary(reminder),
+                color = if (reminder.isEnabled) HpColors.ink else HpColors.muted.copy(alpha = 0.45f),
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+        Switch(
+            checked = reminder.isEnabled,
+            onCheckedChange = { onToggle() }
+        )
+    }
+}
+
+@Composable
+private fun CreateNotificationSettings(
+    viewModel: HumanProgramViewModel,
+    existingReminder: NotificationReminder? = null,
+    saveRequest: Int,
+    onDirtyChange: (Boolean) -> Unit,
+    onSaved: () -> Unit
+) {
+    val editorKey = existingReminder?.id ?: "new"
+    val today = LocalDate.now().toString()
+    val nextMonth = LocalDate.now().plusMonths(1).toString()
+    var name by rememberSaveable(editorKey) { mutableStateOf(existingReminder?.title.orEmpty()) }
+    var message by rememberSaveable(editorKey) { mutableStateOf(existingReminder?.message.orEmpty()) }
+    var sound by rememberSaveable(editorKey) {
+        mutableStateOf(existingReminder?.sound.toNotificationOption(notificationSoundOptions, "Default chime"))
+    }
+    var imageUri by rememberSaveable(editorKey) { mutableStateOf(existingReminder?.imageUri) }
+    var repeat by rememberSaveable(editorKey) {
+        mutableStateOf(existingReminder?.repeatType.toNotificationOption(notificationRepeatOptions, "None"))
+    }
+    var date by rememberSaveable(editorKey) { mutableStateOf(existingReminder?.notificationDate.toNotificationText(today)) }
+    var time by rememberSaveable(editorKey) { mutableStateOf(existingReminder?.reminderAt.toNotificationTimeText("12:00 AM")) }
+    var weeklyDays by remember(editorKey) {
+        mutableStateOf(existingReminder?.selectedWeekdays?.takeIf { it.isNotEmpty() } ?: setOf(2, 7))
+    }
+    var runDays by rememberSaveable(editorKey) {
+        mutableStateOf(existingReminder?.runDays.toNotificationOption(notificationRunDayOptions, "Every day"))
+    }
+    var pickedDays by remember(editorKey) {
+        mutableStateOf(existingReminder?.selectedWeekdays?.takeIf { it.isNotEmpty() } ?: setOf(2, 4, 6))
+    }
+    var everyNDays by rememberSaveable(editorKey) { mutableStateOf((existingReminder?.everyNDays ?: 3).toString()) }
+    var startDate by rememberSaveable(editorKey) { mutableStateOf(existingReminder?.startDate.toNotificationText(today)) }
+    var timeRule by rememberSaveable(editorKey) {
+        mutableStateOf(existingReminder?.timeRule.toNotificationOption(notificationTimeRuleOptions, "At one time"))
+    }
+    var intervalAmount by rememberSaveable(editorKey) { mutableStateOf((existingReminder?.intervalAmount ?: 18).toString()) }
+    var intervalUnit by rememberSaveable(editorKey) {
+        mutableStateOf(existingReminder?.intervalUnit.toNotificationOption(listOf("minutes", "hours"), "minutes"))
+    }
+    var intervalStartTime by rememberSaveable(editorKey) {
+        mutableStateOf(existingReminder?.intervalStartTime.toNotificationTimeText("4:12 PM"))
+    }
+    var intervalWindow by rememberSaveable(editorKey) { mutableStateOf(if (existingReminder?.intervalWindowEnabled == true) "On" else "Off") }
+    var activeWindow by rememberSaveable(editorKey) { mutableStateOf(if (existingReminder?.hourlyWindowEnabled == true) "Custom window" else "All day") }
+    var windowStart by rememberSaveable(editorKey) { mutableStateOf(existingReminder?.windowStartTime.toNotificationTimeText("9:00 AM")) }
+    var windowEnd by rememberSaveable(editorKey) { mutableStateOf(existingReminder?.windowEndTime.toNotificationTimeText("5:00 PM")) }
+    var hourlyMinute by rememberSaveable(editorKey) { mutableStateOf(":${(existingReminder?.hourlyMinute ?: 0).toString().padStart(2, '0')}") }
+    var ends by rememberSaveable(editorKey) {
+        mutableStateOf(existingReminder?.endsMode.toNotificationOption(notificationEndsOptions, "Never"))
+    }
+    var endDate by rememberSaveable(editorKey) { mutableStateOf(existingReminder?.endDate.toNotificationText(nextMonth)) }
+    var endAfterRings by rememberSaveable(editorKey) { mutableStateOf((existingReminder?.endAfterRings ?: 10).toString()) }
+    var handledSaveRequest by rememberSaveable { mutableIntStateOf(saveRequest) }
+    val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            copyNotificationImageToPrivateStorage(context, uri)?.let { copiedPath ->
+                deletePrivateNotificationImage(imageUri)
+                imageUri = copiedPath
+            }
+        }
+    }
+    val isDirty = if (existingReminder == null) {
+        name.isNotBlank() ||
+            message.isNotBlank() ||
+            imageUri != null ||
+            sound != "Default chime" ||
+            repeat != "None" ||
+            date != LocalDate.now().toString() ||
+            time != "12:00 AM"
+    } else {
+        name != existingReminder.title ||
+            message != existingReminder.message ||
+            imageUri != existingReminder.imageUri ||
+            sound != existingReminder.sound ||
+            repeat != existingReminder.repeatType ||
+            date != existingReminder.notificationDate ||
+            time != existingReminder.reminderAt ||
+            runDays != existingReminder.runDays ||
+            timeRule != existingReminder.timeRule ||
+            intervalStartTime != existingReminder.intervalStartTime ||
+            intervalWindow != (if (existingReminder.intervalWindowEnabled) "On" else "Off") ||
+            windowStart != existingReminder.windowStartTime ||
+            windowEnd != existingReminder.windowEndTime ||
+            ends != existingReminder.endsMode
+    }
+    fun saveNotification() {
+        if (name.trim().isBlank()) return
+        val reminder = NotificationReminder(
+                id = existingReminder?.id ?: UUID.randomUUID().toString(),
+                title = name,
+                message = message,
+                sound = sound,
+                imageUri = imageUri,
+                repeatType = repeat,
+                runDays = runDays,
+                timeRule = timeRule,
+                notificationDate = date,
+                selectedWeekdays = if (repeat == "Weekly") weeklyDays else pickedDays,
+                everyNDays = everyNDays.toIntOrNull() ?: 3,
+                startDate = startDate,
+                intervalAmount = intervalAmount.toIntOrNull() ?: 18,
+                intervalUnit = intervalUnit,
+                intervalStartTime = intervalStartTime,
+                intervalWindowEnabled = intervalWindow == "On",
+                hourlyMinute = hourlyMinute.removePrefix(":").toIntOrNull() ?: 0,
+                hourlyWindowEnabled = activeWindow == "Custom window" || timeRule == "Every hour in window",
+                windowStartTime = windowStart,
+                windowEndTime = windowEnd,
+                endsMode = ends,
+                endDate = endDate,
+                endAfterRings = endAfterRings.toIntOrNull() ?: 10,
+                reminderAt = notificationPrimaryTime(repeat, timeRule, time, intervalStartTime, hourlyMinute),
+                recurrence = notificationRecurrence(repeat, runDays),
+                customWeekdays = notificationCustomWeekdays(repeat, runDays, weeklyDays, pickedDays),
+                isEnabled = existingReminder?.isEnabled ?: true
+        )
+        if (existingReminder == null) {
+            viewModel.addNotificationReminder(reminder)
+        } else {
+            viewModel.updateNotificationReminder(reminder)
+        }
+        onSaved()
+    }
+    LaunchedEffect(isDirty) {
+        onDirtyChange(isDirty)
+    }
+    LaunchedEffect(saveRequest) {
+        if (saveRequest > handledSaveRequest) {
+            handledSaveRequest = saveRequest
+            saveNotification()
+        }
+    }
+
+    HpList(
+        modifier = Modifier.pointerInput(Unit) {
+            detectTapGestures(onTap = { focusManager.clearFocus() })
+        }
+    ) {
+        item {
+            HpSettingsUntitledListPage {
+                HpSettingsTextField("Name", name, { name = it }, "Name")
+                HpSettingsTextField("Message", message, { message = it }, "Message")
+                HpSettingsDropdown("Sound", sound, notificationSoundOptions) { sound = it }
+                HpSettingsAttachment(
+                    imageUri = imageUri,
+                    onAdd = {
+                        viewModel.skipNextAppLockCheckForInternalFilePicker()
+                        imagePicker.launch("image/*")
+                    },
+                    onRemove = {
+                        deletePrivateNotificationImage(imageUri)
+                        imageUri = null
+                    }
+                )
+                HpSettingsSegmentedControl(
+                    label = "Repeat",
+                    selected = repeat,
+                    options = notificationRepeatOptions,
+                    onSelected = { repeat = it }
+                )
+                when (repeat) {
+                    "None" -> {
+                        HpSettingsDatePicker("Date", date) { date = it }
+                        HpSettingsTimeWheel("Time", time) { time = it }
+                    }
+                    "Daily" -> HpSettingsTimeWheel("Time", time) { time = it }
+                    "Weekly" -> {
+                        HpSettingsWeekdayPicker("Days", weeklyDays) { weeklyDays = toggleWeekday(weeklyDays, it) }
+                        HpSettingsTimeWheel("Time", time) { time = it }
+                    }
+                    "Custom" -> {
+                        HpSettingsDropdown("Run days", runDays, notificationRunDayOptions) { runDays = it }
+                        if (runDays == "Pick days") {
+                            HpSettingsWeekdayPicker("Days", pickedDays) { pickedDays = toggleWeekday(pickedDays, it) }
+                        }
+                        if (runDays == "Every N days") {
+                            HpSettingsTextField("Every", everyNDays, { everyNDays = it }, "3 days")
+                            HpSettingsTextField("Starting", startDate, { startDate = it }, "2026-05-25")
+                        }
+                        HpSettingsDropdown("Time rule", timeRule, notificationTimeRuleOptions) { timeRule = it }
+                        when (timeRule) {
+                            "At one time" -> HpSettingsTimeWheel("Time", time) { time = it }
+                            "Every interval" -> {
+                                HpSettingsTextField("Every", intervalAmount, { intervalAmount = it }, "18")
+                                HpSettingsDropdown("Unit", intervalUnit, listOf("minutes", "hours")) { intervalUnit = it }
+                                HpSettingsTimeWheel("Starting at", intervalStartTime) { intervalStartTime = it }
+                                HpSettingsDropdown("Active window", intervalWindow, listOf("Off", "On")) { intervalWindow = it }
+                                if (intervalWindow == "On") {
+                                    HpSettingsTimeWheel("From", windowStart) { windowStart = it }
+                                    HpSettingsTimeWheel("To", windowEnd) { windowEnd = it }
+                                }
+                            }
+                            "Every hour at minute" -> {
+                                HpSettingsDropdown("Minute of hour", hourlyMinute, notificationMinuteOptions) { hourlyMinute = it }
+                                HpSettingsDropdown("Active window", activeWindow, listOf("All day", "Custom window")) { activeWindow = it }
+                                if (activeWindow == "Custom window") {
+                                    HpSettingsTimeWheel("From", windowStart) { windowStart = it }
+                                    HpSettingsTimeWheel("To", windowEnd) { windowEnd = it }
+                                }
+                            }
+                            "Every hour in window" -> {
+                                HpSettingsTimeWheel("From", windowStart) { windowStart = it }
+                                HpSettingsTimeWheel("To", windowEnd) { windowEnd = it }
+                                HpSettingsDropdown("Minute of hour", hourlyMinute, notificationMinuteOptions) { hourlyMinute = it }
+                            }
+                        }
+                    }
+                }
+                if (repeat != "None") {
+                    HpSettingsDropdown("Ends", ends, notificationEndsOptions) { ends = it }
+                    if (ends == "On date") {
+                        HpSettingsTextField("End date", endDate, { endDate = it }, "2026-06-25")
+                    }
+                    if (ends == "After number of rings") {
+                        HpSettingsTextField("After", endAfterRings, { endAfterRings = it }, "10 rings")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HpSettingsTextField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        if (label.isNotBlank()) {
+            Text(label, color = HpColors.ink, fontWeight = FontWeight.SemiBold)
+        }
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            placeholder = { Text(placeholder, color = HpColors.muted) }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HpSettingsDatePicker(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit
+) {
+    var showPicker by rememberSaveable(label) { mutableStateOf(false) }
+    val selectedDate = value.toLocalDateOrNull()
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(label, color = HpColors.ink, fontWeight = FontWeight.SemiBold)
+        OutlinedButton(
+            modifier = Modifier.fillMaxWidth(),
+            onClick = { showPicker = true }
+        ) {
+            Text(
+                selectedDate?.toString() ?: "No date",
+                modifier = Modifier.weight(1f),
+                textAlign = TextAlign.Start,
+                color = HpColors.ink
+            )
+            Icon(Icons.Outlined.CalendarMonth, contentDescription = null, tint = HpColors.ink)
+        }
+    }
+
+    if (showPicker) {
+        val initialDate = selectedDate ?: LocalDate.now()
+        val initialMillis = initialDate.atStartOfDay().toInstant(ZoneOffset.UTC).toEpochMilli()
+        val pickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
+        DatePickerDialog(
+            onDismissRequest = { showPicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val millis = pickerState.selectedDateMillis ?: initialMillis
+                        onValueChange(Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate().toString())
+                        showPicker = false
+                    }
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        onValueChange("")
+                        showPicker = false
+                    }
+                ) {
+                    Text("No date")
+                }
+            }
+        ) {
+            DatePicker(state = pickerState)
+        }
+    }
+}
+
+@Composable
+private fun HpSettingsDropdown(
+    label: String,
+    selected: String,
+    options: List<String>,
+    onSelected: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(label, color = HpColors.ink, fontWeight = FontWeight.SemiBold)
+        Box {
+            OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = { expanded = true }
+            ) {
+                Text(
+                    selected,
+                    modifier = Modifier.weight(1f),
+                    textAlign = TextAlign.Start,
+                    color = HpColors.ink
+                )
+                Icon(Icons.Outlined.KeyboardArrowDown, contentDescription = null, tint = HpColors.ink)
+            }
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                options.forEach { option ->
+                    DropdownMenuItem(
+                        text = { Text(option) },
+                        onClick = {
+                            onSelected(option)
+                            expanded = false
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HpSettingsTimeWheel(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit
+) {
+    var expanded by rememberSaveable(label) { mutableStateOf(false) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(label, color = HpColors.ink, fontWeight = FontWeight.SemiBold)
+        OutlinedButton(
+            modifier = Modifier.fillMaxWidth(),
+            onClick = { expanded = !expanded }
+        ) {
+            Text(
+                value,
+                modifier = Modifier.weight(1f),
+                textAlign = TextAlign.Start,
+                color = HpColors.ink
+            )
+            Icon(Icons.Outlined.KeyboardArrowDown, contentDescription = null, tint = HpColors.ink)
+        }
+        if (expanded) {
+            WheelTimePicker(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(156.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .border(1.dp, HpColors.divider, RoundedCornerShape(18.dp))
+                    .padding(vertical = 6.dp),
+                startTime = remember(value) { value.toKotlinxNotificationTime() },
+                timeFormatter = remember {
+                    timeFormatter(
+                        timeFormat = TimeFormat.AM_PM,
+                        formatHour = { hour -> hour.toString() },
+                        formatMinute = { minute -> minute.toString().padStart(2, '0') },
+                        formatAmText = { "AM" },
+                        formatPmText = { "PM" }
+                    )
+                },
+                size = DpSize(260.dp, 132.dp),
+                rowCount = 3,
+                textStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                textColor = HpColors.ink,
+                onSnappedTimeChanged = { snappedTime ->
+                    onValueChange(snappedTime.toNotificationTimeLabel())
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun HpSettingsSegmentedControl(
+    label: String,
+    selected: String,
+    options: List<String>,
+    onSelected: (String) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(label, color = HpColors.ink, fontWeight = FontWeight.SemiBold)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(28.dp))
+                .background(HpColors.glass)
+                .padding(2.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            options.forEach { option ->
+                val active = option == selected
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(if (active) HpColors.ink else Color.Transparent)
+                        .clickable { onSelected(option) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = option,
+                        color = if (active) HpColors.surface else HpColors.ink,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HpSettingsAttachment(
+    imageUri: String?,
+    onAdd: () -> Unit,
+    onRemove: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text("Attachment", color = HpColors.ink, fontWeight = FontWeight.SemiBold)
+        if (imageUri == null) {
+            HpSecondaryButton("Add image", onAdd)
+        } else {
+            val context = LocalContext.current
+            val previewBitmap = remember(imageUri) {
+                decodeNotificationImagePreview(context, imageUri)
+            }
+            Box(
+                modifier = Modifier
+                    .width(150.dp)
+                    .height(92.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(HpColors.glass),
+                contentAlignment = Alignment.Center
+            ) {
+                if (previewBitmap != null) {
+                    Image(
+                        bitmap = previewBitmap.asImageBitmap(),
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Text("Image unavailable", color = HpColors.muted, fontWeight = FontWeight.SemiBold)
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                HpSecondaryButton("Change image", onAdd)
+                HpSecondaryButton("Remove", onRemove)
+            }
+        }
+    }
+}
+
+@Composable
+private fun HpSettingsWeekdayPicker(
+    label: String,
+    selectedDays: Set<Int>,
+    onToggle: (Int) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(label, color = HpColors.ink, fontWeight = FontWeight.SemiBold)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            notificationWeekdayLabels.forEach { (weekday, dayLabel) ->
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .background(if (weekday in selectedDays) HpColors.ink else HpColors.glass)
+                        .clickable { onToggle(weekday) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        dayLabel,
+                        color = if (weekday in selectedDays) HpColors.surface else HpColors.ink,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NotificationPreviewRows(preview: List<String>) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text("Preview next rings", color = HpColors.ink, fontWeight = FontWeight.SemiBold)
+        preview.forEachIndexed { index, row ->
+            Text("${index + 1}. $row", color = HpColors.muted)
+        }
+    }
+}
+
+private val notificationSoundOptions = listOf("Default chime", "Soft bell", "Digital beep", "Ringtone", "Silent")
+private val notificationRepeatOptions = listOf("None", "Daily", "Weekly", "Custom")
+private val notificationRunDayOptions = listOf("Every day", "Weekdays", "Weekends", "Pick days", "Every N days")
+private val notificationTimeRuleOptions = listOf("At one time", "Every interval", "Every hour at minute", "Every hour in window")
+private val notificationEndsOptions = listOf("Never", "On date", "After number of rings")
+private val notificationMinuteOptions = listOf(":00", ":15", ":30", ":38", ":45")
+private val notificationWeekdayLabels = listOf(2 to "M", 3 to "T", 4 to "W", 5 to "T", 6 to "F", 7 to "S", 1 to "S")
+
+private data class NotificationTimeParts(
+    val hour: Int,
+    val minute: Int,
+    val period: String
+)
+
+private fun toggleWeekday(days: Set<Int>, weekday: Int): Set<Int> {
+    return if (weekday in days) days - weekday else days + weekday
+}
+
+private fun String.toNotificationTimeParts(): NotificationTimeParts {
+    val clean = trim().uppercase()
+    val explicitPeriod = when {
+        clean.endsWith(" PM") -> "PM"
+        clean.endsWith(" AM") -> "AM"
+        else -> null
+    }
+    val timePart = clean
+        .removeSuffix(" PM")
+        .removeSuffix(" AM")
+        .trim()
+    val pieces = timePart.split(":")
+    val rawHour = pieces.getOrNull(0)?.toIntOrNull() ?: 12
+    val minute = pieces.getOrNull(1)?.take(2)?.toIntOrNull()?.coerceIn(0, 59) ?: 0
+    val period = explicitPeriod ?: if (rawHour >= 12) "PM" else "AM"
+    val hour = when {
+        rawHour == 0 -> 12
+        rawHour > 12 -> rawHour - 12
+        else -> rawHour
+    }.coerceIn(1, 12)
+    return NotificationTimeParts(hour = hour, minute = minute, period = period)
+}
+
+private fun formatNotificationTime(hour: Int, minute: Int, period: String): String {
+    return "${hour.coerceIn(1, 12)}:${minute.coerceIn(0, 59).toString().padStart(2, '0')} ${period.ifBlank { "AM" }}"
+}
+
+private fun copyNotificationImageToPrivateStorage(context: android.content.Context, sourceUri: Uri): String? {
+    return runCatching {
+        val imageDir = File(context.filesDir, "notification_images").apply { mkdirs() }
+        val destination = File(imageDir, "notification_${UUID.randomUUID()}.image")
+        context.contentResolver.openInputStream(sourceUri)?.use { input ->
+            destination.outputStream().use { output ->
+                input.copyTo(output)
+            }
+        } ?: return null
+        destination.absolutePath
+    }.getOrNull()
+}
+
+private fun decodeNotificationImagePreview(context: android.content.Context, imageRef: String): android.graphics.Bitmap? {
+    return runCatching {
+        when {
+            imageRef.startsWith("content://") -> {
+                context.contentResolver.openInputStream(Uri.parse(imageRef))?.use { input ->
+                    BitmapFactory.decodeStream(input)
+                }
+            }
+            imageRef.startsWith("file://") -> BitmapFactory.decodeFile(Uri.parse(imageRef).path)
+            else -> BitmapFactory.decodeFile(imageRef)
+        }
+    }.getOrNull()
+}
+
+private fun deletePrivateNotificationImage(imageRef: String?) {
+    if (imageRef.isNullOrBlank()) return
+    runCatching {
+        val file = File(imageRef)
+        if (file.parentFile?.name == "notification_images" && file.exists()) {
+            file.delete()
+        }
+    }
+}
+
+private fun String?.toNotificationText(fallback: String): String {
+    return takeUnless { it.isNullOrBlank() || it == "null" } ?: fallback
+}
+
+private fun String?.toNotificationOption(options: List<String>, fallback: String): String {
+    return takeIf { it in options } ?: fallback
+}
+
+private fun String?.toNotificationTimeText(fallback: String): String {
+    return toNotificationText(fallback).toNotificationTimeParts().let { parts ->
+        formatNotificationTime(parts.hour, parts.minute, parts.period)
+    }
+}
+
+private fun String.toKotlinxNotificationTime(): KotlinxLocalTime {
+    val parts = toNotificationTimeParts()
+    val hour24 = when {
+        parts.period == "AM" && parts.hour == 12 -> 0
+        parts.period == "PM" && parts.hour != 12 -> parts.hour + 12
+        else -> parts.hour
+    }
+    return KotlinxLocalTime(hour24.coerceIn(0, 23), parts.minute.coerceIn(0, 59))
+}
+
+private fun KotlinxLocalTime.toNotificationTimeLabel(): String {
+    val period = if (hour >= 12) "PM" else "AM"
+    val hour12 = when {
+        hour == 0 -> 12
+        hour > 12 -> hour - 12
+        else -> hour
+    }
+    return formatNotificationTime(hour12, minute, period)
+}
+
+private fun notificationScheduleSummary(reminder: NotificationReminder): String {
+    return when (reminder.repeatType) {
+        "None" -> "${reminder.notificationDate.ifBlank { "One time" }} at ${reminder.reminderAt}"
+        "Daily" -> "Daily at ${reminder.reminderAt}"
+        "Weekly" -> "Weekly at ${reminder.reminderAt}"
+        "Custom" -> "${reminder.runDays}, ${reminder.timeRule}"
+        else -> "${reminder.reminderAt} / ${reminder.recurrence.label}"
+    }
+}
+
+private fun notificationPrimaryTime(
+    repeat: String,
+    timeRule: String,
+    time: String,
+    intervalStartTime: String,
+    hourlyMinute: String
+): String {
+    return when {
+        repeat == "Custom" && timeRule == "Every interval" -> intervalStartTime
+        repeat == "Custom" && timeRule.startsWith("Every hour") -> "12${hourlyMinute} AM"
+        else -> time
+    }
+}
+
+private fun notificationRecurrence(repeat: String, runDays: String): ReminderRecurrence {
+    return when (repeat) {
+        "Daily" -> ReminderRecurrence.DAILY
+        "Weekly" -> ReminderRecurrence.CUSTOM
+        "Custom" -> if (runDays == "Weekdays") ReminderRecurrence.WEEKDAYS else ReminderRecurrence.CUSTOM
+        else -> ReminderRecurrence.ONCE
+    }
+}
+
+private fun notificationCustomWeekdays(
+    repeat: String,
+    runDays: String,
+    weeklyDays: Set<Int>,
+    pickedDays: Set<Int>
+): Set<Int> {
+    return when {
+        repeat == "Weekly" -> weeklyDays
+        repeat == "Custom" && runDays == "Pick days" -> pickedDays
+        repeat == "Custom" && runDays == "Weekends" -> setOf(1, 7)
+        repeat == "Custom" && runDays == "Weekdays" -> setOf(2, 3, 4, 5, 6)
+        else -> emptySet()
+    }
+}
+
+private fun notificationPreview(
+    repeat: String,
+    date: String,
+    time: String,
+    weeklyDays: Set<Int>,
+    runDays: String,
+    pickedDays: Set<Int>,
+    everyNDays: Int,
+    startDate: String,
+    timeRule: String,
+    intervalAmount: Int,
+    intervalUnit: String,
+    intervalStartTime: String,
+    hourlyMinute: String,
+    windowStart: String,
+    windowEnd: String,
+    ends: String,
+    endAfterRings: Int
+): List<String> {
+    val count = if (ends == "After number of rings") endAfterRings.coerceIn(1, 5) else 5
+    return when (repeat) {
+        "None" -> listOf("${date.ifBlank { LocalDate.now().toString() }} at $time")
+        "Daily" -> nextDayLabels(count).map { "$it at $time" }
+        "Weekly" -> nextWeekdayLabels(weeklyDays, count).map { "$it at $time" }
+        "Custom" -> customNotificationPreview(
+            runDays = runDays,
+            pickedDays = pickedDays,
+            everyNDays = everyNDays,
+            startDate = startDate,
+            timeRule = timeRule,
+            time = time,
+            intervalAmount = intervalAmount,
+            intervalUnit = intervalUnit,
+            intervalStartTime = intervalStartTime,
+            hourlyMinute = hourlyMinute,
+            windowStart = windowStart,
+            windowEnd = windowEnd,
+            count = count
+        )
+        else -> listOf("Choose a time to preview this notification.")
+    }.ifEmpty { listOf("Choose a time to preview this notification.") }
+}
+
+private fun customNotificationPreview(
+    runDays: String,
+    pickedDays: Set<Int>,
+    everyNDays: Int,
+    startDate: String,
+    timeRule: String,
+    time: String,
+    intervalAmount: Int,
+    intervalUnit: String,
+    intervalStartTime: String,
+    hourlyMinute: String,
+    windowStart: String,
+    windowEnd: String,
+    count: Int
+): List<String> {
+    return when (timeRule) {
+        "At one time" -> runDayLabels(runDays, pickedDays, everyNDays, startDate, count).map { "$it at $time" }
+        "Every interval" -> intervalPreview(intervalStartTime, intervalAmount, intervalUnit, count)
+        "Every hour at minute" -> hourlyPreview(hourlyMinute, "All day", windowStart, windowEnd, count)
+        "Every hour in window" -> hourlyPreview(hourlyMinute, "Custom window", windowStart, windowEnd, count)
+        else -> listOf("Choose a time to preview this notification.")
+    }
+}
+
+private fun nextDayLabels(count: Int): List<String> {
+    return (0 until count).map { offset ->
+        when (offset) {
+            0 -> "Today"
+            1 -> "Tomorrow"
+            else -> LocalDate.now().plusDays(offset.toLong()).dayOfWeek.name.lowercase().replaceFirstChar { it.uppercase() }
+        }
+    }
+}
+
+private fun nextWeekdayLabels(days: Set<Int>, count: Int): List<String> {
+    if (days.isEmpty()) return emptyList()
+    val today = LocalDate.now()
+    return generateSequence(0) { it + 1 }
+        .map { today.plusDays(it.toLong()) }
+        .filter { it.hpWeekdayValue() in days }
+        .take(count)
+        .map { it.dayOfWeek.name.lowercase().replaceFirstChar { char -> char.uppercase() } }
+        .toList()
+}
+
+private fun runDayLabels(runDays: String, pickedDays: Set<Int>, everyNDays: Int, startDate: String, count: Int): List<String> {
+    return when (runDays) {
+        "Weekdays" -> nextWeekdayLabels(setOf(2, 3, 4, 5, 6), count)
+        "Weekends" -> nextWeekdayLabels(setOf(1, 7), count)
+        "Pick days" -> nextWeekdayLabels(pickedDays, count)
+        "Every N days" -> {
+            val start = startDate.toLocalDateOrNull() ?: LocalDate.now()
+            (0 until count).map { start.plusDays((it * everyNDays.coerceAtLeast(1)).toLong()).toString() }
+        }
+        else -> nextDayLabels(count)
+    }
+}
+
+private fun intervalPreview(startTime: String, amount: Int, unit: String, count: Int): List<String> {
+    val start = startTime.toNotificationLocalTimeOrNull() ?: return listOf("Choose a time to preview this notification.")
+    val minutes = if (unit == "hours") amount.coerceAtLeast(1) * 60L else amount.coerceAtLeast(1).toLong()
+    return (0 until count).map { "Today at ${start.plusMinutes(minutes * it).toNotificationTimeLabel()}" }
+}
+
+private fun hourlyPreview(minuteText: String, mode: String, windowStart: String, windowEnd: String, count: Int): List<String> {
+    val minute = minuteText.removePrefix(":").toIntOrNull()?.coerceIn(0, 59) ?: 0
+    val startHour = if (mode == "Custom window") {
+        windowStart.toNotificationLocalTimeOrNull()?.hour ?: 0
+    } else {
+        LocalTime.now().hour
+    }
+    return (0 until count).map { hourOffset ->
+        val hour = (startHour + hourOffset) % 24
+        "Today at ${LocalTime.of(hour, minute).toNotificationTimeLabel()}"
+    }
+}
+
+private fun LocalDate.hpWeekdayValue(): Int {
+    return when (dayOfWeek) {
+        java.time.DayOfWeek.SUNDAY -> 1
+        java.time.DayOfWeek.MONDAY -> 2
+        java.time.DayOfWeek.TUESDAY -> 3
+        java.time.DayOfWeek.WEDNESDAY -> 4
+        java.time.DayOfWeek.THURSDAY -> 5
+        java.time.DayOfWeek.FRIDAY -> 6
+        java.time.DayOfWeek.SATURDAY -> 7
+    }
+}
+
+private fun String.toNotificationLocalTimeOrNull(): LocalTime? {
+    return runCatching {
+        LocalTime.parse(trim().uppercase(), DateTimeFormatter.ofPattern("h:mm a"))
+    }.getOrNull()
+}
+
+private fun LocalTime.toNotificationTimeLabel(): String {
+    return format(DateTimeFormatter.ofPattern("h:mm a"))
+}
+
+@Composable
+private fun SecuritySettingsUnlockScreen(
+    viewModel: HumanProgramViewModel,
+    onAppLockPinSet: (PinHash) -> Unit,
+    onRecoveryPhraseSet: (PinHash) -> Unit,
+    innerBackRequest: Int,
+    onInnerBackAvailableChange: (Boolean) -> Unit
+) {
+    var showRecovery by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        onInnerBackAvailableChange(false)
+    }
+    LaunchedEffect(innerBackRequest) {
+        if (innerBackRequest > 0) {
+            viewModel.clearSecuritySettingsUnlock()
+        }
+    }
+
+    CredentialUnlockSettingsPage(titleVisible = true) {
+        when {
+            viewModel.recoveryCredentialResetRequired -> {
+                SecurityCredentialResetFields(
+                    viewModel = viewModel,
+                    onSave = {
+                        viewModel.completeRecoveryCredentialReset()?.let { result ->
+                            onAppLockPinSet(result.credentialHash)
+                            onRecoveryPhraseSet(result.recoveryPhraseHash)
+                        }
+                    }
+                )
+            }
+            showRecovery -> {
+                Text("Enter your recovery phrase to set a new PIN or password.", color = HpColors.muted)
+                HpFormTextField("Recovery phrase", viewModel.recoveryPhraseInput, viewModel::updateRecoveryPhraseInput)
+                HpPrimaryButton("Continue", viewModel::unlockAppWithRecoveryPhrase)
+                HpSecondaryButton("Back") { showRecovery = false }
+                if (viewModel.appUnlockMessage.isNotBlank()) {
+                    Text(viewModel.appUnlockMessage, color = HpColors.muted)
+                }
+            }
+            else -> {
+                CredentialUnlockForm(
+                    credentialType = viewModel.appLockCredentialType,
+                    value = viewModel.securitySettingsUnlockInput,
+                    onValueChange = viewModel::updateSecuritySettingsUnlockInput,
+                    onForgot = { showRecovery = true },
+                    onUnlock = viewModel::unlockSecuritySettingsWithCredential
+                )
+                if (viewModel.securitySettingsUnlockMessage.isNotBlank()) {
+                    Text(viewModel.securitySettingsUnlockMessage, color = HpColors.muted)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CredentialUnlockSettingsPage(
+    titleVisible: Boolean,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    HpList(
+        modifier = Modifier.pointerInput(Unit) {
+            detectTapGestures(
+                onTap = {
+                    focusManager.clearFocus()
+                    keyboardController?.hide()
+                }
+            )
+        }
+    ) {
+        item {
+            HpSettingsContentPage(
+                title = "Security",
+                titleVisible = titleVisible
+            ) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    content = content
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CredentialUnlockForm(
+    credentialType: SecurityCredentialType,
+    value: String,
+    onValueChange: (String) -> Unit,
+    onForgot: () -> Unit,
+    onUnlock: () -> Unit,
+    instruction: String? = null,
+    primaryLabel: String = "Unlock"
+) {
+    val credentialLabel = if (credentialType == SecurityCredentialType.PIN) "PIN" else "Password"
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Spacer(Modifier.height(24.dp))
+        Icon(
+            imageVector = Icons.Outlined.Lock,
+            contentDescription = null,
+            modifier = Modifier.size(88.dp),
+            tint = HpColors.ink
+        )
+        if (instruction != null) {
+            Text(
+                text = instruction,
+                color = HpColors.muted,
+                textAlign = TextAlign.Center
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        HpFormTextField(
+            label = credentialLabel,
+            value = value,
+            onValueChange = onValueChange,
+            keyboardOptions = KeyboardOptions(
+                keyboardType = if (credentialType == SecurityCredentialType.PIN) {
+                    KeyboardType.NumberPassword
+                } else {
+                    KeyboardType.Password
+                }
+            )
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Button(
+                onClick = onUnlock,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(HpTheme.radii.row),
+                colors = ButtonDefaults.buttonColors(containerColor = HpColors.accent, contentColor = Color.White)
+            ) {
+                Text(primaryLabel)
+            }
+            OutlinedButton(
+                onClick = onForgot,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(HpTheme.radii.row)
+            ) {
+                Text("Forgot $credentialLabel")
+            }
+        }
+    }
+}
+
+@Composable
+private fun CredentialChoiceForm(
+    credentialType: SecurityCredentialType,
+    instruction: String,
+    onPin: () -> Unit,
+    onPassword: () -> Unit
+) {
+    val credentialLabel = if (credentialType == SecurityCredentialType.PIN) "PIN" else "Password"
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Spacer(Modifier.height(24.dp))
+        Icon(
+            imageVector = Icons.Outlined.Lock,
+            contentDescription = null,
+            modifier = Modifier.size(88.dp),
+            tint = HpColors.ink
+        )
+        Text(
+            text = instruction,
+            color = HpColors.muted,
+            textAlign = TextAlign.Center
+        )
+        Spacer(Modifier.height(4.dp))
+        HpFormTextField(
+            label = credentialLabel,
+            value = "",
+            onValueChange = {},
+            modifier = Modifier
+                .fillMaxWidth()
+                .alpha(0f),
+            enabled = false
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Button(
+                onClick = onPin,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(HpTheme.radii.row),
+                colors = ButtonDefaults.buttonColors(containerColor = HpColors.accent, contentColor = Color.White)
+            ) {
+                Text("PIN")
+            }
+            Button(
+                onClick = onPassword,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(HpTheme.radii.row),
+                colors = ButtonDefaults.buttonColors(containerColor = HpColors.accent, contentColor = Color.White)
+            ) {
+                Text("Password")
+            }
+        }
+    }
+}
+
+@Composable
+private fun CredentialConfirmForm(
+    credentialType: SecurityCredentialType,
+    instruction: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    onConfirm: () -> Unit
+) {
+    val credentialLabel = if (credentialType == SecurityCredentialType.PIN) "PIN" else "Password"
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Spacer(Modifier.height(24.dp))
+        Icon(
+            imageVector = Icons.Outlined.Lock,
+            contentDescription = null,
+            modifier = Modifier.size(88.dp),
+            tint = HpColors.ink
+        )
+        Text(
+            text = instruction,
+            color = HpColors.muted,
+            textAlign = TextAlign.Center
+        )
+        Spacer(Modifier.height(4.dp))
+        HpFormTextField(
+            label = credentialLabel,
+            value = value,
+            onValueChange = onValueChange,
+            keyboardOptions = KeyboardOptions(
+                keyboardType = if (credentialType == SecurityCredentialType.PIN) {
+                    KeyboardType.NumberPassword
+                } else {
+                    KeyboardType.Password
+                }
+            )
+        )
+        Button(
+            onClick = onConfirm,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(HpTheme.radii.row),
+            colors = ButtonDefaults.buttonColors(containerColor = HpColors.accent, contentColor = Color.White)
+        ) {
+            Text("Confirm")
+        }
+    }
+}
+
+@Composable
+private fun SecurityCredentialChangeFlow(
+    viewModel: HumanProgramViewModel,
+    onRecovery: () -> Unit,
+    onSaved: (AppLockRecoveryResetResult) -> Unit
+) {
+    var step by rememberSaveable { mutableStateOf("prior") }
+    var message by rememberSaveable { mutableStateOf("") }
+    val credentialLabel = if (viewModel.appLockCredentialType == SecurityCredentialType.PIN) "PIN" else "password"
+
+    CredentialUnlockSettingsPage(titleVisible = true) {
+        when (step) {
+            "prior" -> {
+                CredentialUnlockForm(
+                    credentialType = viewModel.appLockCredentialType,
+                    value = viewModel.appLockCurrentCredentialInput,
+                    onValueChange = viewModel::updateAppLockCurrentCredentialInput,
+                    onForgot = onRecovery,
+                    onUnlock = {
+                        message = ""
+                        if (viewModel.verifyCurrentAppLockCredentialForChange()) {
+                            step = "choose"
+                        }
+                    },
+                    instruction = "Enter your prior $credentialLabel",
+                    primaryLabel = "Enter"
+                )
+            }
+            "choose" -> {
+                CredentialChoiceForm(
+                    credentialType = viewModel.appLockCredentialType,
+                    instruction = "Choose between a PIN and a password",
+                    onPin = {
+                        message = ""
+                        viewModel.updateAppLockCredentialType(SecurityCredentialType.PIN)
+                        step = "new"
+                    },
+                    onPassword = {
+                        message = ""
+                        viewModel.updateAppLockCredentialType(SecurityCredentialType.PASSWORD)
+                        step = "new"
+                    }
+                )
+            }
+            "new" -> {
+                val newLabel = if (viewModel.appLockCredentialType == SecurityCredentialType.PIN) "PIN" else "password"
+                CredentialConfirmForm(
+                    credentialType = viewModel.appLockCredentialType,
+                    instruction = "Enter your new $newLabel",
+                    value = viewModel.appLockPinInput,
+                    onValueChange = viewModel::updateAppLockPinInput,
+                    onConfirm = {
+                        message = ""
+                        if (viewModel.validateAppLockCredentialDraft()) {
+                            step = "again"
+                        }
+                    }
+                )
+            }
+            else -> {
+                val newLabel = if (viewModel.appLockCredentialType == SecurityCredentialType.PIN) "PIN" else "password"
+                CredentialConfirmForm(
+                    credentialType = viewModel.appLockCredentialType,
+                    instruction = "Re-enter the $newLabel",
+                    value = viewModel.appLockPinConfirmInput,
+                    onValueChange = viewModel::updateAppLockPinConfirmInput,
+                    onConfirm = {
+                        if (viewModel.appLockPinInput != viewModel.appLockPinConfirmInput) {
+                            message = "Does not match"
+                        } else {
+                            message = ""
+                            viewModel.changeAppLockCredentialAfterPriorVerified()?.let(onSaved)
+                        }
+                    }
+                )
+            }
+        }
+        val visibleMessage = message.ifBlank { viewModel.appLockPinMessage }
+        if (visibleMessage.isNotBlank()) {
+            Text(visibleMessage, color = HpColors.muted)
+        }
+    }
+}
+
+@Composable
+private fun SecurityCredentialResetFields(
+    viewModel: HumanProgramViewModel,
+    onSave: () -> Unit,
+    showCurrentCredential: Boolean = false,
+    onRecovery: (() -> Unit)? = null
+) {
+    Text("Choose a PIN or password.", color = HpColors.muted)
+    SecurityCredentialTypePicker(viewModel)
+    if (showCurrentCredential) {
+        HpFormTextField(
+            label = if (viewModel.appLockCredentialType == SecurityCredentialType.PIN) "Current PIN" else "Current Password",
+            value = viewModel.appLockCurrentCredentialInput,
+            onValueChange = viewModel::updateAppLockCurrentCredentialInput,
+            keyboardOptions = KeyboardOptions(
+                keyboardType = if (viewModel.appLockCredentialType == SecurityCredentialType.PIN) {
+                    KeyboardType.NumberPassword
+                } else {
+                    KeyboardType.Password
+                }
+            )
+        )
+    }
+    HpFormTextField(
+        label = if (viewModel.appLockCredentialType == SecurityCredentialType.PIN) "New PIN" else "New Password",
+        value = viewModel.appLockPinInput,
+        onValueChange = viewModel::updateAppLockPinInput,
+        keyboardOptions = KeyboardOptions(
+            keyboardType = if (viewModel.appLockCredentialType == SecurityCredentialType.PIN) {
+                KeyboardType.NumberPassword
+            } else {
+                KeyboardType.Password
+            }
+        )
+    )
+    HpFormTextField(
+        label = if (viewModel.appLockCredentialType == SecurityCredentialType.PIN) "Confirm PIN" else "Confirm Password",
+        value = viewModel.appLockPinConfirmInput,
+        onValueChange = viewModel::updateAppLockPinConfirmInput,
+        keyboardOptions = KeyboardOptions(
+            keyboardType = if (viewModel.appLockCredentialType == SecurityCredentialType.PIN) {
+                KeyboardType.NumberPassword
+            } else {
+                KeyboardType.Password
+            }
+        )
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        HpPrimaryButton("Save", onSave)
+        if (onRecovery != null) {
+            HpSecondaryButton("Use Recovery Phrase", onRecovery)
+        }
+    }
+    if (viewModel.appLockPinMessage.isNotBlank()) {
+        Text(viewModel.appLockPinMessage, color = HpColors.muted)
+    }
+    if (viewModel.recoveryPhraseMessage.isNotBlank()) {
+        Text(viewModel.recoveryPhraseMessage, color = HpColors.muted)
+    }
+}
+
+@Composable
 internal fun SecuritySettings(
     viewModel: HumanProgramViewModel,
     onAppLockPinSet: (PinHash) -> Unit,
     onRecoveryPhraseSet: (PinHash) -> Unit,
-    onRecoveryPhraseRevoked: () -> Unit,
     onAppLockTimeoutChanged: (Int) -> Unit,
     onBiometricUnlockChanged: (Boolean) -> Unit,
     innerBackRequest: Int,
     onInnerBackAvailableChange: (Boolean) -> Unit
 ) {
     var showPinSetup by rememberSaveable { mutableStateOf(!viewModel.appLockEnabled) }
+    var showPinRecovery by rememberSaveable { mutableStateOf(false) }
     var page by rememberSaveable { mutableStateOf("root") }
     LaunchedEffect(page) {
         onInnerBackAvailableChange(page != "root")
@@ -2446,6 +4100,26 @@ internal fun SecuritySettings(
         if (innerBackRequest > 0 && page != "root") page = "root"
     }
     if (page != "root") {
+        if (
+            page == "pin" &&
+            viewModel.appLockEnabled &&
+            showPinSetup &&
+            !showPinRecovery &&
+            !viewModel.recoveryCredentialResetRequired
+        ) {
+            SecurityCredentialChangeFlow(
+                viewModel = viewModel,
+                onRecovery = { showPinRecovery = true },
+                onSaved = { result ->
+                    onAppLockPinSet(result.credentialHash)
+                    onRecoveryPhraseSet(result.recoveryPhraseHash)
+                    showPinSetup = false
+                    showPinRecovery = false
+                    page = "root"
+                }
+            )
+            return
+        }
         HpList {
             when (page) {
                 "lock" -> item {
@@ -2459,24 +4133,54 @@ internal fun SecuritySettings(
                 "pin" -> item {
                     HpSettingsContentPage(title = "PIN / Password") {
                         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            if (showPinSetup) {
-                                HpFormTextField("PIN or password", viewModel.appLockPinInput, viewModel::updateAppLockPinInput)
-                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    HpPrimaryButton(if (viewModel.appLockEnabled) "Save" else "Set") {
-                                        viewModel.setupAppLockPin()?.let { hash ->
-                                            onAppLockPinSet(hash)
-                                            if (viewModel.generatedRecoveryPhrase.isBlank()) {
-                                                viewModel.generateRecoveryPhrase()?.let(onRecoveryPhraseSet)
+                            when {
+                                viewModel.recoveryCredentialResetRequired -> {
+                                    SecurityCredentialResetFields(
+                                        viewModel = viewModel,
+                                        onSave = {
+                                            viewModel.completeRecoveryCredentialReset()?.let { result ->
+                                                onAppLockPinSet(result.credentialHash)
+                                                onRecoveryPhraseSet(result.recoveryPhraseHash)
+                                                showPinSetup = false
+                                                showPinRecovery = false
                                             }
                                         }
-                                        showPinSetup = false
-                                    }
+                                    )
+                                }
+                                showPinRecovery -> {
+                                    Text("Enter your recovery phrase to set a new PIN or password.", color = HpColors.muted)
+                                    HpFormTextField("Recovery phrase", viewModel.recoveryPhraseInput, viewModel::updateRecoveryPhraseInput)
+                                    HpPrimaryButton("Continue", viewModel::unlockAppWithRecoveryPhrase)
+                                    HpSecondaryButton("Back") { showPinRecovery = false }
+                                    if (viewModel.appUnlockMessage.isNotBlank()) Text(viewModel.appUnlockMessage, color = HpColors.muted)
+                                }
+                                showPinSetup -> {
+                                    SecurityCredentialResetFields(
+                                        viewModel = viewModel,
+                                        showCurrentCredential = viewModel.appLockEnabled,
+                                        onRecovery = if (viewModel.appLockEnabled) ({ showPinRecovery = true }) else null,
+                                        onSave = {
+                                            val result = if (viewModel.appLockEnabled) {
+                                                viewModel.changeAppLockCredentialWithConfirmation()
+                                            } else {
+                                                viewModel.setupAppLockCredentialWithConfirmation()
+                                            }
+                                            result?.let {
+                                                onAppLockPinSet(it.credentialHash)
+                                                onRecoveryPhraseSet(it.recoveryPhraseHash)
+                                                showPinSetup = false
+                                            }
+                                        }
+                                    )
                                     if (viewModel.appLockEnabled) HpSecondaryButton("Cancel") { showPinSetup = false }
                                 }
-                            } else {
-                                HpSecondaryButton("Change PIN / Password") { showPinSetup = true }
+                                else -> {
+                                    HpSecondaryButton("Change PIN / Password") {
+                                        showPinSetup = true
+                                        showPinRecovery = false
+                                    }
+                                }
                             }
-                            if (viewModel.appLockPinMessage.isNotBlank()) Text(viewModel.appLockPinMessage, color = HpColors.muted)
                         }
                     }
                 }
@@ -2496,25 +4200,91 @@ internal fun SecuritySettings(
                 }
                 "encryption" -> item {
                     HpSettingsContentPage(title = "Encryption Settings") {
-                        HpPlainRow(Icons.Outlined.Lock, "Always encrypted", "Android Keystore AES-GCM")
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            HpPlainRow(Icons.Outlined.Lock, "Planner snapshot encrypted", "Android Keystore AES-GCM")
+                            HpPlainRow(Icons.Outlined.Lock, "Room cache disabled", "Planner data is saved in the encrypted snapshot")
+                            HpPlainRow(Icons.Outlined.Lock, "Recovery phrase encrypted", "Android Keystore AES-GCM")
+                        }
                     }
                 }
                 "recovery" -> item {
+                    var recoveryPhraseVisible by rememberSaveable { mutableStateOf(false) }
+                    var showRotateConfirm by rememberSaveable { mutableStateOf(false) }
+                    var showRotateResetConfirm by rememberSaveable { mutableStateOf(false) }
+                    var rotateResetInput by rememberSaveable { mutableStateOf("") }
                     HpSettingsContentPage(title = "Recovery") {
                         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            if (viewModel.generatedRecoveryPhrase.isNotBlank()) {
-                                Text(viewModel.generatedRecoveryPhrase, color = HpColors.accent, fontWeight = FontWeight.SemiBold)
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                HpSecondaryButton(if (viewModel.generatedRecoveryPhrase.isBlank()) "Generate Recovery Phrase" else "Generate New Phrase") {
-                                    viewModel.generateRecoveryPhrase()?.let(onRecoveryPhraseSet)
+                            Text(
+                                "Write this phrase on paper and store it somewhere safe. Use it only if you forget your PIN or password.",
+                                color = HpColors.muted
+                            )
+                            if (viewModel.generatedRecoveryPhrase.isBlank()) {
+                                Text("No recovery phrase is saved.", color = HpColors.ink)
+                                HpPrimaryButton("Generate Recovery Phrase") {
+                                    viewModel.generateRecoveryPhrase()?.let {
+                                        onRecoveryPhraseSet(it)
+                                        recoveryPhraseVisible = true
+                                    }
                                 }
-                                if (viewModel.generatedRecoveryPhrase.isNotBlank()) {
-                                    HpSecondaryButton("Revoke", onRecoveryPhraseRevoked)
+                            } else {
+                                Text(
+                                    if (recoveryPhraseVisible) viewModel.generatedRecoveryPhrase else "Recovery phrase saved.",
+                                    color = if (recoveryPhraseVisible) HpColors.accent else HpColors.ink,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    HpSecondaryButton(if (recoveryPhraseVisible) "Hide Phrase" else "View Phrase") {
+                                        recoveryPhraseVisible = !recoveryPhraseVisible
+                                    }
+                                    HpSecondaryButton("Generate New Phrase") { showRotateConfirm = true }
                                 }
                             }
                             if (viewModel.recoveryPhraseMessage.isNotBlank()) Text(viewModel.recoveryPhraseMessage, color = HpColors.muted)
                         }
+                    }
+                    if (showRotateConfirm) {
+                        AlertDialog(
+                            onDismissRequest = { showRotateConfirm = false },
+                            title = { Text("Generate New Phrase") },
+                            text = { Text("This replaces the current recovery phrase. The old phrase will stop working.") },
+                            confirmButton = {
+                                TextButton(onClick = {
+                                    showRotateConfirm = false
+                                    showRotateResetConfirm = true
+                                    rotateResetInput = ""
+                                }) { Text("Yes") }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showRotateConfirm = false }) { Text("No") }
+                            }
+                        )
+                    }
+                    if (showRotateResetConfirm) {
+                        AlertDialog(
+                            onDismissRequest = { showRotateResetConfirm = false },
+                            title = { Text("Confirm Replacement") },
+                            text = {
+                                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Text("Type reset to replace your recovery phrase.")
+                                    HpFormTextField("Confirmation", rotateResetInput, { rotateResetInput = it.take(20) })
+                                }
+                            },
+                            confirmButton = {
+                                TextButton(onClick = {
+                                    if (rotateResetInput.equals("reset", ignoreCase = true)) {
+                                        viewModel.generateRecoveryPhrase()?.let {
+                                            onRecoveryPhraseSet(it)
+                                            recoveryPhraseVisible = true
+                                            showRotateResetConfirm = false
+                                            rotateResetInput = ""
+                                        }
+                                    }
+                                }) { Text("Replace") }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showRotateResetConfirm = false }) { Text("Cancel") }
+                            }
+                        )
                     }
                 }
             }
@@ -2536,7 +4306,11 @@ internal fun SecuritySettings(
                             HpSettingsMenuItem(
                                 title = "PIN / Password",
                                 icon = Icons.Outlined.Lock,
-                                onClick = { page = "pin" }
+                                onClick = {
+                                    showPinSetup = true
+                                    showPinRecovery = false
+                                    page = "pin"
+                                }
                             ),
                             HpSettingsMenuItem(
                                 title = "Biometric Unlock",
@@ -2766,11 +4540,14 @@ private fun NativeArticleImageViewer(
     assetPath: String,
     onDismiss: () -> Unit
 ) {
-    val zoomableState = rememberZoomableState()
-    val imageState = rememberSubSamplingImageState(
-        imageSource = SubSamplingImageSource.asset(assetPath),
-        zoomableState = zoomableState
-    )
+    val context = LocalContext.current
+    val bitmap = remember(assetPath) {
+        runCatching {
+            context.assets.open(assetPath).use { input ->
+                BitmapFactory.decodeStream(input)?.asImageBitmap()
+            }
+        }.getOrNull()
+    }
 
     Box(
         modifier = Modifier
@@ -2778,13 +4555,16 @@ private fun NativeArticleImageViewer(
             .background(Color.Black),
         contentAlignment = Alignment.Center
     ) {
-        SubSamplingImage(
-            state = imageState,
-            contentDescription = null,
-            modifier = Modifier
-                .fillMaxSize()
-                .zoomable(zoomableState)
-        )
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit
+            )
+        } else {
+            Text("Image unavailable", color = Color.White)
+        }
         TextButton(
             onClick = onDismiss,
             modifier = Modifier
@@ -2801,41 +4581,122 @@ private fun NativeArticleImageViewer(
 }
 
 @Composable
+private fun SecurityCredentialTypePicker(viewModel: HumanProgramViewModel) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilterChip(
+            selected = viewModel.appLockCredentialType == SecurityCredentialType.PIN,
+            onClick = { viewModel.updateAppLockCredentialType(SecurityCredentialType.PIN) },
+            label = { Text("PIN") }
+        )
+        FilterChip(
+            selected = viewModel.appLockCredentialType == SecurityCredentialType.PASSWORD,
+            onClick = { viewModel.updateAppLockCredentialType(SecurityCredentialType.PASSWORD) },
+            label = { Text("Password") }
+        )
+    }
+}
+
+@Composable
 internal fun AppLockScreen(
     viewModel: HumanProgramViewModel,
+    onAppLockPinSet: (PinHash) -> Unit,
+    onRecoveryPhraseSet: (PinHash) -> Unit,
     onRequestBiometricUnlock: () -> Unit
 ) {
     var showRecovery by rememberSaveable { mutableStateOf(false) }
+    if (!viewModel.recoveryCredentialResetRequired && !showRecovery) {
+        AppLockCredentialUnlockScreen(
+            viewModel = viewModel,
+            onForgot = { showRecovery = true },
+            onRequestBiometricUnlock = onRequestBiometricUnlock
+        )
+        return
+    }
+
     Surface(modifier = Modifier.fillMaxSize(), color = HpColors.canvas) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
                 .navigationBarsPadding()
-                .padding(24.dp),
-            verticalArrangement = Arrangement.Center
+                .padding(horizontal = 52.dp, vertical = 24.dp),
+            verticalArrangement = Arrangement.Top
         ) {
-            Text("Locked", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold, color = HpColors.ink)
-            Text("Enter your PIN to continue.", color = HpColors.muted)
-            Spacer(Modifier.height(22.dp))
-            HpFormTextField("PIN", viewModel.appUnlockPinInput, viewModel::updateAppUnlockPinInput)
-            Spacer(Modifier.height(12.dp))
-            HpPrimaryButton("Unlock", viewModel::unlockApp)
-            if (viewModel.biometricUnlockEnabled && viewModel.biometricUnlockAvailable) {
-                Spacer(Modifier.height(8.dp))
-                HpSecondaryButton("Use Biometric Unlock", onRequestBiometricUnlock)
+            if (viewModel.recoveryCredentialResetRequired) {
+                Text("Set New Lock", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold, color = HpColors.ink)
+                Spacer(Modifier.height(22.dp))
+                SecurityCredentialResetFields(
+                    viewModel = viewModel,
+                    onSave = {
+                        viewModel.completeRecoveryCredentialReset()?.let { result ->
+                            onAppLockPinSet(result.credentialHash)
+                            onRecoveryPhraseSet(result.recoveryPhraseHash)
+                        }
+                    }
+                )
+                return@Column
             }
-            Spacer(Modifier.height(18.dp))
+
             if (showRecovery) {
+                Text("Recovery Phrase", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold, color = HpColors.ink)
+                Text("Enter your recovery phrase to set a new PIN or password.", color = HpColors.muted)
+                Spacer(Modifier.height(22.dp))
                 HpFormTextField("Recovery phrase", viewModel.recoveryPhraseInput, viewModel::updateRecoveryPhraseInput)
-                Spacer(Modifier.height(8.dp))
-                HpSecondaryButton("Unlock With Recovery Phrase", viewModel::unlockAppWithRecoveryPhrase)
-            } else {
-                HpSecondaryButton("Use Recovery Phrase") { showRecovery = true }
-            }
-            if (viewModel.appUnlockMessage.isNotBlank()) {
                 Spacer(Modifier.height(12.dp))
-                Text(viewModel.appUnlockMessage, color = HpColors.muted)
+                HpPrimaryButton("Continue", viewModel::unlockAppWithRecoveryPhrase)
+                Spacer(Modifier.height(8.dp))
+                HpSecondaryButton("Back") { showRecovery = false }
+                if (viewModel.appUnlockMessage.isNotBlank()) {
+                    Spacer(Modifier.height(12.dp))
+                    Text(viewModel.appUnlockMessage, color = HpColors.muted)
+                }
+                return@Column
+            }
+        }
+    }
+}
+
+@Composable
+private fun AppLockCredentialUnlockScreen(
+    viewModel: HumanProgramViewModel,
+    onForgot: () -> Unit,
+    onRequestBiometricUnlock: () -> Unit
+) {
+    Surface(modifier = Modifier.fillMaxSize(), color = HpColors.canvas) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Spacer(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 8.dp)
+                        .height(56.dp)
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .imePadding()
+                        .navigationBarsPadding()
+                ) {
+                    CredentialUnlockSettingsPage(titleVisible = false) {
+                        CredentialUnlockForm(
+                            credentialType = viewModel.appLockCredentialType,
+                            value = viewModel.appUnlockPinInput,
+                            onValueChange = viewModel::updateAppUnlockPinInput,
+                            onForgot = onForgot,
+                            onUnlock = viewModel::unlockApp
+                        )
+                        if (viewModel.biometricUnlockEnabled && viewModel.biometricUnlockAvailable) {
+                            HpSecondaryButton("Use Biometric Unlock", onRequestBiometricUnlock)
+                        }
+                        if (viewModel.appUnlockMessage.isNotBlank()) {
+                            Text(viewModel.appUnlockMessage, color = HpColors.muted)
+                        }
+                    }
+                }
             }
         }
     }
@@ -2871,17 +4732,16 @@ internal fun WelcomeScreen(
             HpSoftPanel {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Create a PIN or password before entering the app. A recovery phrase will be generated right away.", color = HpColors.muted)
-                    HpFormTextField("PIN or password", viewModel.appLockPinInput, viewModel::updateAppLockPinInput)
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        HpSecondaryButton("Set PIN / Password") {
-                            viewModel.setupAppLockPin()?.let { hash ->
-                                onAppLockPinSet(hash)
-                                viewModel.generateRecoveryPhrase()?.let(onRecoveryPhraseSet)
+                    SecurityCredentialResetFields(
+                        viewModel = viewModel,
+                        onSave = {
+                            viewModel.setupAppLockCredentialWithConfirmation()?.let { result ->
+                                onAppLockPinSet(result.credentialHash)
+                                onRecoveryPhraseSet(result.recoveryPhraseHash)
                             }
                         }
-                    }
+                    )
                     if (viewModel.generatedRecoveryPhrase.isNotBlank()) Text(viewModel.generatedRecoveryPhrase, color = HpColors.accent)
-                    if (viewModel.appLockPinMessage.isNotBlank()) Text(viewModel.appLockPinMessage, color = HpColors.muted)
                 }
             }
         }

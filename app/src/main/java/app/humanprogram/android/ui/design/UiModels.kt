@@ -242,7 +242,7 @@ internal enum class SettingsDetail(
     SCHEDULE("Schedule", "Daily blocks", Icons.Outlined.Event),
     EXERCISE("Exercise", "Routine items", Icons.Outlined.FitnessCenter),
     NOTIFICATIONS("Notifications", "Permissions and reminders", Icons.Outlined.Notifications),
-    CALENDAR("Calendar", "Sources feeding Today", Icons.Outlined.CalendarMonth),
+    CALENDAR("Calendar Sources", "Google Calendar", Icons.Outlined.CalendarMonth),
     IMPORT("Import", "Backlog and backup imports", Icons.Outlined.ImportExport),
     EXPORT("Export", "Backup export", Icons.Outlined.ImportExport),
     SECURITY("Security", "Lock, recovery, and encryption", Icons.Outlined.Lock),
@@ -256,7 +256,7 @@ internal data class SettingsGroup(
 )
 
 internal val settingsGroups = listOf(
-    SettingsGroup("General", listOf(SettingsDetail.GENERAL_SETTINGS, SettingsDetail.CALENDAR, SettingsDetail.NOTIFICATIONS, SettingsDetail.SECURITY)),
+    SettingsGroup("General", listOf(SettingsDetail.CALENDAR, SettingsDetail.GENERAL_SETTINGS, SettingsDetail.NOTIFICATIONS, SettingsDetail.SECURITY)),
     SettingsGroup("Planning", listOf(SettingsDetail.RECURRING, SettingsDetail.SCHEDULE, SettingsDetail.EXERCISE)),
     SettingsGroup("Import-Export", listOf(SettingsDetail.IMPORT, SettingsDetail.EXPORT)),
     SettingsGroup("About", listOf(SettingsDetail.ABOUT)),

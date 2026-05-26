@@ -15,7 +15,8 @@ data class DeviceCalendarEvent(
 
 data class DeviceCalendarSource(
     val calendarId: String,
-    val displayName: String
+    val displayName: String,
+    val accountType: String = ""
 )
 
 data class CalendarLocalState(

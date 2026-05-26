@@ -32,6 +32,10 @@ android {
     }
 }
 
+configurations.configureEach {
+    exclude(group = "androidx.graphics", module = "graphics-path")
+}
+
 ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
 }
@@ -56,13 +60,13 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.core:core-ktx:1.18.0")
-    implementation("androidx.datastore:datastore-preferences:1.2.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
-    implementation("me.saket.telephoto:sub-sampling-image:0.18.0")
-    implementation("me.saket.telephoto:zoomable:0.18.0")
+    implementation("com.google.crypto.tink:tink:1.21.0")
+    implementation("io.github.darkokoa:datetime-wheel-picker:1.3.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.8.0")
     ksp("androidx.room:room-compiler:$roomVersion")
 
     debugImplementation("androidx.compose.ui:ui-tooling")

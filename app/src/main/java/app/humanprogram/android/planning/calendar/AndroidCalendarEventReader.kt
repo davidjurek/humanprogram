@@ -19,7 +19,8 @@ class AndroidCalendarEventReader(
 
         val projection = arrayOf(
             CalendarContract.Calendars._ID,
-            CalendarContract.Calendars.CALENDAR_DISPLAY_NAME
+            CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
+            CalendarContract.Calendars.ACCOUNT_TYPE
         )
 
         val sources = mutableListOf<DeviceCalendarSource>()
@@ -32,12 +33,14 @@ class AndroidCalendarEventReader(
         )?.use { cursor ->
             val idIndex = cursor.getColumnIndexOrThrow(CalendarContract.Calendars._ID)
             val nameIndex = cursor.getColumnIndexOrThrow(CalendarContract.Calendars.CALENDAR_DISPLAY_NAME)
+            val accountTypeIndex = cursor.getColumnIndexOrThrow(CalendarContract.Calendars.ACCOUNT_TYPE)
 
             while (cursor.moveToNext()) {
                 sources.add(
                     DeviceCalendarSource(
                         calendarId = cursor.getLong(idIndex).toString(),
-                        displayName = cursor.getString(nameIndex).orEmpty().ifBlank { "Calendar" }
+                        displayName = cursor.getString(nameIndex).orEmpty().ifBlank { "Calendar" },
+                        accountType = cursor.getString(accountTypeIndex).orEmpty()
                     )
                 )
             }

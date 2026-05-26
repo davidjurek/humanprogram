@@ -97,9 +97,9 @@ fun NotificationReminder.toEntity(now: Instant = Instant.now()): NotificationRem
         id = id,
         title = title,
         reminderAt = reminderAt,
-        soundMode = "DEFAULT",
-        imageFilename = null,
-        intervalAmount = null,
+        soundMode = sound,
+        imageFilename = imageUri,
+        intervalAmount = intervalAmount,
         intervalUnit = customWeekdays.sorted().joinToString(",").takeIf { it.isNotBlank() },
         isEnabled = isEnabled,
         recurrenceMode = recurrence.name,
@@ -113,6 +113,9 @@ fun NotificationReminderEntity.toModel(): NotificationReminder {
         id = id,
         title = title,
         reminderAt = reminderAt,
+        sound = soundMode,
+        imageUri = imageFilename,
+        intervalAmount = intervalAmount ?: 18,
         recurrence = recurrenceMode.toReminderRecurrence(),
         customWeekdays = intervalUnit
             ?.split(",")

@@ -70,6 +70,7 @@ import androidx.compose.material.icons.outlined.LockOpen
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.RestartAlt
 import androidx.compose.material.icons.outlined.Save
@@ -511,12 +512,16 @@ internal fun ScheduleTimeline(
 ) {
     val events = blocks.mapIndexed { index, block ->
         val parsed = parseScheduleRange(block.timeRange)
+        val isSleepBlock = block.title.equals("Sleep", ignoreCase = true)
+        val savedColor = parseScheduleBlockColor(block.colorHex)
         TimelineEvent(
             time = block.timeRange,
             title = block.title,
-            color = HpColors.accentSoft,
+            color = savedColor ?: if (isSleepBlock) Color(0xFF475C6C) else HpColors.accentSoft,
             startMinute = parsed?.first ?: timelineStartHour * 60,
             endMinute = parsed?.second ?: timelineStartHour * 60 + 45,
+            wrapsMidnight = parsed?.wrapsMidnight == true,
+            opaque = savedColor != null || isSleepBlock,
             scheduleBlockIndex = index
         )
     } + calendarEvents.map { event ->
@@ -555,6 +560,11 @@ internal fun ScheduleTimeline(
             fun heightForMinutes(minutes: Int): Dp =
                 dayHeight * (minutes / ((timelineEndHour - timelineStartHour) * 60f))
             fun labelYForHour(hour: Int): Dp = yForHour(hour) - 9.dp
+            val timelineLineColor = if (LocalHpDark.current) {
+                Color.White.copy(alpha = 0.58f)
+            } else {
+                Color(0xFF4B515C)
+            }
 
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Box(
@@ -576,34 +586,29 @@ internal fun ScheduleTimeline(
                         .weight(1f)
                         .height(timelineHeight)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .width(railWidth)
-                            .offset(y = timelineVerticalPadding)
-                            .height(dayHeight)
-                            .background(Color(0xFFF7F7F7).copy(alpha = 0.7f))
-                    )
+                    timelineEventSegments(events).forEach { segment ->
+                        TimelineEventBox(
+                            segment = segment,
+                            railWidth = railWidth,
+                            yForMinute = ::yForMinute,
+                            heightForMinutes = ::heightForMinutes
+                        )
+                    }
                     (timelineStartHour..timelineEndHour step 3).forEach { hour ->
                         Box(
                             modifier = Modifier
                                 .width(railWidth)
                                 .height(1.dp)
                                 .offset(y = yForHour(hour))
-                                .background(HpColors.divider)
+                                .background(timelineLineColor)
                         )
                     }
                     events.sortedBy { it.startMinute }.forEach { event ->
-                        TimelineEventBox(
-                            event = event,
-                            railWidth = railWidth,
-                            yForMinute = ::yForMinute,
-                            heightForMinutes = ::heightForMinutes
-                        )
                         TimelineEventLabel(
                             event = event,
                             modifier = Modifier.offset(
                                 x = railWidth + 10.dp,
-                                y = yForMinute((event.startMinute + event.endMinute) / 2) - 10.dp
+                                y = yForMinute(event.labelMinute()) - 10.dp
                             )
                         )
                     }
@@ -630,9 +635,47 @@ private data class TimelineEvent(
     val color: Color,
     val startMinute: Int,
     val endMinute: Int,
+    val wrapsMidnight: Boolean = false,
+    val opaque: Boolean = false,
     val scheduleBlockIndex: Int? = null,
     val calendarEvent: DeviceCalendarEvent? = null
 )
+
+private data class TimelineEventSegment(
+    val event: TimelineEvent,
+    val startMinute: Int,
+    val endMinute: Int
+)
+
+private data class TimelineRange(
+    val first: Int,
+    val second: Int,
+    val wrapsMidnight: Boolean
+)
+
+private fun timelineEventSegments(events: List<TimelineEvent>): List<TimelineEventSegment> {
+    return events
+        .flatMap { event ->
+            if (event.wrapsMidnight) {
+                listOf(
+                    TimelineEventSegment(event, event.startMinute, timelineEndHour * 60),
+                    TimelineEventSegment(event, timelineStartHour * 60, event.endMinute)
+                )
+            } else {
+                listOf(TimelineEventSegment(event, event.startMinute, event.endMinute))
+            }
+        }
+        .filter { it.endMinute > it.startMinute }
+        .sortedBy { it.startMinute }
+}
+
+private fun TimelineEvent.labelMinute(): Int {
+    return if (wrapsMidnight) {
+        (startMinute + timelineEndHour * 60) / 2
+    } else {
+        (startMinute + endMinute) / 2
+    }
+}
 
 @Composable
 private fun TimelineNowRow(
@@ -689,20 +732,22 @@ private fun TimelineNowRow(
 
 @Composable
 private fun TimelineEventBox(
-    event: TimelineEvent,
+    segment: TimelineEventSegment,
     railWidth: Dp,
     yForMinute: (Int) -> Dp,
     heightForMinutes: (Int) -> Dp
 ) {
-    val clippedStart = event.startMinute.coerceIn(timelineStartHour * 60, timelineEndHour * 60)
-    val clippedEnd = event.endMinute.coerceAtLeast(event.startMinute + 30).coerceIn(timelineStartHour * 60, timelineEndHour * 60)
+    val event = segment.event
+    val clippedStart = segment.startMinute.coerceIn(timelineStartHour * 60, timelineEndHour * 60)
+    val clippedEnd = segment.endMinute.coerceAtLeast(segment.startMinute + 30).coerceIn(timelineStartHour * 60, timelineEndHour * 60)
+    val backgroundColor = if (event.opaque) event.color else event.color.copy(alpha = 0.24f)
     Row(
         modifier = Modifier
             .width(railWidth)
             .offset(y = yForMinute(clippedStart))
             .height(heightForMinutes((clippedEnd - clippedStart).coerceAtLeast(30)))
             .clip(RoundedCornerShape(10.dp))
-            .background(event.color.copy(alpha = 0.24f))
+            .background(backgroundColor)
             .padding(horizontal = 8.dp, vertical = 7.dp),
         verticalAlignment = Alignment.Top
     ) {}
@@ -919,14 +964,18 @@ internal fun TodayTaskDetailSheet(
     }
 }
 
-private fun parseScheduleRange(raw: String): Pair<Int, Int>? {
+private fun parseScheduleRange(raw: String): TimelineRange? {
     val parts = raw.split("-", "–", "—").map { it.trim() }.filter { it.isNotBlank() }
     if (parts.size < 2) return null
     val start = parseTimelineTime(parts[0]) ?: return null
     val end = parseTimelineTime(parts[1]) ?: return null
     val startMinute = start.toSecondOfDay() / 60
     val endMinute = end.toSecondOfDay() / 60
-    return startMinute to if (endMinute <= startMinute) timelineEndHour * 60 else endMinute
+    return TimelineRange(
+        first = startMinute,
+        second = endMinute,
+        wrapsMidnight = endMinute <= startMinute
+    )
 }
 
 private fun parseTimelineTime(raw: String): LocalTime? {
@@ -939,6 +988,12 @@ private fun parseTimelineTime(raw: String): LocalTime? {
             null
         }
     }
+}
+
+private fun parseScheduleBlockColor(colorHex: String?): Color? {
+    val hex = colorHex?.trim()?.removePrefix("#") ?: return null
+    if (hex.length != 6 || hex.any { it !in '0'..'9' && it !in 'a'..'f' && it !in 'A'..'F' }) return null
+    return Color(0xFF000000 or hex.toLong(16))
 }
 
 @Composable
@@ -2428,15 +2483,36 @@ internal fun ImportScreen(
     onPlannerDataReplacing: () -> Unit,
     onReminderScheduleChanged: () -> Unit,
     innerBackRequest: Int,
-    onInnerBackAvailableChange: (Boolean) -> Unit
+    onInnerBackAvailableChange: (Boolean) -> Unit,
+    confirmRequest: Int,
+    onConfirmPageChange: (Boolean) -> Unit
 ) {
     var page by rememberSaveable { mutableStateOf("root") }
     var textImportDraft by rememberSaveable { mutableStateOf("") }
+    var handledConfirmRequest by rememberSaveable { mutableIntStateOf(confirmRequest) }
     LaunchedEffect(page) {
         onInnerBackAvailableChange(page != "root")
+        onConfirmPageChange(page == "confirm")
     }
     LaunchedEffect(innerBackRequest) {
-        if (innerBackRequest > 0 && page != "root") page = "root"
+        if (innerBackRequest > 0 && page != "root") {
+            if (page == "confirm") viewModel.clearPendingBacklogImport()
+            page = "root"
+        }
+    }
+    LaunchedEffect(viewModel.pendingBacklogImport) {
+        if (viewModel.pendingBacklogImport != null) {
+            page = "confirm"
+        }
+    }
+    LaunchedEffect(confirmRequest, page) {
+        if (confirmRequest != handledConfirmRequest) {
+            handledConfirmRequest = confirmRequest
+            if (page == "confirm" && viewModel.confirmPendingBacklogImport()) {
+                page = "result"
+                textImportDraft = ""
+            }
+        }
     }
 
     if (page == "text") {
@@ -2451,8 +2527,7 @@ internal fun ImportScreen(
                             minLines = 6
                         )
                         HpSecondaryButton("Import Text", textImportDraft.isNotBlank()) {
-                            viewModel.importBacklogPlainText(textImportDraft)
-                            textImportDraft = ""
+                            viewModel.previewBacklogTextImport(textImportDraft)
                         }
                         if (viewModel.backlogCsvMessage.isNotBlank()) Text(viewModel.backlogCsvMessage, color = HpColors.muted)
                     }
@@ -2469,6 +2544,34 @@ internal fun ImportScreen(
                         HpSecondaryButton("Save CSV Import Template", onExportBacklogCsvTemplate)
                         HpPrimaryButton("Choose CSV", onImportBacklogCsv)
                         if (viewModel.backlogCsvMessage.isNotBlank()) Text(viewModel.backlogCsvMessage, color = HpColors.muted)
+                    }
+                }
+            }
+        }
+        return
+    }
+    if (page == "confirm") {
+        BacklogImportConfirmScreen(viewModel)
+        return
+    }
+    if (page == "result") {
+        val result = viewModel.lastBacklogImportResult
+        HpList {
+            item {
+                HpSettingsContentPage(title = "Import Result") {
+                    Column {
+                        BacklogImportResultRow(
+                            icon = Icons.Outlined.CheckCircle,
+                            title = "${result?.importedCount ?: 0} imported",
+                            subtitle = "${result?.notImportedCount ?: 0} not imported"
+                        )
+                        result?.rejectedRows.orEmpty().forEach { rejection ->
+                            BacklogImportResultRow(
+                                icon = Icons.Outlined.Info,
+                                title = "Row ${rejection.rowNumber}: ${rejection.reason}",
+                                subtitle = rejection.rawRow
+                            )
+                        }
                     }
                 }
             }
@@ -2528,6 +2631,101 @@ internal fun ImportScreen(
                     )
                 )
             )
+        }
+    }
+}
+
+@Composable
+private fun BacklogImportConfirmScreen(viewModel: HumanProgramViewModel) {
+    val pending = viewModel.pendingBacklogImport
+    if (pending == null) {
+        HpList {}
+        return
+    }
+
+    val preview = pending.preview
+    HpList {
+        item {
+            HpSettingsContentPage(title = "Confirm Import") {
+                Column {
+                    preview.accepted.forEach { item ->
+                        val selected = item.id in viewModel.pendingBacklogImportSelectedIds
+                        BacklogImportPreviewRow(
+                            item = item,
+                            selected = selected,
+                            onToggle = { viewModel.togglePendingBacklogImportSelection(item.id) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BacklogImportPreviewRow(
+    item: BacklogItem,
+    selected: Boolean,
+    onToggle: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(HpTheme.radii.row))
+            .background(if (selected) HpColors.glass else Color.Transparent)
+            .clickable(onClick = onToggle)
+            .padding(vertical = HpTheme.spacing.md),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Icon(
+            imageVector = if (selected) Icons.Outlined.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
+            contentDescription = null,
+            tint = if (selected) HpColors.accent else HpColors.muted
+        )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(item.title, color = HpColors.ink, fontWeight = FontWeight.SemiBold)
+            val metadata = listOfNotNull(
+                item.projectBucket.takeIf { it.isNotBlank() },
+                item.assignedDate?.format(DateTimeFormatter.ofPattern("MMM d, yyyy"))
+            )
+            if (metadata.isNotEmpty()) {
+                Text(
+                    metadata.joinToString(" / "),
+                    color = HpColors.muted,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            if (item.notes.isNotBlank()) {
+                Text(item.notes, color = HpColors.muted, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+@Composable
+private fun BacklogImportResultRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(HpTheme.radii.row))
+            .padding(vertical = HpTheme.spacing.md),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Icon(icon, contentDescription = null, tint = HpColors.accent)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(title, color = HpColors.ink, fontWeight = FontWeight.Medium)
+            if (subtitle.isNotBlank()) {
+                Text(subtitle, color = HpColors.muted, style = MaterialTheme.typography.bodySmall)
+            }
         }
     }
 }

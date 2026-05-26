@@ -2,11 +2,13 @@ package app.humanprogram.android.planning.backlog
 
 import app.humanprogram.android.planning.model.BacklogItem
 import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
 
 data class BacklogImportPreview(
     val accepted: List<BacklogItem>,
-    val rejected: List<BacklogImportRejection>
+    val rejected: List<BacklogImportRejection>,
+    val fatalError: String? = null
 )
 
 data class BacklogImportRejection(
@@ -22,7 +24,15 @@ class BacklogCsvImporter {
             return BacklogImportPreview(emptyList(), emptyList())
         }
 
-        val hasHeader = lines.first().parseCsvRow().map { it.lowercase() } == EXPECTED_HEADER
+        val firstRow = lines.first().parseCsvRowOrNull()
+            ?: return BacklogImportPreview(
+                accepted = emptyList(),
+                rejected = lines.mapIndexed { index, rawRow ->
+                    BacklogImportRejection(index + 1, "CSV format error", rawRow)
+                },
+                fatalError = "CSV format error"
+            )
+        val hasHeader = firstRow.map { it.lowercase() } == EXPECTED_HEADER
         val dataLines = if (hasHeader) lines.drop(1) else lines
         val startRow = if (hasHeader) 2 else 1
 
@@ -31,7 +41,16 @@ class BacklogCsvImporter {
 
         dataLines.forEachIndexed { index, rawRow ->
             val rowNumber = startRow + index
-            val cells = rawRow.parseCsvRow()
+            val cells = rawRow.parseCsvRowOrNull()
+            if (cells == null) {
+                return BacklogImportPreview(
+                    accepted = emptyList(),
+                    rejected = dataLines.mapIndexed { rowIndex, row ->
+                        BacklogImportRejection(startRow + rowIndex, "CSV format error", row)
+                    },
+                    fatalError = "CSV format error"
+                )
+            }
             val title = cells.getOrNull(0).orEmpty().trim()
 
             if (title.isEmpty()) {
@@ -60,18 +79,25 @@ class BacklogCsvImporter {
 }
 
 private val EXPECTED_HEADER = listOf("title", "date", "project_bucket", "note")
+private val ACCEPTED_DATE_FORMATS = listOf(
+    DateTimeFormatter.ISO_LOCAL_DATE,
+    DateTimeFormatter.ofPattern("M/d/yyyy"),
+    DateTimeFormatter.ofPattern("MM/dd/yyyy")
+)
 
 private fun String.toLocalDateOrNull(): LocalDate? {
     if (isBlank()) return null
 
-    return try {
-        LocalDate.parse(this)
-    } catch (_: DateTimeParseException) {
-        null
+    return ACCEPTED_DATE_FORMATS.firstNotNullOfOrNull { formatter ->
+        try {
+            LocalDate.parse(this, formatter)
+        } catch (_: DateTimeParseException) {
+            null
+        }
     }
 }
 
-private fun String.parseCsvRow(): List<String> {
+private fun String.parseCsvRowOrNull(): List<String>? {
     val cells = mutableListOf<String>()
     val current = StringBuilder()
     var inQuotes = false
@@ -96,6 +122,7 @@ private fun String.parseCsvRow(): List<String> {
         index += 1
     }
 
+    if (inQuotes) return null
     cells.add(current.toString())
     return cells
 }

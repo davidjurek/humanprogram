@@ -63,7 +63,8 @@ private fun PlannerSnapshot.toPlanningJson(): String {
         "\"scheduleBlocks\":${scheduleBlocks.joinToJsonArray { block ->
             listOf(
                 "\"title\":${block.title.toJsonString()}",
-                "\"timeRange\":${block.timeRange.toJsonString()}"
+                "\"timeRange\":${block.timeRange.toJsonString()}",
+                "\"colorHex\":${block.colorHex.toJsonNullableString()}"
             ).joinToString(prefix = "{", separator = ",", postfix = "}")
         }}",
         "\"exerciseRoutine\":${listOf(

@@ -1,7 +1,11 @@
 package app.humanprogram.android.planning
 
 import app.humanprogram.android.planning.calendar.DeviceCalendarEvent
+import app.humanprogram.android.core.notifications.NotificationScheduleRecurrence
+import app.humanprogram.android.core.security.EncryptedSecret
+import app.humanprogram.android.core.security.SecretEncryptor
 import app.humanprogram.android.planning.model.DailyTaskSourceType
+import app.humanprogram.android.planning.model.NotificationReminder
 import app.humanprogram.android.planning.model.ReminderRecurrence
 import app.humanprogram.android.planning.model.ScheduleBlock
 import org.junit.Assert.assertFalse
@@ -88,6 +92,8 @@ class HumanProgramViewModelTest {
             biometricEnabled = false,
             saltBase64 = hash!!.saltBase64,
             hashBase64 = hash.hashBase64,
+            credentialType = hash.credentialType,
+            verifierScheme = hash.verifierScheme,
             timeoutMinutes = 0
         )
         viewModel.lockAppIfEnabled()
@@ -188,8 +194,96 @@ class HumanProgramViewModelTest {
     }
 
     @Test
-    fun recoveryPhraseCanUnlockWhenPinIsForgotten() {
+    fun securitySettingsRequireCurrentCredential() {
         val viewModel = HumanProgramViewModel()
+        viewModel.updateAppLockPinInput("1234")
+        viewModel.setupAppLockPin()
+        viewModel.clearSecuritySettingsUnlock()
+
+        viewModel.updateSecuritySettingsUnlockInput("0000")
+        viewModel.unlockSecuritySettingsWithCredential()
+
+        assertFalse(viewModel.securitySettingsUnlocked)
+        assertEquals("PIN rejected.", viewModel.securitySettingsUnlockMessage)
+
+        viewModel.updateSecuritySettingsUnlockInput("1234")
+        viewModel.unlockSecuritySettingsWithCredential()
+
+        assertTrue(viewModel.securitySettingsUnlocked)
+        assertEquals("", viewModel.securitySettingsUnlockMessage)
+    }
+
+    @Test
+    fun appLockSetupRequiresMatchingConfirmationAndCreatesRecoveryPhrase() {
+        val viewModel = HumanProgramViewModel(secretEncryptor = FakeSecretEncryptor())
+        viewModel.updateAppLockPinInput("1234")
+        viewModel.updateAppLockPinConfirmInput("4321")
+
+        assertEquals(null, viewModel.setupAppLockCredentialWithConfirmation())
+        assertEquals("PIN entries do not match.", viewModel.appLockPinMessage)
+
+        viewModel.updateAppLockPinInput("1234")
+        viewModel.updateAppLockPinConfirmInput("1234")
+        val result = viewModel.setupAppLockCredentialWithConfirmation()
+
+        assertTrue(result != null)
+        assertTrue(viewModel.appLockEnabled)
+        assertEquals(4, viewModel.generatedRecoveryPhrase.split("-").size)
+    }
+
+    @Test
+    fun appLockChangeRequiresCurrentCredentialAndRotatesRecoveryPhrase() {
+        val viewModel = HumanProgramViewModel(secretEncryptor = FakeSecretEncryptor())
+        viewModel.updateAppLockPinInput("1234")
+        viewModel.updateAppLockPinConfirmInput("1234")
+        viewModel.setupAppLockCredentialWithConfirmation()
+        val oldPhrase = viewModel.generatedRecoveryPhrase
+
+        viewModel.updateAppLockCurrentCredentialInput("0000")
+        viewModel.updateAppLockPinInput("5678")
+        viewModel.updateAppLockPinConfirmInput("5678")
+
+        assertEquals(null, viewModel.changeAppLockCredentialWithConfirmation())
+        assertEquals("Current PIN rejected.", viewModel.appLockPinMessage)
+
+        viewModel.updateAppLockCurrentCredentialInput("1234")
+        viewModel.updateAppLockPinInput("5678")
+        viewModel.updateAppLockPinConfirmInput("5678")
+        val result = viewModel.changeAppLockCredentialWithConfirmation()
+        val newPhrase = viewModel.generatedRecoveryPhrase
+
+        assertTrue(result != null)
+        assertTrue(newPhrase != oldPhrase)
+
+        viewModel.lockAppNow()
+        viewModel.updateAppUnlockPinInput("1234")
+        viewModel.unlockApp()
+        assertTrue(viewModel.appLocked)
+
+        viewModel.updateAppUnlockPinInput("5678")
+        viewModel.unlockApp()
+        assertFalse(viewModel.appLocked)
+    }
+
+    @Test
+    fun biometricUnlockDoesNotOpenSecuritySettings() {
+        val viewModel = HumanProgramViewModel()
+        viewModel.updateBiometricAvailability(true)
+        viewModel.updateAppLockPinInput("1234")
+        viewModel.setupAppLockPin()
+        viewModel.clearSecuritySettingsUnlock()
+        viewModel.updateBiometricUnlockEnabled(true)
+        viewModel.lockAppNow()
+
+        viewModel.unlockAppWithBiometric()
+
+        assertFalse(viewModel.appLocked)
+        assertFalse(viewModel.securitySettingsUnlocked)
+    }
+
+    @Test
+    fun recoveryPhraseCanUnlockWhenPinIsForgotten() {
+        val viewModel = HumanProgramViewModel(secretEncryptor = FakeSecretEncryptor())
         viewModel.updateAppLockPinInput("1234")
         viewModel.setupAppLockPin()
         val hash = viewModel.generateRecoveryPhrase()
@@ -202,13 +296,190 @@ class HumanProgramViewModelTest {
             hashBase64 = "pin-hash",
             timeoutMinutes = 0,
             recoverySaltBase64 = hash!!.saltBase64,
-            recoveryHashBase64 = hash.hashBase64
+            recoveryHashBase64 = hash.hashBase64,
+            recoveryVerifierScheme = hash.verifierScheme
         )
         viewModel.lockAppNow()
         viewModel.updateRecoveryPhraseInput(phrase)
         viewModel.unlockAppWithRecoveryPhrase()
 
+        assertTrue(viewModel.appLocked)
+        assertTrue(viewModel.recoveryCredentialResetRequired)
+
+        viewModel.updateAppLockPinInput("5678")
+        viewModel.updateAppLockPinConfirmInput("5678")
+        val resetResult = viewModel.completeRecoveryCredentialReset()
+        val newPhrase = viewModel.generatedRecoveryPhrase
+
         assertFalse(viewModel.appLocked)
+        assertFalse(viewModel.recoveryCredentialResetRequired)
+        assertTrue(resetResult != null)
+        assertTrue(newPhrase != phrase)
+
+        viewModel.lockAppNow()
+        viewModel.updateRecoveryPhraseInput(phrase)
+        viewModel.unlockAppWithRecoveryPhrase()
+
+        assertFalse(viewModel.recoveryCredentialResetRequired)
+        assertEquals("Recovery phrase rejected.", viewModel.appUnlockMessage)
+
+        viewModel.updateRecoveryPhraseInput(newPhrase)
+        viewModel.unlockAppWithRecoveryPhrase()
+
+        assertTrue(viewModel.recoveryCredentialResetRequired)
+    }
+
+    @Test
+    fun recoveryResetDoesNotChangePinWhenNewPhraseEncryptionFails() {
+        val viewModel = HumanProgramViewModel(secretEncryptor = FakeSecretEncryptor())
+        viewModel.updateAppLockPinInput("1234")
+        viewModel.setupAppLockPin()
+        val hash = viewModel.generateRecoveryPhrase()
+        val phrase = viewModel.generatedRecoveryPhrase
+
+        viewModel.loadStoredAppLockPin(
+            enabled = true,
+            biometricEnabled = false,
+            saltBase64 = "pin-salt",
+            hashBase64 = "pin-hash",
+            timeoutMinutes = 0,
+            recoverySaltBase64 = hash!!.saltBase64,
+            recoveryHashBase64 = hash.hashBase64,
+            recoveryVerifierScheme = hash.verifierScheme
+        )
+        viewModel.lockAppNow()
+        viewModel.updateRecoveryPhraseInput(phrase)
+        viewModel.unlockAppWithRecoveryPhrase()
+
+        val noEncryptorViewModel = HumanProgramViewModel()
+        noEncryptorViewModel.loadStoredAppLockPin(
+            enabled = true,
+            biometricEnabled = false,
+            saltBase64 = "pin-salt",
+            hashBase64 = "pin-hash",
+            timeoutMinutes = 0,
+            recoverySaltBase64 = hash.saltBase64,
+            recoveryHashBase64 = hash.hashBase64,
+            recoveryVerifierScheme = hash.verifierScheme
+        )
+        noEncryptorViewModel.lockAppNow()
+        noEncryptorViewModel.updateRecoveryPhraseInput(phrase)
+        noEncryptorViewModel.unlockAppWithRecoveryPhrase()
+        noEncryptorViewModel.updateAppLockPinInput("5678")
+        noEncryptorViewModel.updateAppLockPinConfirmInput("5678")
+
+        val resetResult = noEncryptorViewModel.completeRecoveryCredentialReset()
+
+        assertEquals(null, resetResult)
+        assertTrue(noEncryptorViewModel.appLocked)
+        assertTrue(noEncryptorViewModel.recoveryCredentialResetRequired)
+        assertEquals("Recovery phrase encryption is not available.", noEncryptorViewModel.recoveryPhraseMessage)
+    }
+
+    @Test
+    fun recoveryPhraseRequiresEncryptionBeforeItCanBeSaved() {
+        val viewModel = HumanProgramViewModel()
+        viewModel.updateAppLockPinInput("1234")
+        viewModel.setupAppLockPin()
+
+        val hash = viewModel.generateRecoveryPhrase()
+
+        assertEquals(null, hash)
+        assertEquals("", viewModel.generatedRecoveryPhrase)
+        assertEquals(null, viewModel.recoveryPhraseEncryptedSecret)
+        assertEquals("Recovery phrase encryption is not available.", viewModel.recoveryPhraseMessage)
+    }
+
+    @Test
+    fun recoveryPhraseIsFourWordsAndCanBeLoadedFromEncryptedStorage() {
+        val encryptor = FakeSecretEncryptor()
+        val viewModel = HumanProgramViewModel(secretEncryptor = encryptor)
+        viewModel.updateAppLockPinInput("1234")
+        viewModel.setupAppLockPin()
+
+        val hash = viewModel.generateRecoveryPhrase()
+        val phrase = viewModel.generatedRecoveryPhrase
+        val encrypted = viewModel.recoveryPhraseEncryptedSecret
+
+        assertEquals(4, phrase.split("-").size)
+        assertTrue(encrypted!!.ciphertextBase64.isNotBlank())
+
+        val restoredViewModel = HumanProgramViewModel(secretEncryptor = encryptor)
+        restoredViewModel.loadStoredAppLockPin(
+            enabled = true,
+            biometricEnabled = false,
+            saltBase64 = "pin-salt",
+            hashBase64 = "pin-hash",
+            timeoutMinutes = 0,
+            recoverySaltBase64 = hash!!.saltBase64,
+            recoveryHashBase64 = hash.hashBase64,
+            recoveryVerifierScheme = hash.verifierScheme,
+            recoveryPhraseEncryptionScheme = encrypted.scheme,
+            recoveryPhraseKeyAlias = encrypted.keyAlias,
+            recoveryPhraseNonceBase64 = encrypted.nonceBase64,
+            recoveryPhraseCiphertextBase64 = encrypted.ciphertextBase64
+        )
+
+        assertEquals(phrase, restoredViewModel.generatedRecoveryPhrase)
+    }
+
+    @Test
+    fun rotatingRecoveryPhraseReplacesOldPhrase() {
+        val viewModel = HumanProgramViewModel(secretEncryptor = FakeSecretEncryptor())
+        viewModel.updateAppLockPinInput("1234")
+        viewModel.setupAppLockPin()
+        viewModel.generateRecoveryPhrase()
+        val oldPhrase = viewModel.generatedRecoveryPhrase
+
+        viewModel.generateRecoveryPhrase()
+        val newPhrase = viewModel.generatedRecoveryPhrase
+
+        assertTrue(newPhrase != oldPhrase)
+
+        viewModel.lockAppNow()
+        viewModel.updateRecoveryPhraseInput(oldPhrase)
+        viewModel.unlockAppWithRecoveryPhrase()
+
+        assertFalse(viewModel.recoveryCredentialResetRequired)
+        assertEquals("Recovery phrase rejected.", viewModel.appUnlockMessage)
+
+        viewModel.updateRecoveryPhraseInput(newPhrase)
+        viewModel.unlockAppWithRecoveryPhrase()
+
+        assertTrue(viewModel.recoveryCredentialResetRequired)
+    }
+
+    @Test
+    fun legacyPlaintextRecoveryPhraseCanStillLoadAsFallback() {
+        val viewModel = HumanProgramViewModel(secretEncryptor = FakeSecretEncryptor())
+        viewModel.loadStoredAppLockPin(
+            enabled = true,
+            biometricEnabled = false,
+            saltBase64 = "pin-salt",
+            hashBase64 = "pin-hash",
+            timeoutMinutes = 0,
+            recoveryPhrasePlainText = "anchor-bright-cedar-dawn"
+        )
+
+        assertEquals("anchor-bright-cedar-dawn", viewModel.generatedRecoveryPhrase)
+    }
+
+    @Test
+    fun oldSixWordRecoveryPhraseIsClearedOnLoad() {
+        val viewModel = HumanProgramViewModel(secretEncryptor = FakeSecretEncryptor())
+        viewModel.loadStoredAppLockPin(
+            enabled = true,
+            biometricEnabled = false,
+            saltBase64 = "pin-salt",
+            hashBase64 = "pin-hash",
+            timeoutMinutes = 0,
+            recoverySaltBase64 = "recovery-salt",
+            recoveryHashBase64 = "recovery-hash",
+            recoveryPhrasePlainText = "juniper-silver-olive-cedar-thrive-dawn"
+        )
+
+        assertEquals("", viewModel.generatedRecoveryPhrase)
+        assertEquals("Old recovery phrase format was removed. Generate a new recovery phrase.", viewModel.recoveryPhraseMessage)
     }
 
     @Test
@@ -822,6 +1093,124 @@ class HumanProgramViewModelTest {
     }
 
     @Test
+    fun reminderSchedulingAcceptsNotificationEditorTimeLabels() {
+        val viewModel = HumanProgramViewModel()
+
+        viewModel.addNotificationReminder(
+            NotificationReminder(
+                title = "Editor time",
+                reminderAt = "4:12 PM",
+                message = "Check the picture",
+                imageUri = "/tmp/reminder.image",
+                recurrence = ReminderRecurrence.DAILY
+            )
+        )
+
+        val request = viewModel.reminderScheduleRequests(
+            now = Instant.parse("2026-05-18T16:00:00Z"),
+            zoneId = java.time.ZoneOffset.UTC
+        ).single { it.title == "Editor time" }
+
+        assertEquals(Instant.parse("2026-05-18T16:12:00Z"), request.reminderAt)
+        assertEquals("Check the picture", request.message)
+        assertEquals("/tmp/reminder.image", request.imageUri)
+    }
+
+    @Test
+    fun oneOffReminderUsesSavedNotificationDateAndDropsPastOccurrence() {
+        val viewModel = HumanProgramViewModel()
+
+        viewModel.addNotificationReminder(
+            NotificationReminder(
+                title = "One off",
+                reminderAt = "11:50 AM",
+                notificationDate = "2026-05-25",
+                recurrence = ReminderRecurrence.ONCE
+            )
+        )
+
+        val requests = viewModel.reminderScheduleRequests(
+            now = Instant.parse("2026-05-25T20:00:00Z"),
+            zoneId = java.time.ZoneOffset.UTC
+        )
+
+        assertTrue(requests.none { it.title == "One off" })
+    }
+
+    @Test
+    fun futureOneOffReminderUsesSavedNotificationDate() {
+        val viewModel = HumanProgramViewModel()
+
+        viewModel.addNotificationReminder(
+            NotificationReminder(
+                title = "Future one off",
+                reminderAt = "11:50 AM",
+                notificationDate = "2026-05-26",
+                recurrence = ReminderRecurrence.ONCE
+            )
+        )
+
+        val request = viewModel.reminderScheduleRequests(
+            now = Instant.parse("2026-05-25T20:00:00Z"),
+            zoneId = java.time.ZoneOffset.UTC
+        ).single { it.title == "Future one off" }
+
+        assertEquals(Instant.parse("2026-05-26T11:50:00Z"), request.reminderAt)
+        assertEquals(NotificationScheduleRecurrence.NONE, request.recurrenceMode)
+    }
+
+    @Test
+    fun intervalReminderSchedulesNextIntervalAndRepeatInterval() {
+        val viewModel = HumanProgramViewModel()
+
+        viewModel.addNotificationReminder(
+            NotificationReminder(
+                title = "Every three minutes",
+                reminderAt = "4:12 PM",
+                repeatType = "Custom",
+                timeRule = "Every interval",
+                intervalAmount = 3,
+                intervalUnit = "minutes",
+                intervalStartTime = "4:12 PM",
+                recurrence = ReminderRecurrence.DAILY
+            )
+        )
+
+        val request = viewModel.reminderScheduleRequests(
+            now = Instant.parse("2026-05-18T16:13:00Z"),
+            zoneId = java.time.ZoneOffset.UTC
+        ).single { it.title == "Every three minutes" }
+
+        assertEquals(Instant.parse("2026-05-18T16:15:00Z"), request.reminderAt)
+        assertEquals(180_000L, request.repeatIntervalMillis)
+        assertEquals(NotificationScheduleRecurrence.INTERVAL, request.recurrenceMode)
+    }
+
+    @Test
+    fun notificationEditorWeeklyDaysUseSettingsWeekdayNumbers() {
+        val viewModel = HumanProgramViewModel()
+
+        viewModel.addNotificationReminder(
+            NotificationReminder(
+                title = "Tuesday weekly",
+                reminderAt = "9:00 AM",
+                repeatType = "Weekly",
+                selectedWeekdays = setOf(3),
+                customWeekdays = setOf(3),
+                recurrence = ReminderRecurrence.CUSTOM
+            )
+        )
+
+        val request = viewModel.reminderScheduleRequests(
+            now = Instant.parse("2026-05-18T18:00:00Z"),
+            zoneId = java.time.ZoneOffset.UTC
+        ).single { it.title == "Tuesday weekly" }
+
+        assertEquals(Instant.parse("2026-05-19T09:00:00Z"), request.reminderAt)
+        assertEquals(setOf(2), request.allowedWeekdays)
+    }
+
+    @Test
     fun factoryResetRequiresTypedConfirmation() {
         val viewModel = HumanProgramViewModel()
         viewModel.updateNewTaskTitle("Reset target")
@@ -906,4 +1295,25 @@ class HumanProgramViewModelTest {
         )
     }
 
+}
+
+private class FakeSecretEncryptor : SecretEncryptor {
+    override fun encrypt(
+        plaintext: ByteArray,
+        associatedData: ByteArray
+    ): EncryptedSecret {
+        return EncryptedSecret(
+            ciphertextBase64 = plaintext.toString(Charsets.UTF_8).reversed(),
+            nonceBase64 = "fake-nonce",
+            keyAlias = "fake-key",
+            scheme = "android-keystore-aes-gcm-v1"
+        )
+    }
+
+    override fun decrypt(
+        encryptedSecret: EncryptedSecret,
+        associatedData: ByteArray
+    ): ByteArray {
+        return encryptedSecret.ciphertextBase64.reversed().toByteArray(Charsets.UTF_8)
+    }
 }

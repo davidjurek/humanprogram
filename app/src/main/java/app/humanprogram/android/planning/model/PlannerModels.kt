@@ -56,7 +56,8 @@ data class DailyPage(
 
 data class ScheduleBlock(
     val title: String,
-    val timeRange: String
+    val timeRange: String,
+    val colorHex: String? = null
 )
 
 data class ScheduleTemplate(
@@ -97,6 +98,27 @@ data class NotificationReminder(
     val id: String = UUID.randomUUID().toString(),
     val title: String,
     val reminderAt: String,
+    val message: String = "",
+    val sound: String = "Default chime",
+    val imageUri: String? = null,
+    val repeatType: String = "None",
+    val runDays: String = "Every day",
+    val timeRule: String = "At one time",
+    val notificationDate: String = "",
+    val selectedWeekdays: Set<Int> = emptySet(),
+    val everyNDays: Int = 3,
+    val startDate: String = "",
+    val intervalAmount: Int = 18,
+    val intervalUnit: String = "minutes",
+    val intervalStartTime: String = "",
+    val intervalWindowEnabled: Boolean = false,
+    val hourlyMinute: Int = 0,
+    val hourlyWindowEnabled: Boolean = false,
+    val windowStartTime: String = "",
+    val windowEndTime: String = "",
+    val endsMode: String = "Never",
+    val endDate: String = "",
+    val endAfterRings: Int = 10,
     val recurrence: ReminderRecurrence = ReminderRecurrence.ONCE,
     val customWeekdays: Set<Int> = emptySet(),
     val isEnabled: Boolean = true

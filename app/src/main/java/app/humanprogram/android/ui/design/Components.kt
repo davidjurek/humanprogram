@@ -8,6 +8,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -135,10 +136,11 @@ import java.time.ZoneOffset
 internal fun HpList(
     topInset: Boolean = false,
     itemSpacing: Dp = HpTheme.spacing.lg,
+    modifier: Modifier = Modifier,
     content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit
 ) {
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             start = HpTheme.spacing.xl,
             end = HpTheme.spacing.xl,
@@ -242,7 +244,7 @@ internal data class HpSettingsInlineLabel(
     val active: Boolean
 )
 
-private object HpSettingsPageMetrics {
+internal object HpSettingsPageMetrics {
     val topPadding = 11.dp
     val titleStartPadding = 20.dp
     val menuTitleBottomGap = 17.dp
@@ -278,12 +280,15 @@ private fun HpSettingsPageLayout(
     title: String,
     modifier: Modifier = Modifier,
     titleBottomGap: Dp,
+    titleVisible: Boolean = true,
     content: @Composable ColumnScope.() -> Unit
 ) {
     Column(modifier = modifier.padding(top = HpSettingsPageMetrics.topPadding)) {
         Text(
             text = title,
-            modifier = Modifier.padding(start = HpSettingsPageMetrics.titleStartPadding),
+            modifier = Modifier
+                .padding(start = HpSettingsPageMetrics.titleStartPadding)
+                .alpha(if (titleVisible) 1f else 0f),
             style = MaterialTheme.typography.titleMedium.copy(fontSize = 18.sp),
             fontWeight = FontWeight.SemiBold,
             color = HpColors.ink
@@ -413,15 +418,35 @@ internal fun HpSettingsListPage(
 }
 
 @Composable
+internal fun HpSettingsUntitledListPage(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Column(modifier = modifier.padding(top = HpSettingsPageMetrics.topPadding)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(
+                    horizontal = HpSettingsPageMetrics.listHorizontalPadding,
+                    vertical = HpSettingsPageMetrics.listVerticalPadding
+                ),
+            verticalArrangement = Arrangement.spacedBy(0.dp)
+        ) { content() }
+    }
+}
+
+@Composable
 internal fun HpSettingsMessagePage(
     title: String,
     modifier: Modifier = Modifier,
+    titleVisible: Boolean = true,
     content: @Composable ColumnScope.() -> Unit
 ) {
     HpSettingsPageLayout(
         title = title,
         modifier = modifier,
-        titleBottomGap = HpSettingsPageMetrics.choiceTitleBottomGap
+        titleBottomGap = HpSettingsPageMetrics.choiceTitleBottomGap,
+        titleVisible = titleVisible
     ) {
         Column(
             modifier = Modifier
@@ -440,11 +465,13 @@ internal fun HpSettingsMessagePage(
 internal fun HpSettingsContentPage(
     title: String,
     modifier: Modifier = Modifier,
+    titleVisible: Boolean = true,
     content: @Composable ColumnScope.() -> Unit
 ) {
     HpSettingsMessagePage(
         title = title,
         modifier = modifier,
+        titleVisible = titleVisible,
         content = content
     )
 }
@@ -484,6 +511,37 @@ internal fun HpSettingsActionHeader(
                 onClick = onAction
             ) {
                 Icon(actionIcon, contentDescription = if (actionEnabled) actionContentDescription else null, tint = HpColors.ink)
+            }
+        }
+    }
+}
+
+@Composable
+internal fun HpSettingsMixedListPage(
+    title: String,
+    menuItems: List<HpSettingsMenuItem>,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    HpSettingsPageLayout(
+        title = title,
+        modifier = modifier,
+        titleBottomGap = HpSettingsPageMetrics.menuTitleBottomGap
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            menuItems.forEach { item ->
+                HpSettingsMenuRow(item)
+            }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        horizontal = HpSettingsPageMetrics.listHorizontalPadding,
+                        vertical = HpSettingsPageMetrics.listVerticalPadding
+                    ),
+                verticalArrangement = Arrangement.spacedBy(0.dp)
+            ) {
+                content()
             }
         }
     }
@@ -690,7 +748,7 @@ internal fun HpProjectRow(
                     onClick = onClick,
                     onLongClick = onLongClick
                 )
-                .padding(horizontal = HpTheme.spacing.lg, vertical = 14.dp),
+                .padding(horizontal = HpSettingsPageMetrics.titleStartPadding, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(HpTheme.spacing.md)
         ) {
@@ -719,7 +777,10 @@ internal fun HpProjectRow(
                 overflow = TextOverflow.Ellipsis
             )
         }
-        HorizontalDivider(color = HpColors.divider)
+        HorizontalDivider(
+            modifier = Modifier.padding(horizontal = HpSettingsPageMetrics.titleStartPadding),
+            color = HpColors.divider
+        )
     }
 }
 
@@ -798,16 +859,21 @@ internal fun HpFormTextField(
     value: String,
     onValueChange: (String) -> Unit,
     minLines: Int = 1,
-    placeholder: String? = null
+    placeholder: String? = null,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    modifier: Modifier = Modifier.fillMaxWidth(),
+    enabled: Boolean = true
 ) {
     OutlinedTextField(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier,
         value = value,
         onValueChange = onValueChange,
+        enabled = enabled,
         label = { Text(label) },
         placeholder = placeholder?.let { { Text(it) } },
         minLines = minLines,
         singleLine = minLines == 1,
+        keyboardOptions = keyboardOptions,
         shape = RoundedCornerShape(HpTheme.radii.row)
     )
 }

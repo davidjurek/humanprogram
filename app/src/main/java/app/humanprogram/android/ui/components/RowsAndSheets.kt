@@ -1,6 +1,9 @@
 package app.humanprogram.android.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -108,7 +111,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -218,7 +220,7 @@ internal fun BacklogTaskRow(
                     onClick = onClick,
                     onLongClick = onLongClick
                 )
-                .padding(horizontal = 0.dp, vertical = 14.dp),
+                .padding(horizontal = HpSettingsPageMetrics.titleStartPadding, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
@@ -277,7 +279,10 @@ internal fun BacklogTaskRow(
                 }
             }
         }
-        HorizontalDivider(color = HpColors.divider)
+        HorizontalDivider(
+            modifier = Modifier.padding(horizontal = HpSettingsPageMetrics.titleStartPadding),
+            color = HpColors.divider
+        )
     }
 }
 
@@ -655,6 +660,11 @@ internal fun ProgramScreen(
             focusRequester.requestFocus()
         }
     }
+    val searchSpace by animateDpAsState(
+        targetValue = if (searchVisible) 62.dp else 0.dp,
+        animationSpec = tween(durationMillis = 220),
+        label = "programSearchSpace"
+    )
 
     Box(
         modifier = Modifier
@@ -693,19 +703,26 @@ internal fun ProgramScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(start = 22.dp, top = 74.dp, end = 22.dp, bottom = 28.dp)
+                .animateContentSize(animationSpec = tween(durationMillis = 220))
         ) {
-            AnimatedVisibility(
-                visible = searchVisible,
-                enter = fadeIn() + slideInVertically(initialOffsetY = { -it / 2 }),
-                exit = fadeOut() + slideOutVertically(targetOffsetY = { -it / 2 })
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(searchSpace)
             ) {
-                ProgramSearchBar(
-                    active = searchActive,
-                    query = searchQuery,
-                    focusRequester = focusRequester,
-                    onActivate = { searchActive = true },
-                    onQueryChange = { searchQuery = it }
-                )
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = searchVisible,
+                    enter = fadeIn(animationSpec = tween(durationMillis = 160)) + slideInVertically(initialOffsetY = { -it / 2 }),
+                    exit = fadeOut(animationSpec = tween(durationMillis = 120)) + slideOutVertically(targetOffsetY = { -it / 2 })
+                ) {
+                    ProgramSearchBar(
+                        active = searchActive,
+                        query = searchQuery,
+                        focusRequester = focusRequester,
+                        onActivate = { searchActive = true },
+                        onQueryChange = { searchQuery = it }
+                    )
+                }
             }
             Box(
                 modifier = Modifier

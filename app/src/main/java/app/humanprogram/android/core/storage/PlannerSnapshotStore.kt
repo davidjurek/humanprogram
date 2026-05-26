@@ -14,7 +14,6 @@ import app.humanprogram.android.planning.model.ScheduleTemplate
 import org.json.JSONObject
 import java.io.File
 import java.security.KeyStore
-import java.security.SecureRandom
 import java.time.LocalDate
 import java.util.Base64
 import javax.crypto.Cipher
@@ -62,27 +61,21 @@ class PlannerSnapshotStore(context: Context) {
 
     fun save(snapshot: PlannerSnapshot) {
         val plainText = PlannerSnapshotJson.encode(snapshot).toString()
-        val encrypted = runCatching {
-            val iv = ByteArray(IV_SIZE_BYTES)
-            SecureRandom().nextBytes(iv)
+        runCatching {
             val cipher = Cipher.getInstance(TRANSFORMATION)
-            cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey(), GCMParameterSpec(GCM_TAG_BITS, iv))
+            cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
+            val actualIv = cipher.iv
             val cipherText = cipher.doFinal(plainText.toByteArray(Charsets.UTF_8))
             encryptedFile.writeText(
                 JSONObject()
                     .put("schemaVersion", 1)
                     .put("algorithm", TRANSFORMATION)
-                    .put("ivBase64", Base64.getEncoder().encodeToString(iv))
+                    .put("ivBase64", Base64.getEncoder().encodeToString(actualIv))
                     .put("cipherTextBase64", Base64.getEncoder().encodeToString(cipherText))
                     .toString()
             )
-        }.isSuccess
-
-        if (encrypted) {
             legacyFile.delete()
-        } else {
-            legacyFile.writeText(plainText)
-        }
+        }.getOrThrow()
     }
 
     private fun getOrCreateKey(): SecretKey {
@@ -97,6 +90,7 @@ class PlannerSnapshotStore(context: Context) {
             .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
             .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
             .setRandomizedEncryptionRequired(true)
+            .setKeySize(256)
             .build()
         keyGenerator.init(keySpec)
         return keyGenerator.generateKey()
@@ -106,7 +100,6 @@ class PlannerSnapshotStore(context: Context) {
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"
         private const val KEY_ALIAS = "human_program_planner_snapshot_key"
         private const val TRANSFORMATION = "AES/GCM/NoPadding"
-        private const val IV_SIZE_BYTES = 12
         private const val GCM_TAG_BITS = 128
     }
 }
