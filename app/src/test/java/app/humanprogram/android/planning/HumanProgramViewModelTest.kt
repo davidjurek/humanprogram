@@ -4,6 +4,7 @@ import app.humanprogram.android.planning.calendar.DeviceCalendarEvent
 import app.humanprogram.android.core.notifications.NotificationScheduleRecurrence
 import app.humanprogram.android.core.security.EncryptedSecret
 import app.humanprogram.android.core.security.SecretEncryptor
+import app.humanprogram.android.core.security.SecurityCredentialType
 import app.humanprogram.android.planning.model.DailyTaskSourceType
 import app.humanprogram.android.planning.model.NotificationReminder
 import app.humanprogram.android.planning.model.ReminderRecurrence
@@ -211,6 +212,54 @@ class HumanProgramViewModelTest {
 
         assertTrue(viewModel.securitySettingsUnlocked)
         assertEquals("", viewModel.securitySettingsUnlockMessage)
+    }
+
+    @Test
+    fun blankCredentialEntriesFailWithoutCrashing() {
+        val viewModel = HumanProgramViewModel(secretEncryptor = FakeSecretEncryptor())
+        viewModel.updateAppLockPinInput("1234")
+        viewModel.updateAppLockPinConfirmInput("1234")
+        viewModel.setupAppLockCredentialWithConfirmation()
+        viewModel.lockAppNow()
+
+        viewModel.unlockApp()
+
+        assertTrue(viewModel.appLocked)
+        assertEquals("Enter your PIN.", viewModel.appUnlockMessage)
+
+        viewModel.clearSecuritySettingsUnlock()
+        viewModel.unlockSecuritySettingsWithCredential()
+
+        assertFalse(viewModel.securitySettingsUnlocked)
+        assertEquals("Enter your PIN.", viewModel.securitySettingsUnlockMessage)
+
+        assertFalse(viewModel.verifySecurityCredentialForRecoveryPhraseReset())
+        assertEquals("Enter your PIN.", viewModel.securitySettingsUnlockMessage)
+
+        viewModel.unlockAppWithRecoveryPhrase()
+
+        assertEquals("Enter your recovery phrase.", viewModel.appUnlockMessage)
+
+        viewModel.updateAppLockPinInput("5678")
+        viewModel.updateAppLockPinConfirmInput("5678")
+
+        assertEquals(null, viewModel.changeAppLockCredentialWithConfirmation())
+        assertEquals("Enter your current PIN.", viewModel.appLockPinMessage)
+    }
+
+    @Test
+    fun blankPasswordUnlockFailsWithoutCrashing() {
+        val viewModel = HumanProgramViewModel(secretEncryptor = FakeSecretEncryptor())
+        viewModel.updateAppLockCredentialType(SecurityCredentialType.PASSWORD)
+        viewModel.updateAppLockPinInput("abc12345")
+        viewModel.updateAppLockPinConfirmInput("abc12345")
+        viewModel.setupAppLockCredentialWithConfirmation()
+        viewModel.lockAppNow()
+
+        viewModel.unlockApp()
+
+        assertTrue(viewModel.appLocked)
+        assertEquals("Enter your password.", viewModel.appUnlockMessage)
     }
 
     @Test
@@ -578,7 +627,7 @@ class HumanProgramViewModelTest {
     @Test
     fun todayTaskCompletionCanUndoAndRedo() {
         val viewModel = HumanProgramViewModel()
-        val taskId = viewModel.todayTasks.first().id
+        val taskId = addManualTask(viewModel)
 
         viewModel.toggleTask(taskId)
 
@@ -596,8 +645,8 @@ class HumanProgramViewModelTest {
     @Test
     fun todayTaskRenameCanUndoAndRedo() {
         val viewModel = HumanProgramViewModel()
-        val taskId = viewModel.todayTasks.first().id
-        val originalTitle = viewModel.todayTasks.first().title
+        val taskId = addManualTask(viewModel, "Original task")
+        val originalTitle = viewModel.todayTasks.first { it.id == taskId }.title
 
         viewModel.renameTask(taskId, "Renamed task")
 
@@ -615,7 +664,7 @@ class HumanProgramViewModelTest {
     @Test
     fun backlogAssignmentCanUndoAndRedo() {
         val viewModel = HumanProgramViewModel()
-        val itemId = viewModel.backlogItems.first().id
+        val itemId = addBacklogItem(viewModel)
 
         viewModel.assignBacklogItemToToday(itemId)
 
@@ -637,7 +686,7 @@ class HumanProgramViewModelTest {
     fun backlogAssignmentUsesSelectedDate() {
         val viewModel = HumanProgramViewModel()
         val targetDate = LocalDate.now().plusDays(3)
-        val itemId = viewModel.backlogItems.first().id
+        val itemId = addBacklogItem(viewModel)
 
         viewModel.goToDate(targetDate)
         viewModel.assignBacklogItemToToday(itemId)
@@ -650,7 +699,7 @@ class HumanProgramViewModelTest {
     fun backlogAssignmentCannotChangeLockedPastDate() {
         val viewModel = HumanProgramViewModel()
         val pastDate = LocalDate.now().minusDays(2)
-        val itemId = viewModel.backlogItems.first().id
+        val itemId = addBacklogItem(viewModel)
 
         viewModel.goToDate(pastDate)
         viewModel.assignBacklogItemToToday(itemId)
@@ -668,8 +717,8 @@ class HumanProgramViewModelTest {
     @Test
     fun backlogRenameCanUndoAndRedo() {
         val viewModel = HumanProgramViewModel()
-        val itemId = viewModel.backlogItems.first().id
-        val originalTitle = viewModel.backlogItems.first().title
+        val itemId = addBacklogItem(viewModel, "Original backlog")
+        val originalTitle = viewModel.backlogItems.first { it.id == itemId }.title
 
         viewModel.renameBacklogItem(itemId, "Renamed backlog")
 
@@ -814,7 +863,9 @@ class HumanProgramViewModelTest {
     @Test
     fun todayTasksUseDefaultSourceOrderAndManualTasksStayLast() {
         val viewModel = HumanProgramViewModel()
-        val itemId = viewModel.backlogItems.first().id
+        addRecurringTask(viewModel, "First recurring")
+        addRecurringTask(viewModel, "Second recurring")
+        val itemId = addBacklogItem(viewModel)
 
         viewModel.updateNewTaskTitle("Manual note")
         viewModel.addManualTask()
@@ -868,6 +919,7 @@ class HumanProgramViewModelTest {
     @Test
     fun scheduleEditsCanUndoAndRedo() {
         val viewModel = HumanProgramViewModel()
+        addScheduleTemplate(viewModel)
         val originalTitle = viewModel.scheduleBlocks.first().title
 
         viewModel.renameScheduleBlock(0, "Changed block")
@@ -903,6 +955,17 @@ class HumanProgramViewModelTest {
     @Test
     fun conflictingInactiveScheduleCanSaveButCannotBeEnabled() {
         val viewModel = HumanProgramViewModel()
+        assertTrue(
+            viewModel.saveScheduleTemplate(
+                templateId = null,
+                name = "Thursday primary",
+                active = true,
+                assignedWeekdays = setOf(5),
+                customDateStart = null,
+                customDateEnd = null,
+                blocks = listOf(ScheduleBlock("Primary", "09:00-10:00"))
+            )
+        )
 
         val saved = viewModel.saveScheduleTemplate(
             templateId = null,
@@ -927,6 +990,7 @@ class HumanProgramViewModelTest {
     @Test
     fun recurringTemplateEditDeleteAndWeekdaysCanUndo() {
         val viewModel = HumanProgramViewModel()
+        addRecurringTask(viewModel)
         val template = viewModel.recurringTemplates.first()
         val originalTitle = template.title
 
@@ -1066,8 +1130,10 @@ class HumanProgramViewModelTest {
 
         viewModel.goToPreviousDay()
         viewModel.unlockSelectedPastDateForEditing()
+        addManualTask(viewModel, "Past task")
         viewModel.todayTasks.map { it.id }.forEach(viewModel::toggleTask)
         viewModel.goToToday()
+        addManualTask(viewModel, "Today task")
         viewModel.todayTasks.map { it.id }.forEach(viewModel::toggleTask)
 
         assertEquals(2, viewModel.trackedDayCount)
@@ -1269,6 +1335,8 @@ class HumanProgramViewModelTest {
         viewModel.updateNewBacklogProject("Reset project")
         viewModel.addProjectBucket()
         viewModel.addNotificationReminder(NotificationReminder(title = "Reset reminder", reminderAt = "7:00 AM"))
+        addRecurringTask(viewModel)
+        addScheduleTemplate(viewModel)
 
         assertTrue(viewModel.recurringTemplates.isNotEmpty())
         assertTrue(viewModel.scheduleTemplates.isNotEmpty())
@@ -1336,6 +1404,7 @@ class HumanProgramViewModelTest {
 
         assertFalse(viewModel.hiddenSudokuGateVisible)
 
+        addManualTask(viewModel)
         viewModel.todayTasks.map { it.id }.forEach(viewModel::toggleTask)
         viewModel.requestHiddenSudokuGate()
         (1..8).forEach { index ->
@@ -1351,6 +1420,43 @@ class HumanProgramViewModelTest {
 
         viewModel.closeHiddenGameContainer()
         assertFalse(viewModel.hiddenGameContainerOpen)
+    }
+
+    private fun addManualTask(viewModel: HumanProgramViewModel, title: String = "Test task"): String {
+        viewModel.updateNewTaskTitle(title)
+        viewModel.addManualTask()
+        return viewModel.todayTasks.first { it.title == title }.id
+    }
+
+    private fun addBacklogItem(viewModel: HumanProgramViewModel, title: String = "Test backlog"): String {
+        viewModel.updateNewBacklogTitle(title)
+        viewModel.addBacklogItem()
+        return viewModel.backlogItems.first { it.title == title }.id
+    }
+
+    private fun addRecurringTask(viewModel: HumanProgramViewModel, title: String = "Test recurring"): String {
+        viewModel.addRecurringTask(
+            title = title,
+            notes = "",
+            applicableWeekdays = setOf(1, 2, 3, 4, 5, 6, 7),
+            active = true
+        )
+        return viewModel.recurringTemplates.first { it.title == title }.id
+    }
+
+    private fun addScheduleTemplate(viewModel: HumanProgramViewModel, name: String = "Test schedule"): String {
+        assertTrue(
+            viewModel.saveScheduleTemplate(
+                templateId = null,
+                name = name,
+                active = true,
+                assignedWeekdays = setOf(1, 2, 3, 4, 5, 6, 7),
+                customDateStart = null,
+                customDateEnd = null,
+                blocks = listOf(ScheduleBlock("Test block", "09:00-10:00"))
+            )
+        )
+        return viewModel.scheduleTemplates.first { it.name == name }.id
     }
 
     private fun calendarEvent(): DeviceCalendarEvent {

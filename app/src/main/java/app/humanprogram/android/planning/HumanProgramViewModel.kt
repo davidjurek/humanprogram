@@ -294,6 +294,9 @@ class HumanProgramViewModel(
     var onboardingComplete by mutableStateOf(false)
         private set
 
+    var initialWelcomeComplete by mutableStateOf(false)
+        private set
+
     var hprgmMessage by mutableStateOf("")
         private set
 
@@ -345,15 +348,7 @@ class HumanProgramViewModel(
         if (snapshot != null) {
             applySnapshot(snapshot)
         } else {
-            recurringTemplates.addAll(defaultRecurringTemplates())
-            scheduleTemplates.addAll(defaultScheduleTemplates())
             refreshScheduleBlocksForSelectedDate()
-            backlogItems.addAll(
-                listOf(
-                    BacklogItem(title = "Set up first Human Program Android build"),
-                    BacklogItem(title = "Create the Today screen data model")
-                )
-            )
             todayTasks.addAll(
                 dailyPageGenerator.generate(
                     date = today,
@@ -647,6 +642,7 @@ class HumanProgramViewModel(
 
     fun clearAppSettingsForFactoryReset() {
         onboardingComplete = true
+        initialWelcomeComplete = true
         appLockEnabled = false
         biometricUnlockEnabled = false
         appLockTimeoutMinutes = 0
@@ -687,6 +683,14 @@ class HumanProgramViewModel(
 
     fun loadOnboardingComplete(complete: Boolean) {
         onboardingComplete = complete
+    }
+
+    fun loadInitialWelcomeComplete(complete: Boolean) {
+        initialWelcomeComplete = complete
+    }
+
+    fun completeInitialWelcome() {
+        initialWelcomeComplete = true
     }
 
     fun completeOnboarding() {
@@ -1929,6 +1933,10 @@ class HumanProgramViewModel(
             appLockPinMessage = "Set a PIN or password first."
             return false
         }
+        if (appLockCurrentCredentialInput.isBlank()) {
+            appLockPinMessage = enterCredentialMessage(current = true)
+            return false
+        }
         return if (pinHashService.verify(appLockCurrentCredentialInput, hash)) {
             appLockCurrentCredentialInput = ""
             appLockPinMessage = ""
@@ -1967,6 +1975,10 @@ class HumanProgramViewModel(
     ): AppLockRecoveryResetResult? {
         if (requireCurrentCredential) {
             val hash = appLockPinHash
+            if (appLockCurrentCredentialInput.isBlank()) {
+                appLockPinMessage = enterCredentialMessage(current = true)
+                return null
+            }
             if (hash == null || !pinHashService.verify(appLockCurrentCredentialInput, hash)) {
                 clearCredentialDrafts(clearCurrent = false)
                 appLockCurrentCredentialInput = ""
@@ -2088,6 +2100,10 @@ class HumanProgramViewModel(
             securitySettingsUnlockMessage = ""
             return true
         }
+        if (securitySettingsUnlockInput.isBlank()) {
+            securitySettingsUnlockMessage = enterCredentialMessage()
+            return false
+        }
 
         return if (pinHashService.verify(securitySettingsUnlockInput, hash)) {
             securitySettingsUnlockInput = ""
@@ -2133,10 +2149,24 @@ class HumanProgramViewModel(
         }
     }
 
+    private fun enterCredentialMessage(current: Boolean = false): String {
+        val credentialName = if (appLockCredentialType == SecurityCredentialType.PIN) "PIN" else "password"
+        return if (current) {
+            "Enter your current $credentialName."
+        } else {
+            "Enter your $credentialName."
+        }
+    }
+
     fun testAppLockPin() {
         val hash = appLockPinHash
         if (hash == null) {
             appLockPinMessage = "Set a PIN first."
+            return
+        }
+
+        if (appLockPinInput.isBlank()) {
+            appLockPinMessage = enterCredentialMessage()
             return
         }
 
@@ -2194,6 +2224,10 @@ class HumanProgramViewModel(
             appUnlockMessage = "Try again in ${java.time.Duration.between(now, blockedUntil).seconds.coerceAtLeast(1)} seconds."
             return
         }
+        if (appUnlockPinInput.isBlank()) {
+            appUnlockMessage = enterCredentialMessage()
+            return
+        }
 
         if (pinHashService.verify(appUnlockPinInput, hash)) {
             appLocked = false
@@ -2209,7 +2243,11 @@ class HumanProgramViewModel(
                 pinUnlockBlockedUntil = now.plusSeconds(30)
                 appUnlockMessage = "Too many attempts. Try again in 30 seconds."
             } else {
-                appUnlockMessage = "PIN rejected."
+                appUnlockMessage = if (appLockCredentialType == SecurityCredentialType.PIN) {
+                    "PIN rejected."
+                } else {
+                    "Password rejected."
+                }
             }
         }
     }
@@ -2220,6 +2258,11 @@ class HumanProgramViewModel(
             securitySettingsUnlocked = true
             securitySettingsUnlockInput = ""
             securitySettingsUnlockMessage = ""
+            return
+        }
+        if (securitySettingsUnlockInput.isBlank()) {
+            securitySettingsUnlocked = false
+            securitySettingsUnlockMessage = enterCredentialMessage()
             return
         }
 
@@ -2242,6 +2285,10 @@ class HumanProgramViewModel(
         val hash = recoveryPhraseHash
         if (hash == null) {
             appUnlockMessage = "Recovery phrase is unavailable."
+            return
+        }
+        if (recoveryPhraseInput.isBlank()) {
+            appUnlockMessage = "Enter your recovery phrase."
             return
         }
 
@@ -3126,7 +3173,7 @@ class HumanProgramViewModel(
                 .sorted()
         )
         recurringTemplates.addAll(
-            if (snapshot.recurringTemplatesDefined) snapshot.recurringTemplates else defaultRecurringTemplates()
+            if (snapshot.recurringTemplatesDefined) snapshot.recurringTemplates else emptyList()
         )
         scheduleTemplates.addAll(scheduleTemplatesFromSnapshot(snapshot))
         refreshScheduleBlocksForSelectedDate()
@@ -3162,14 +3209,14 @@ class HumanProgramViewModel(
     private fun scheduleTemplatesFromSnapshot(snapshot: PlannerSnapshot): List<ScheduleTemplate> {
         return when {
             snapshot.scheduleTemplatesDefined -> snapshot.scheduleTemplates
-            snapshot.scheduleBlocksDefined -> listOf(
+            snapshot.scheduleBlocksDefined && snapshot.scheduleBlocks.isNotEmpty() -> listOf(
                 ScheduleTemplate(
                     name = "Daily Schedule",
                     assignedWeekdays = setOf(1, 2, 3, 4, 5, 6, 7),
-                    blocks = snapshot.scheduleBlocks.ifEmpty { defaultScheduleBlocks() }
+                    blocks = snapshot.scheduleBlocks
                 )
             )
-            else -> defaultScheduleTemplates()
+            else -> emptyList()
         }
     }
 
@@ -3330,38 +3377,6 @@ class HumanProgramViewModel(
         } else {
             calendarLocalStates[index] = updated
         }
-    }
-
-    private fun defaultRecurringTemplates(): List<RecurringTaskTemplate> {
-        return listOf(
-            RecurringTaskTemplate(
-                title = "Study calendar",
-                applicableWeekdays = setOf(1, 2, 3, 4, 5, 6, 7)
-            ),
-            RecurringTaskTemplate(
-                title = "Review Anki",
-                applicableWeekdays = setOf(1, 2, 3, 4, 5, 6, 7)
-            )
-        )
-    }
-
-    private fun defaultScheduleBlocks(): List<ScheduleBlock> {
-        return listOf(
-            ScheduleBlock("Sleep", "21:30-05:30", colorHex = "#475C6C"),
-            ScheduleBlock("Rise, gym, and ready", "05:30-07:30"),
-            ScheduleBlock("Work", "07:30-15:30"),
-            ScheduleBlock("Study", "16:30-20:30")
-        )
-    }
-
-    private fun defaultScheduleTemplates(): List<ScheduleTemplate> {
-        return listOf(
-            ScheduleTemplate(
-                name = "Daily Schedule",
-                assignedWeekdays = setOf(1, 2, 3, 4, 5, 6, 7),
-                blocks = defaultScheduleBlocks()
-            )
-        )
     }
 
     private fun refreshScheduleBlocksForSelectedDate() {

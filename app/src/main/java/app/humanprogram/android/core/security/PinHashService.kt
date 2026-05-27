@@ -72,6 +72,8 @@ class PinHashService(
     }
 
     fun verify(credential: String, pinHash: PinHash): Boolean {
+        if (credential.isBlank()) return false
+
         val salt = Base64.getDecoder().decode(pinHash.saltBase64)
         val expected = Base64.getDecoder().decode(pinHash.hashBase64)
         val actual = when (pinHash.verifierScheme.ifBlank { LegacySha256Scheme }) {

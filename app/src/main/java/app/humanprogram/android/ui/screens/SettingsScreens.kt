@@ -4798,6 +4798,58 @@ private fun FactoryResetSuccessScreen(onContinue: () -> Unit) {
     }
 }
 
+@Composable
+internal fun InitialLaunchWelcomeScreen(onContinue: () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = Color.White
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 28.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .offset(y = (-42).dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.RestartAlt,
+                    contentDescription = null,
+                    modifier = Modifier.size(96.dp),
+                    tint = Color.Black
+                )
+                Spacer(Modifier.height(38.dp))
+                Text(
+                    "Welcome to the Human Program.",
+                    color = Color.Black,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 24.sp,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "Click Continue to get started",
+                    color = Color.Black,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 18.sp,
+                    textAlign = TextAlign.Center
+                )
+            }
+            FactoryResetCapsuleButton(
+                "Continue",
+                primary = true,
+                onClick = onContinue,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 34.dp)
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun AboutSettings(

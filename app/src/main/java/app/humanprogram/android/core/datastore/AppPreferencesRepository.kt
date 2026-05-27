@@ -14,6 +14,7 @@ data class AppPreferences(
     val showProjectBucket: Boolean,
     val showTaskSource: Boolean,
     val calendarViewMode: String,
+    val initialWelcomeComplete: Boolean = false,
     val onboardingComplete: Boolean = false,
     val selectedCalendarIdsCsv: String = "",
     val appLockEnabled: Boolean = false,
@@ -61,6 +62,7 @@ class AppPreferencesRepository(context: Context) {
     suspend fun clearForFactoryReset() {
         sharedPreferences.edit()
             .clear()
+            .putBoolean(Keys.InitialWelcomeComplete, true)
             .putBoolean(Keys.OnboardingComplete, true)
             .apply()
     }
@@ -74,6 +76,7 @@ class AppPreferencesRepository(context: Context) {
             showProjectBucket = getBoolean(Keys.ShowProjectBucket, false),
             showTaskSource = getBoolean(Keys.ShowTaskSource, true),
             calendarViewMode = getString(Keys.CalendarViewMode, "month") ?: "month",
+            initialWelcomeComplete = getBoolean(Keys.InitialWelcomeComplete, false),
             onboardingComplete = getBoolean(Keys.OnboardingComplete, false),
             selectedCalendarIdsCsv = getString(Keys.SelectedCalendarIdsCsv, "").orEmpty(),
             appLockEnabled = getBoolean(Keys.AppLockEnabled, false),
@@ -105,6 +108,7 @@ class AppPreferencesRepository(context: Context) {
         const val ShowProjectBucket = "show_project_bucket"
         const val ShowTaskSource = "show_task_source"
         const val CalendarViewMode = "calendar_view_mode"
+        const val InitialWelcomeComplete = "initial_welcome_complete"
         const val OnboardingComplete = "onboarding_complete"
         const val SelectedCalendarIdsCsv = "selected_calendar_ids_csv"
         const val AppLockEnabled = "app_lock_enabled"

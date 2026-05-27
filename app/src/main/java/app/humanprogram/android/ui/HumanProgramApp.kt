@@ -161,6 +161,7 @@ fun HumanProgramApp(
     onHprgmPrivateFilesImported: (Map<String, String>) -> Unit = {},
     onRefreshCalendarEvents: () -> Unit = {},
     onToggleCalendarSource: (String) -> Unit = {},
+    onInitialWelcomeComplete: () -> Unit = {},
     onOnboardingComplete: () -> Unit = {},
     onAppLockPinSet: (PinHash) -> Unit = {},
     onRecoveryPhraseSet: (PinHash) -> Unit = {},
@@ -327,15 +328,8 @@ fun HumanProgramApp(
             return@CompositionLocalProvider
         }
 
-        if (!viewModel.onboardingComplete) {
-            WelcomeScreen(
-                viewModel = viewModel,
-                calendarPermissionGranted = calendarPermissionGranted,
-                onRequestCalendarPermission = onRequestCalendarPermission,
-                onAppLockPinSet = onAppLockPinSet,
-                onRecoveryPhraseSet = onRecoveryPhraseSet,
-                onOnboardingComplete = onOnboardingComplete
-            )
+        if (!viewModel.initialWelcomeComplete && !viewModel.onboardingComplete) {
+            InitialLaunchWelcomeScreen(onContinue = onInitialWelcomeComplete)
             return@CompositionLocalProvider
         }
 

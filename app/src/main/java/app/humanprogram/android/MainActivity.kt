@@ -251,6 +251,20 @@ class MainActivity : ComponentActivity() {
                     onHprgmPrivateFilesImported = ::restoreHprgmPrivateFiles,
                     onRefreshCalendarEvents = ::refreshCalendarEvents,
                     onToggleCalendarSource = ::toggleCalendarSource,
+                    onInitialWelcomeComplete = {
+                        plannerViewModel.completeInitialWelcome()
+                        plannerViewModel.completeOnboarding()
+                        lifecycleScope.launch {
+                            appPreferencesRepository.setBoolean(
+                                AppPreferencesRepository.Keys.InitialWelcomeComplete,
+                                true
+                            )
+                            appPreferencesRepository.setBoolean(
+                                AppPreferencesRepository.Keys.OnboardingComplete,
+                                true
+                            )
+                        }
+                    },
                     onOnboardingComplete = {
                         plannerViewModel.completeOnboarding()
                         lifecycleScope.launch {
@@ -526,6 +540,7 @@ class MainActivity : ComponentActivity() {
                         .filter { it.isNotBlank() }
                         .toSet()
                 )
+                plannerViewModel.loadInitialWelcomeComplete(preferences.initialWelcomeComplete)
                 plannerViewModel.loadOnboardingComplete(preferences.onboardingComplete)
                 refreshCalendarEvents()
             }
