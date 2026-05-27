@@ -477,6 +477,34 @@ internal fun HpSettingsContentPage(
 }
 
 @Composable
+internal fun HpSettingsLockHeader(
+    instruction: String?,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Top
+    ) {
+        Spacer(Modifier.height(38.dp))
+        Icon(
+            imageVector = Icons.Outlined.Lock,
+            contentDescription = null,
+            modifier = Modifier.size(88.dp),
+            tint = HpColors.ink
+        )
+        if (instruction != null) {
+            Spacer(Modifier.height(14.dp))
+            Text(
+                text = instruction,
+                color = HpColors.muted,
+                textAlign = TextAlign.Center
+            )
+        }
+    }
+}
+
+@Composable
 internal fun HpSettingsActionHeader(
     title: String,
     titleClickEnabled: Boolean = false,
@@ -882,6 +910,18 @@ internal fun HpFormTextField(
 internal fun HpPrimaryButton(label: String, onClick: () -> Unit) {
     Button(
         onClick = onClick,
+        shape = RoundedCornerShape(HpTheme.radii.row),
+        colors = ButtonDefaults.buttonColors(containerColor = HpColors.accent, contentColor = Color.White)
+    ) {
+        Text(label)
+    }
+}
+
+@Composable
+internal fun HpSettingsWidePrimaryButton(label: String, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(HpTheme.radii.row),
         colors = ButtonDefaults.buttonColors(containerColor = HpColors.accent, contentColor = Color.White)
     ) {

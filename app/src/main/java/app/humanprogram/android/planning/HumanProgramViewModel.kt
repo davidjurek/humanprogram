@@ -66,7 +66,12 @@ import org.json.JSONObject
 
 data class AppLockRecoveryResetResult(
     val credentialHash: PinHash,
-    val recoveryPhraseHash: PinHash
+    val recoveryPhraseHash: PinHash?
+)
+
+data class RecoveryPhraseRevealResult(
+    val phrase: String,
+    val recoveryPhraseHash: PinHash? = null
 )
 
 data class HprgmImportApplyResult(
@@ -261,6 +266,9 @@ class HumanProgramViewModel(
 
     val recoveryPhraseEncryptedSecret: EncryptedSecret?
         get() = encryptedRecoveryPhrase
+
+    val hasRecoveryPhrase: Boolean
+        get() = recoveryPhraseHash != null
 
     var securitySettingsUnlockInput by mutableStateOf("")
         private set
@@ -632,6 +640,11 @@ class HumanProgramViewModel(
         securitySettingsUnlockMessage = ""
     }
 
+    fun clearSecurityCredentialEntry() {
+        securitySettingsUnlockInput = ""
+        securitySettingsUnlockMessage = ""
+    }
+
     fun clearAppSettingsForFactoryReset() {
         onboardingComplete = true
         appLockEnabled = false
@@ -717,7 +730,8 @@ class HumanProgramViewModel(
         recoveryPhraseNonceBase64: String = "",
         recoveryPhraseCiphertextBase64: String = "",
         recoveryPhrasePlainText: String = ""
-    ) {
+    ): PinHash? {
+        var repairedRecoveryPhraseHash: PinHash? = null
         appLockTimeoutMinutes = timeoutMinutes.coerceAtLeast(-1)
         biometricUnlockEnabled = biometricEnabled
         recoveryPhraseHash = if (recoverySaltBase64.isNotBlank() && recoveryHashBase64.isNotBlank()) {
@@ -749,11 +763,24 @@ class HumanProgramViewModel(
             val loadedPhrase = decryptRecoveryPhrase().orEmpty().ifBlank { recoveryPhrasePlainText }
             if (loadedPhrase.isBlank() || loadedPhrase.isFourWordRecoveryPhrase()) {
                 generatedRecoveryPhrase = loadedPhrase
+                if (loadedPhrase.isNotBlank() && recoveryPhraseHash == null) {
+                    recoveryPhraseHash = pinHashService.hashSecret(loadedPhrase, SecurityCredentialType.PASSWORD)
+                    repairedRecoveryPhraseHash = recoveryPhraseHash
+                }
+                if (loadedPhrase.isNotBlank() && encryptedRecoveryPhrase == null) {
+                    encryptedRecoveryPhrase = runCatching {
+                        val encryptor = secretEncryptor ?: error("Recovery phrase encryption is not available.")
+                        encryptor.encrypt(
+                            plaintext = loadedPhrase.toByteArray(Charsets.UTF_8),
+                            associatedData = RecoveryPhraseAssociatedData
+                        )
+                    }.getOrNull()
+                }
             } else {
                 generatedRecoveryPhrase = ""
                 recoveryPhraseHash = null
                 encryptedRecoveryPhrase = null
-                recoveryPhraseMessage = "Old recovery phrase format was removed. Generate a new recovery phrase."
+                recoveryPhraseMessage = "Recovery phrase format is no longer supported."
             }
         }
         if (enabled && saltBase64.isNotBlank() && hashBase64.isNotBlank()) {
@@ -770,7 +797,11 @@ class HumanProgramViewModel(
             if (!wasAlreadyEnabled && appLockTimeoutMinutes != -1) {
                 appLocked = true
             }
+            if (recoveryPhraseHash == null) {
+                repairedRecoveryPhraseHash = createRecoveryPhraseHash()
+            }
         }
+        return repairedRecoveryPhraseHash
     }
 
     fun updateBiometricAvailability(available: Boolean) {
@@ -1881,7 +1912,7 @@ class HumanProgramViewModel(
             appLockPinMessage = "Use Change PIN / Password to update your lock."
             return null
         }
-        return saveCredentialAndRotateRecovery(requireCurrentCredential = false)
+        return saveCredentialWithRecoveryPhrase(requireCurrentCredential = false, createRecoveryPhrase = recoveryPhraseHash == null)
     }
 
     fun changeAppLockCredentialWithConfirmation(): AppLockRecoveryResetResult? {
@@ -1889,7 +1920,7 @@ class HumanProgramViewModel(
             appLockPinMessage = "Set a PIN or password first."
             return null
         }
-        return saveCredentialAndRotateRecovery(requireCurrentCredential = true)
+        return saveCredentialWithRecoveryPhrase(requireCurrentCredential = true, createRecoveryPhrase = false)
     }
 
     fun verifyCurrentAppLockCredentialForChange(): Boolean {
@@ -1927,10 +1958,13 @@ class HumanProgramViewModel(
             appLockPinMessage = "Set a PIN or password first."
             return null
         }
-        return saveCredentialAndRotateRecovery(requireCurrentCredential = false)
+        return saveCredentialWithRecoveryPhrase(requireCurrentCredential = false, createRecoveryPhrase = false)
     }
 
-    private fun saveCredentialAndRotateRecovery(requireCurrentCredential: Boolean): AppLockRecoveryResetResult? {
+    private fun saveCredentialWithRecoveryPhrase(
+        requireCurrentCredential: Boolean,
+        createRecoveryPhrase: Boolean
+    ): AppLockRecoveryResetResult? {
         if (requireCurrentCredential) {
             val hash = appLockPinHash
             if (hash == null || !pinHashService.verify(appLockCurrentCredentialInput, hash)) {
@@ -1959,7 +1993,7 @@ class HumanProgramViewModel(
             return null
         }
 
-        val recovery = createRecoveryPhraseHash() ?: return null
+        val recovery = if (createRecoveryPhrase) createRecoveryPhraseHash() ?: return null else null
         val credentialHash = pinHashService.hash(credential, appLockCredentialType)
 
         appLockPinHash = credentialHash
@@ -1997,8 +2031,6 @@ class HumanProgramViewModel(
         }
 
         val credentialHash = pinHashService.hash(credential, appLockCredentialType)
-        val phraseHash = createRecoveryPhraseHash() ?: return null
-
         appLockPinHash = credentialHash
         appLockEnabled = true
         appLocked = false
@@ -2012,22 +2044,64 @@ class HumanProgramViewModel(
 
         return AppLockRecoveryResetResult(
             credentialHash = credentialHash,
-            recoveryPhraseHash = phraseHash
+            recoveryPhraseHash = null
         )
     }
 
-    fun generateRecoveryPhrase(): PinHash? {
+    fun resetRecoveryPhrase(): PinHash? {
         if (!appLockEnabled) {
-            recoveryPhraseMessage = "Set a PIN first."
+            recoveryPhraseMessage = ""
             return null
         }
-        val encryptor = secretEncryptor
-        if (encryptor == null) {
-            recoveryPhraseMessage = "Recovery phrase encryption is not available."
-            return null
+        return createRecoveryPhraseHash()
+    }
+
+    fun revealRecoveryPhrase(): RecoveryPhraseRevealResult? {
+        if (generatedRecoveryPhrase.isBlank()) {
+            val loadedPhrase = decryptRecoveryPhrase().orEmpty()
+            if (loadedPhrase.isFourWordRecoveryPhrase()) {
+                generatedRecoveryPhrase = loadedPhrase
+            }
+        }
+        return if (generatedRecoveryPhrase.isNotBlank()) {
+            recoveryPhraseMessage = ""
+            RecoveryPhraseRevealResult(phrase = generatedRecoveryPhrase)
+        } else {
+            val repairedHash = resetRecoveryPhrase()
+            if (repairedHash != null && generatedRecoveryPhrase.isNotBlank()) {
+                recoveryPhraseMessage = ""
+                RecoveryPhraseRevealResult(
+                    phrase = generatedRecoveryPhrase,
+                    recoveryPhraseHash = repairedHash
+                )
+            } else {
+                recoveryPhraseMessage = ""
+                null
+            }
+        }
+    }
+
+    fun verifySecurityCredentialForRecoveryPhraseReset(): Boolean {
+        val hash = appLockPinHash
+        if (!appLockEnabled || hash == null) {
+            securitySettingsUnlockInput = ""
+            securitySettingsUnlockMessage = ""
+            return true
         }
 
-        return createRecoveryPhraseHash()
+        return if (pinHashService.verify(securitySettingsUnlockInput, hash)) {
+            securitySettingsUnlockInput = ""
+            securitySettingsUnlockMessage = ""
+            true
+        } else {
+            securitySettingsUnlockInput = ""
+            securitySettingsUnlockMessage = if (appLockCredentialType == SecurityCredentialType.PIN) {
+                "PIN rejected."
+            } else {
+                "Password rejected."
+            }
+            false
+        }
     }
 
     private fun createRecoveryPhraseHash(): PinHash? {
@@ -2047,7 +2121,7 @@ class HumanProgramViewModel(
         generatedRecoveryPhrase = phrase
         recoveryPhraseHash = pinHashService.hashSecret(phrase, SecurityCredentialType.PASSWORD)
         encryptedRecoveryPhrase = encryptedPhrase.second
-        recoveryPhraseMessage = "Recovery phrase generated. Store it somewhere safe."
+        recoveryPhraseMessage = ""
         return recoveryPhraseHash
     }
 
@@ -2167,7 +2241,7 @@ class HumanProgramViewModel(
     fun unlockAppWithRecoveryPhrase() {
         val hash = recoveryPhraseHash
         if (hash == null) {
-            appUnlockMessage = "No recovery phrase is saved."
+            appUnlockMessage = "Recovery phrase is unavailable."
             return
         }
 

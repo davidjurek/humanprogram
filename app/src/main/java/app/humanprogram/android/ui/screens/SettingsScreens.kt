@@ -239,6 +239,7 @@ internal fun SettingsScreen(
     articleFontScale: Float,
     onArticleOpenChange: (Boolean) -> Unit,
     onArticleImageOpenChange: (Boolean) -> Unit,
+    onResetSuccessVisibleChange: (Boolean) -> Unit,
     onResetContinueToToday: () -> Unit
 ) {
     LaunchedEffect(detail) {
@@ -360,6 +361,7 @@ internal fun SettingsScreen(
             onReminderScheduleChanged = onReminderScheduleChanged,
             innerBackRequest = innerBackRequest,
             onInnerBackAvailableChange = onInnerBackAvailableChange,
+            onResetSuccessVisibleChange = onResetSuccessVisibleChange,
             onResetContinueToToday = onResetContinueToToday
         )
         SettingsDetail.ABOUT -> AboutSettings(
@@ -436,7 +438,9 @@ internal fun GeneralSettings(
         onInnerBackAvailableChange(page != "root")
     }
     LaunchedEffect(innerBackRequest) {
-        if (innerBackRequest > 0 && page != "root") page = "root"
+        if (innerBackRequest > 0 && page != "root") {
+            page = "root"
+        }
     }
     if (page == "appearance") {
         AppearanceSettings(appearance = appearance, onAppearanceChanged = onAppearanceChanged)
@@ -523,7 +527,9 @@ internal fun CalendarSettings(
         onInnerBackAvailableChange(page != "root")
     }
     LaunchedEffect(innerBackRequest) {
-        if (innerBackRequest > 0 && page != "root") page = "root"
+        if (innerBackRequest > 0 && page != "root") {
+            page = "root"
+        }
     }
     if (page == GoogleCalendarSettingsPage) {
         GoogleCalendarSettings(
@@ -3716,19 +3722,18 @@ private fun SecuritySettingsUnlockScreen(
                     onSave = {
                         viewModel.completeRecoveryCredentialReset()?.let { result ->
                             onAppLockPinSet(result.credentialHash)
-                            onRecoveryPhraseSet(result.recoveryPhraseHash)
+                            result.recoveryPhraseHash?.let(onRecoveryPhraseSet)
                         }
                     }
                 )
             }
             showRecovery -> {
-                Text("Enter your recovery phrase to set a new PIN or password.", color = HpColors.muted)
-                HpFormTextField("Recovery phrase", viewModel.recoveryPhraseInput, viewModel::updateRecoveryPhraseInput)
-                HpPrimaryButton("Continue", viewModel::unlockAppWithRecoveryPhrase)
-                HpSecondaryButton("Back") { showRecovery = false }
-                if (viewModel.appUnlockMessage.isNotBlank()) {
-                    Text(viewModel.appUnlockMessage, color = HpColors.muted)
-                }
+                RecoveryPhraseEntryForm(
+                    value = viewModel.recoveryPhraseInput,
+                    onValueChange = viewModel::updateRecoveryPhraseInput,
+                    onContinue = viewModel::unlockAppWithRecoveryPhrase,
+                    message = viewModel.appUnlockMessage
+                )
             }
             else -> {
                 CredentialUnlockForm(
@@ -3736,7 +3741,8 @@ private fun SecuritySettingsUnlockScreen(
                     value = viewModel.securitySettingsUnlockInput,
                     onValueChange = viewModel::updateSecuritySettingsUnlockInput,
                     onForgot = { showRecovery = true },
-                    onUnlock = viewModel::unlockSecuritySettingsWithCredential
+                    onUnlock = viewModel::unlockSecuritySettingsWithCredential,
+                    showForgotButton = viewModel.hasRecoveryPhrase
                 )
                 if (viewModel.securitySettingsUnlockMessage.isNotBlank()) {
                     Text(viewModel.securitySettingsUnlockMessage, color = HpColors.muted)
@@ -3779,6 +3785,38 @@ private fun CredentialUnlockSettingsPage(
 }
 
 @Composable
+private fun RecoveryPhraseEntryForm(
+    value: String,
+    onValueChange: (String) -> Unit,
+    onContinue: () -> Unit,
+    message: String
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(620.dp),
+        verticalArrangement = Arrangement.Top
+    ) {
+        Text("Enter your recovery phrase to set a new PIN or password.", color = HpColors.muted)
+        Spacer(Modifier.height(22.dp))
+        HpFormTextField("Recovery phrase", value, onValueChange)
+        if (message.isNotBlank()) {
+            Spacer(Modifier.height(12.dp))
+            Text(message, color = HpColors.muted)
+        }
+        Spacer(Modifier.weight(1f))
+        Button(
+            onClick = onContinue,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(HpTheme.radii.row),
+            colors = ButtonDefaults.buttonColors(containerColor = HpColors.accent, contentColor = Color.White)
+        ) {
+            Text("Continue")
+        }
+    }
+}
+
+@Composable
 private fun CredentialUnlockForm(
     credentialType: SecurityCredentialType,
     value: String,
@@ -3794,23 +3832,10 @@ private fun CredentialUnlockForm(
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        verticalArrangement = Arrangement.Top
     ) {
-        Spacer(Modifier.height(24.dp))
-        Icon(
-            imageVector = Icons.Outlined.Lock,
-            contentDescription = null,
-            modifier = Modifier.size(88.dp),
-            tint = HpColors.ink
-        )
-        if (instruction != null) {
-            Text(
-                text = instruction,
-                color = HpColors.muted,
-                textAlign = TextAlign.Center
-            )
-        }
-        Spacer(Modifier.height(4.dp))
+        HpSettingsLockHeader(instruction = instruction)
+        Spacer(Modifier.height(32.dp))
         HpFormTextField(
             label = credentialLabel,
             value = value,
@@ -3860,21 +3885,10 @@ private fun CredentialChoiceForm(
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        verticalArrangement = Arrangement.Top
     ) {
-        Spacer(Modifier.height(24.dp))
-        Icon(
-            imageVector = Icons.Outlined.Lock,
-            contentDescription = null,
-            modifier = Modifier.size(88.dp),
-            tint = HpColors.ink
-        )
-        Text(
-            text = instruction,
-            color = HpColors.muted,
-            textAlign = TextAlign.Center
-        )
-        Spacer(Modifier.height(4.dp))
+        HpSettingsLockHeader(instruction = instruction)
+        Spacer(Modifier.height(32.dp))
         HpFormTextField(
             label = credentialLabel,
             value = "",
@@ -3921,21 +3935,10 @@ private fun CredentialConfirmForm(
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        verticalArrangement = Arrangement.Top
     ) {
-        Spacer(Modifier.height(24.dp))
-        Icon(
-            imageVector = Icons.Outlined.Lock,
-            contentDescription = null,
-            modifier = Modifier.size(88.dp),
-            tint = HpColors.ink
-        )
-        Text(
-            text = instruction,
-            color = HpColors.muted,
-            textAlign = TextAlign.Center
-        )
-        Spacer(Modifier.height(4.dp))
+        HpSettingsLockHeader(instruction = instruction)
+        Spacer(Modifier.height(32.dp))
         HpFormTextField(
             label = credentialLabel,
             value = value,
@@ -3960,10 +3963,156 @@ private fun CredentialConfirmForm(
 }
 
 @Composable
+private fun RecoveryPhraseCreatedForm(
+    recoveryPhrase: String,
+    onDone: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(620.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Top
+    ) {
+        HpSettingsLockHeader(
+            instruction = "Save this recovery phrase somewhere safe. You can use this phrase to reset the app in case you misplace your pin or password."
+        )
+        Text(
+            text = recoveryPhrase,
+            color = HpColors.accent,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 24.dp)
+        )
+        Spacer(Modifier.weight(1f))
+        Button(
+            onClick = onDone,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(HpTheme.radii.row),
+            colors = ButtonDefaults.buttonColors(containerColor = HpColors.accent, contentColor = Color.White)
+        ) {
+            Text("Done")
+        }
+    }
+}
+
+@Composable
+private fun SecurityCredentialCreateFlow(
+    viewModel: HumanProgramViewModel,
+    saveCredential: () -> AppLockRecoveryResetResult?,
+    onSaved: (AppLockRecoveryResetResult) -> Unit,
+    onDone: () -> Unit
+) {
+    var step by rememberSaveable { mutableStateOf("choose") }
+    var message by rememberSaveable { mutableStateOf("") }
+
+    when (step) {
+        "choose" -> {
+            CredentialChoiceForm(
+                credentialType = viewModel.appLockCredentialType,
+                instruction = "Choose between a PIN and a password",
+                onPin = {
+                    message = ""
+                    viewModel.updateAppLockCredentialType(SecurityCredentialType.PIN)
+                    step = "new"
+                },
+                onPassword = {
+                    message = ""
+                    viewModel.updateAppLockCredentialType(SecurityCredentialType.PASSWORD)
+                    step = "new"
+                }
+            )
+        }
+        "new" -> {
+            val newLabel = if (viewModel.appLockCredentialType == SecurityCredentialType.PIN) "PIN" else "password"
+            CredentialConfirmForm(
+                credentialType = viewModel.appLockCredentialType,
+                instruction = "Enter your new $newLabel",
+                value = viewModel.appLockPinInput,
+                onValueChange = viewModel::updateAppLockPinInput,
+                onConfirm = {
+                    message = ""
+                    if (viewModel.validateAppLockCredentialDraft()) {
+                        step = "again"
+                    }
+                }
+            )
+        }
+        "again" -> {
+            val newLabel = if (viewModel.appLockCredentialType == SecurityCredentialType.PIN) "PIN" else "password"
+            CredentialConfirmForm(
+                credentialType = viewModel.appLockCredentialType,
+                instruction = "Re-enter the $newLabel",
+                value = viewModel.appLockPinConfirmInput,
+                onValueChange = viewModel::updateAppLockPinConfirmInput,
+                onConfirm = {
+                    if (viewModel.appLockPinInput != viewModel.appLockPinConfirmInput) {
+                        message = "Does not match"
+                    } else {
+                        message = ""
+                        saveCredential()?.let { result ->
+                            onSaved(result)
+                            if (result.recoveryPhraseHash != null) {
+                                step = "recovery"
+                            } else {
+                                onDone()
+                                step = "choose"
+                            }
+                        }
+                    }
+                }
+            )
+        }
+        else -> {
+            RecoveryPhraseCreatedForm(
+                recoveryPhrase = viewModel.generatedRecoveryPhrase,
+                onDone = onDone
+            )
+        }
+    }
+
+    val visibleMessage = message.ifBlank { viewModel.appLockPinMessage }
+    if (visibleMessage.isNotBlank() && step != "recovery") {
+        Text(visibleMessage, color = HpColors.muted)
+    }
+}
+
+@Composable
+private fun SecurityCredentialSetupFlow(
+    viewModel: HumanProgramViewModel,
+    onSaved: (AppLockRecoveryResetResult) -> Unit,
+    onDone: () -> Unit
+) {
+    SecurityCredentialCreateFlow(
+        viewModel = viewModel,
+        saveCredential = viewModel::setupAppLockCredentialWithConfirmation,
+        onSaved = onSaved,
+        onDone = onDone
+    )
+}
+
+@Composable
+private fun SecurityCredentialRecoveryResetFlow(
+    viewModel: HumanProgramViewModel,
+    onSaved: (AppLockRecoveryResetResult) -> Unit,
+    onDone: () -> Unit
+) {
+    SecurityCredentialCreateFlow(
+        viewModel = viewModel,
+        saveCredential = viewModel::completeRecoveryCredentialReset,
+        onSaved = onSaved,
+        onDone = onDone
+    )
+}
+
+@Composable
 private fun SecurityCredentialChangeFlow(
     viewModel: HumanProgramViewModel,
     onRecovery: () -> Unit,
-    onSaved: (AppLockRecoveryResetResult) -> Unit
+    onSaved: (AppLockRecoveryResetResult) -> Unit,
+    onDone: () -> Unit
 ) {
     var step by rememberSaveable { mutableStateOf("prior") }
     var message by rememberSaveable { mutableStateOf("") }
@@ -3984,55 +4133,16 @@ private fun SecurityCredentialChangeFlow(
                         }
                     },
                     instruction = "Enter your prior $credentialLabel",
-                    primaryLabel = "Enter"
-                )
-            }
-            "choose" -> {
-                CredentialChoiceForm(
-                    credentialType = viewModel.appLockCredentialType,
-                    instruction = "Choose between a PIN and a password",
-                    onPin = {
-                        message = ""
-                        viewModel.updateAppLockCredentialType(SecurityCredentialType.PIN)
-                        step = "new"
-                    },
-                    onPassword = {
-                        message = ""
-                        viewModel.updateAppLockCredentialType(SecurityCredentialType.PASSWORD)
-                        step = "new"
-                    }
-                )
-            }
-            "new" -> {
-                val newLabel = if (viewModel.appLockCredentialType == SecurityCredentialType.PIN) "PIN" else "password"
-                CredentialConfirmForm(
-                    credentialType = viewModel.appLockCredentialType,
-                    instruction = "Enter your new $newLabel",
-                    value = viewModel.appLockPinInput,
-                    onValueChange = viewModel::updateAppLockPinInput,
-                    onConfirm = {
-                        message = ""
-                        if (viewModel.validateAppLockCredentialDraft()) {
-                            step = "again"
-                        }
-                    }
+                    primaryLabel = "Enter",
+                    showForgotButton = viewModel.hasRecoveryPhrase
                 )
             }
             else -> {
-                val newLabel = if (viewModel.appLockCredentialType == SecurityCredentialType.PIN) "PIN" else "password"
-                CredentialConfirmForm(
-                    credentialType = viewModel.appLockCredentialType,
-                    instruction = "Re-enter the $newLabel",
-                    value = viewModel.appLockPinConfirmInput,
-                    onValueChange = viewModel::updateAppLockPinConfirmInput,
-                    onConfirm = {
-                        if (viewModel.appLockPinInput != viewModel.appLockPinConfirmInput) {
-                            message = "Does not match"
-                        } else {
-                            message = ""
-                            viewModel.changeAppLockCredentialAfterPriorVerified()?.let(onSaved)
-                        }
-                    }
+                SecurityCredentialCreateFlow(
+                    viewModel = viewModel,
+                    saveCredential = viewModel::changeAppLockCredentialAfterPriorVerified,
+                    onSaved = onSaved,
+                    onDone = onDone
                 )
             }
         }
@@ -4099,8 +4209,170 @@ private fun SecurityCredentialResetFields(
     if (viewModel.appLockPinMessage.isNotBlank()) {
         Text(viewModel.appLockPinMessage, color = HpColors.muted)
     }
-    if (viewModel.recoveryPhraseMessage.isNotBlank()) {
-        Text(viewModel.recoveryPhraseMessage, color = HpColors.muted)
+}
+
+@Composable
+private fun RecoveryPhraseSettingsFlow(
+    viewModel: HumanProgramViewModel,
+    onRecoveryPhraseSet: (PinHash) -> Unit,
+    onSetupPinPassword: () -> Unit
+) {
+    var visiblePhrase by rememberSaveable { mutableStateOf("") }
+    var resetResultPhrase by rememberSaveable { mutableStateOf("") }
+    var showResetConfirm by rememberSaveable { mutableStateOf(false) }
+    var showResetCredentialConfirm by rememberSaveable { mutableStateOf(false) }
+
+    if (!viewModel.appLockEnabled) {
+        HpList {
+            item {
+                HpSettingsContentPage(title = "Recovery Phrase") {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(620.dp),
+                        verticalArrangement = Arrangement.Top
+                    ) {
+                        Text(
+                            "Set up a PIN or password for the recovery phrase to generate.",
+                            color = HpColors.muted
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Button(
+                            onClick = onSetupPinPassword,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(HpTheme.radii.row),
+                            colors = ButtonDefaults.buttonColors(containerColor = HpColors.accent, contentColor = Color.White)
+                        ) {
+                            Text("Set Up PIN / Password")
+                        }
+                    }
+                }
+            }
+        }
+        return
+    }
+
+    if (resetResultPhrase.isNotBlank()) {
+        HpList {
+            item {
+                HpSettingsContentPage(title = "Recovery Phrase") {
+                    RecoveryPhraseCreatedForm(
+                        recoveryPhrase = resetResultPhrase,
+                        onDone = {
+                            resetResultPhrase = ""
+                            visiblePhrase = ""
+                        }
+                    )
+                }
+            }
+        }
+        return
+    }
+
+    if (showResetCredentialConfirm) {
+        HpList {
+            item {
+                HpSettingsContentPage(title = "Security") {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        CredentialUnlockForm(
+                            credentialType = viewModel.appLockCredentialType,
+                            value = viewModel.securitySettingsUnlockInput,
+	                            onValueChange = viewModel::updateSecuritySettingsUnlockInput,
+	                            onForgot = {},
+	                            onUnlock = {
+	                                if (viewModel.verifySecurityCredentialForRecoveryPhraseReset()) {
+	                                    val phraseHash = viewModel.resetRecoveryPhrase()
+	                                    val newPhrase = viewModel.generatedRecoveryPhrase
+	                                    if (phraseHash != null && newPhrase.isNotBlank()) {
+                                        onRecoveryPhraseSet(phraseHash)
+                                        visiblePhrase = ""
+                                        resetResultPhrase = newPhrase
+                                        showResetCredentialConfirm = false
+                                    }
+                                }
+                            },
+                            primaryLabel = "Reset Phrase",
+                            showForgotButton = false
+                        )
+                        if (viewModel.securitySettingsUnlockMessage.isNotBlank()) {
+                            Text(viewModel.securitySettingsUnlockMessage, color = HpColors.muted)
+                        }
+                    }
+                }
+            }
+        }
+        return
+    }
+
+    HpList {
+        item {
+            HpSettingsContentPage(title = "Recovery Phrase") {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(620.dp),
+                    verticalArrangement = Arrangement.Top
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(
+                            "Write this recovery phrase and store it somewhere secure. You can use the recovery phrase in case you forget your PIN or password.",
+                            color = HpColors.muted
+                        )
+                        if (visiblePhrase.isNotBlank()) {
+                            Text(
+                                visiblePhrase,
+                                color = HpColors.accent,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Button(
+                        onClick = {
+                            if (visiblePhrase.isNotBlank()) {
+                                visiblePhrase = ""
+                            } else {
+                                val revealResult = viewModel.revealRecoveryPhrase()
+                                revealResult?.recoveryPhraseHash?.let(onRecoveryPhraseSet)
+                                visiblePhrase = revealResult?.phrase.orEmpty()
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(HpTheme.radii.row),
+                        colors = ButtonDefaults.buttonColors(containerColor = HpColors.accent, contentColor = Color.White)
+                    ) {
+                        Text(if (visiblePhrase.isNotBlank()) "Hide Phrase" else "Reveal Phrase")
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Button(
+                        onClick = { showResetConfirm = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(HpTheme.radii.row),
+                        colors = ButtonDefaults.buttonColors(containerColor = HpColors.accent, contentColor = Color.White)
+                    ) {
+                        Text("Reset Phrase")
+                    }
+                }
+            }
+        }
+    }
+
+    if (showResetConfirm) {
+        AlertDialog(
+            onDismissRequest = { showResetConfirm = false },
+            title = { Text("Reset Recovery Phrase") },
+            text = { Text("This replaces the current recovery phrase. The old phrase will stop working.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showResetConfirm = false
+                    viewModel.clearSecurityCredentialEntry()
+                    showResetCredentialConfirm = true
+                }) { Text("Reset") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetConfirm = false }) { Text("Cancel") }
+            }
+        )
     }
 }
 
@@ -4116,18 +4388,23 @@ internal fun SecuritySettings(
 ) {
     var showPinSetup by rememberSaveable { mutableStateOf(!viewModel.appLockEnabled) }
     var showPinRecovery by rememberSaveable { mutableStateOf(false) }
+    var pinChangeRequiresPrior by rememberSaveable { mutableStateOf(false) }
     var page by rememberSaveable { mutableStateOf("root") }
     LaunchedEffect(page) {
         onInnerBackAvailableChange(page != "root")
     }
     LaunchedEffect(innerBackRequest) {
-        if (innerBackRequest > 0 && page != "root") page = "root"
+        if (innerBackRequest > 0 && page != "root") {
+            pinChangeRequiresPrior = false
+            page = "root"
+        }
     }
     if (page != "root") {
         if (
             page == "pin" &&
             viewModel.appLockEnabled &&
             showPinSetup &&
+            pinChangeRequiresPrior &&
             !showPinRecovery &&
             !viewModel.recoveryCredentialResetRequired
         ) {
@@ -4136,10 +4413,26 @@ internal fun SecuritySettings(
                 onRecovery = { showPinRecovery = true },
                 onSaved = { result ->
                     onAppLockPinSet(result.credentialHash)
-                    onRecoveryPhraseSet(result.recoveryPhraseHash)
-                    showPinSetup = false
+                    result.recoveryPhraseHash?.let(onRecoveryPhraseSet)
+                },
+                onDone = {
+                showPinSetup = false
+                showPinRecovery = false
+                pinChangeRequiresPrior = false
+                page = "root"
+            }
+        )
+            return
+        }
+        if (page == "recovery") {
+            RecoveryPhraseSettingsFlow(
+                viewModel = viewModel,
+                onRecoveryPhraseSet = onRecoveryPhraseSet,
+                onSetupPinPassword = {
+                    showPinSetup = true
                     showPinRecovery = false
-                    page = "root"
+                    pinChangeRequiresPrior = false
+                    page = "pin"
                 }
             )
             return
@@ -4155,53 +4448,62 @@ internal fun SecuritySettings(
                     )
                 }
                 "pin" -> item {
-                    HpSettingsContentPage(title = "PIN / Password") {
+                    val pinPageTitle = if (viewModel.recoveryCredentialResetRequired || showPinSetup) {
+                        "Set a new password or pin"
+                    } else {
+                        "Security"
+                    }
+                    HpSettingsContentPage(title = pinPageTitle) {
                         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             when {
                                 viewModel.recoveryCredentialResetRequired -> {
-                                    SecurityCredentialResetFields(
+                                    SecurityCredentialRecoveryResetFlow(
                                         viewModel = viewModel,
-                                        onSave = {
-                                            viewModel.completeRecoveryCredentialReset()?.let { result ->
-                                                onAppLockPinSet(result.credentialHash)
-                                                onRecoveryPhraseSet(result.recoveryPhraseHash)
-                                                showPinSetup = false
-                                                showPinRecovery = false
-                                            }
+                                        onSaved = { result ->
+                                            onAppLockPinSet(result.credentialHash)
+                                            result.recoveryPhraseHash?.let(onRecoveryPhraseSet)
+                                        },
+                                        onDone = {
+                                            showPinSetup = false
+                                            showPinRecovery = false
+                                            pinChangeRequiresPrior = false
+                                            page = "root"
                                         }
                                     )
                                 }
                                 showPinRecovery -> {
-                                    Text("Enter your recovery phrase to set a new PIN or password.", color = HpColors.muted)
-                                    HpFormTextField("Recovery phrase", viewModel.recoveryPhraseInput, viewModel::updateRecoveryPhraseInput)
-                                    HpPrimaryButton("Continue", viewModel::unlockAppWithRecoveryPhrase)
-                                    HpSecondaryButton("Back") { showPinRecovery = false }
-                                    if (viewModel.appUnlockMessage.isNotBlank()) Text(viewModel.appUnlockMessage, color = HpColors.muted)
+                                    RecoveryPhraseEntryForm(
+                                        value = viewModel.recoveryPhraseInput,
+                                        onValueChange = viewModel::updateRecoveryPhraseInput,
+                                        onContinue = viewModel::unlockAppWithRecoveryPhrase,
+                                        message = viewModel.appUnlockMessage
+                                    )
                                 }
                                 showPinSetup -> {
-                                    SecurityCredentialResetFields(
+                                    SecurityCredentialSetupFlow(
                                         viewModel = viewModel,
-                                        showCurrentCredential = viewModel.appLockEnabled,
-                                        onRecovery = if (viewModel.appLockEnabled) ({ showPinRecovery = true }) else null,
-                                        onSave = {
-                                            val result = if (viewModel.appLockEnabled) {
-                                                viewModel.changeAppLockCredentialWithConfirmation()
-                                            } else {
-                                                viewModel.setupAppLockCredentialWithConfirmation()
-                                            }
-                                            result?.let {
-                                                onAppLockPinSet(it.credentialHash)
-                                                onRecoveryPhraseSet(it.recoveryPhraseHash)
-                                                showPinSetup = false
-                                            }
+                                        onSaved = { result ->
+                                            onAppLockPinSet(result.credentialHash)
+                                            result.recoveryPhraseHash?.let(onRecoveryPhraseSet)
+                                        },
+                                        onDone = {
+                                            showPinSetup = false
+                                            pinChangeRequiresPrior = false
+                                            page = "root"
                                         }
                                     )
-                                    if (viewModel.appLockEnabled) HpSecondaryButton("Cancel") { showPinSetup = false }
+                                    if (pinChangeRequiresPrior) {
+                                        HpSecondaryButton("Cancel") {
+                                            showPinSetup = false
+                                            pinChangeRequiresPrior = false
+                                        }
+                                    }
                                 }
                                 else -> {
                                     HpSecondaryButton("Change PIN / Password") {
                                         showPinSetup = true
                                         showPinRecovery = false
+                                        pinChangeRequiresPrior = true
                                     }
                                 }
                             }
@@ -4231,86 +4533,6 @@ internal fun SecuritySettings(
                         }
                     }
                 }
-                "recovery" -> item {
-                    var recoveryPhraseVisible by rememberSaveable { mutableStateOf(false) }
-                    var showRotateConfirm by rememberSaveable { mutableStateOf(false) }
-                    var showRotateResetConfirm by rememberSaveable { mutableStateOf(false) }
-                    var rotateResetInput by rememberSaveable { mutableStateOf("") }
-                    HpSettingsContentPage(title = "Recovery") {
-                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Text(
-                                "Write this phrase on paper and store it somewhere safe. Use it only if you forget your PIN or password.",
-                                color = HpColors.muted
-                            )
-                            if (viewModel.generatedRecoveryPhrase.isBlank()) {
-                                Text("No recovery phrase is saved.", color = HpColors.ink)
-                                HpPrimaryButton("Generate Recovery Phrase") {
-                                    viewModel.generateRecoveryPhrase()?.let {
-                                        onRecoveryPhraseSet(it)
-                                        recoveryPhraseVisible = true
-                                    }
-                                }
-                            } else {
-                                Text(
-                                    if (recoveryPhraseVisible) viewModel.generatedRecoveryPhrase else "Recovery phrase saved.",
-                                    color = if (recoveryPhraseVisible) HpColors.accent else HpColors.ink,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    HpSecondaryButton(if (recoveryPhraseVisible) "Hide Phrase" else "View Phrase") {
-                                        recoveryPhraseVisible = !recoveryPhraseVisible
-                                    }
-                                    HpSecondaryButton("Generate New Phrase") { showRotateConfirm = true }
-                                }
-                            }
-                            if (viewModel.recoveryPhraseMessage.isNotBlank()) Text(viewModel.recoveryPhraseMessage, color = HpColors.muted)
-                        }
-                    }
-                    if (showRotateConfirm) {
-                        AlertDialog(
-                            onDismissRequest = { showRotateConfirm = false },
-                            title = { Text("Generate New Phrase") },
-                            text = { Text("This replaces the current recovery phrase. The old phrase will stop working.") },
-                            confirmButton = {
-                                TextButton(onClick = {
-                                    showRotateConfirm = false
-                                    showRotateResetConfirm = true
-                                    rotateResetInput = ""
-                                }) { Text("Yes") }
-                            },
-                            dismissButton = {
-                                TextButton(onClick = { showRotateConfirm = false }) { Text("No") }
-                            }
-                        )
-                    }
-                    if (showRotateResetConfirm) {
-                        AlertDialog(
-                            onDismissRequest = { showRotateResetConfirm = false },
-                            title = { Text("Confirm Replacement") },
-                            text = {
-                                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    Text("Type reset to replace your recovery phrase.")
-                                    HpFormTextField("Confirmation", rotateResetInput, { rotateResetInput = it.take(20) })
-                                }
-                            },
-                            confirmButton = {
-                                TextButton(onClick = {
-                                    if (rotateResetInput.equals("reset", ignoreCase = true)) {
-                                        viewModel.generateRecoveryPhrase()?.let {
-                                            onRecoveryPhraseSet(it)
-                                            recoveryPhraseVisible = true
-                                            showRotateResetConfirm = false
-                                            rotateResetInput = ""
-                                        }
-                                    }
-                                }) { Text("Replace") }
-                            },
-                            dismissButton = {
-                                TextButton(onClick = { showRotateResetConfirm = false }) { Text("Cancel") }
-                            }
-                        )
-                    }
-                }
             }
         }
         return
@@ -4321,37 +4543,48 @@ internal fun SecuritySettings(
                 sections = listOf(
                     HpSettingsMenuSection(
                         title = "Security",
-                        items = listOf(
-                            HpSettingsMenuItem(
-                                title = "Lock Settings",
-                                icon = Icons.Outlined.Lock,
-                                onClick = { page = "lock" }
-                            ),
-                            HpSettingsMenuItem(
-                                title = "PIN / Password",
-                                icon = Icons.Outlined.Lock,
-                                onClick = {
-                                    showPinSetup = true
-                                    showPinRecovery = false
-                                    page = "pin"
-                                }
-                            ),
-                            HpSettingsMenuItem(
-                                title = "Biometric Unlock",
-                                icon = Icons.Outlined.LockOpen,
-                                onClick = { page = "biometric" }
-                            ),
-                            HpSettingsMenuItem(
-                                title = "Encryption Settings",
-                                icon = Icons.Outlined.Lock,
-                                onClick = { page = "encryption" }
-                            ),
-                            HpSettingsMenuItem(
-                                title = "Recovery",
-                                icon = Icons.Outlined.RestartAlt,
-                                onClick = { page = "recovery" }
+                        items = buildList {
+                            add(
+                                HpSettingsMenuItem(
+                                    title = "Lock Settings",
+                                    icon = Icons.Outlined.Lock,
+                                    onClick = { page = "lock" }
+                                )
                             )
-                        )
+                            add(
+                                HpSettingsMenuItem(
+                                    title = "PIN / Password",
+                                    icon = Icons.Outlined.Lock,
+                                    onClick = {
+                                        showPinSetup = true
+                                        showPinRecovery = false
+                                        pinChangeRequiresPrior = viewModel.appLockEnabled
+                                        page = "pin"
+                                    }
+                                )
+                            )
+                            add(
+                                HpSettingsMenuItem(
+                                    title = "Biometric Unlock",
+                                    icon = Icons.Outlined.LockOpen,
+                                    onClick = { page = "biometric" }
+                                )
+                            )
+                            add(
+                                HpSettingsMenuItem(
+                                    title = "Encryption Settings",
+                                    icon = Icons.Outlined.Lock,
+                                    onClick = { page = "encryption" }
+                                )
+                            )
+                            add(
+                                HpSettingsMenuItem(
+                                    title = "Recovery",
+                                    icon = Icons.Outlined.RestartAlt,
+                                    onClick = { page = "recovery" }
+                                )
+                            )
+                        }
                     )
                 )
             )
@@ -4368,12 +4601,14 @@ internal fun ResetSettings(
     onReminderScheduleChanged: () -> Unit,
     innerBackRequest: Int,
     onInnerBackAvailableChange: (Boolean) -> Unit,
+    onResetSuccessVisibleChange: (Boolean) -> Unit,
     onResetContinueToToday: () -> Unit
 ) {
     var showConfirmDialog by rememberSaveable { mutableStateOf(false) }
     var resetStep by rememberSaveable { mutableStateOf(FactoryResetStep.WARNING) }
     LaunchedEffect(resetStep) {
         onInnerBackAvailableChange(resetStep != FactoryResetStep.WARNING)
+        onResetSuccessVisibleChange(resetStep == FactoryResetStep.SUCCESS)
     }
     LaunchedEffect(innerBackRequest) {
         if (innerBackRequest > 0 && resetStep == FactoryResetStep.UNLOCK) {
@@ -4390,20 +4625,26 @@ internal fun ResetSettings(
         item {
             HpSettingsContentPage(title = "Factory Reset") {
                 when (resetStep) {
-                    FactoryResetStep.WARNING -> Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    FactoryResetStep.WARNING -> Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(620.dp),
+                        verticalArrangement = Arrangement.Top
+                    ) {
                         Text(
                             "Factory reset will erase all content and settings in Human Program. Please ensure that you have backed up your data to prevent data loss.",
                             color = HpColors.ink,
                             fontWeight = FontWeight.SemiBold
                         )
-                        FactoryResetCapsuleButton("Go to Backup Export", primary = false, onClick = onOpenExport)
-                        FactoryResetCapsuleButton("Continue with Factory Reset", primary = false) {
+                        Spacer(Modifier.weight(1f))
+                        FactoryResetCapsuleButton("Go to Backup Export", primary = true, onClick = onOpenExport)
+                        Spacer(Modifier.height(10.dp))
+                        FactoryResetCapsuleButton("Continue with Factory Reset", primary = true) {
                             viewModel.beginResetSequence()
                             viewModel.acknowledgeResetExportReminder()
                             viewModel.clearSecuritySettingsUnlock()
                             resetStep = FactoryResetStep.UNLOCK
                         }
-                        if (viewModel.resetMessage.isNotBlank()) Text(viewModel.resetMessage, color = HpColors.ink)
                     }
                     FactoryResetStep.UNLOCK -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         CredentialUnlockForm(
@@ -4487,15 +4728,16 @@ private enum class FactoryResetStep {
 private fun FactoryResetCapsuleButton(
     label: String,
     primary: Boolean,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
-    val modifier = Modifier
+    val buttonModifier = modifier
         .fillMaxWidth()
         .height(56.dp)
     if (primary) {
         Button(
             onClick = onClick,
-            modifier = modifier,
+            modifier = buttonModifier,
             shape = RoundedCornerShape(28.dp),
             colors = ButtonDefaults.buttonColors(containerColor = HpColors.accent, contentColor = Color.White)
         ) {
@@ -4504,7 +4746,7 @@ private fun FactoryResetCapsuleButton(
     } else {
         OutlinedButton(
             onClick = onClick,
-            modifier = modifier,
+            modifier = buttonModifier,
             shape = RoundedCornerShape(28.dp)
         ) {
             Text(label, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
@@ -4518,29 +4760,40 @@ private fun FactoryResetSuccessScreen(onContinue: () -> Unit) {
         modifier = Modifier.fillMaxSize(),
         color = Color.White
     ) {
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 28.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+                .padding(horizontal = 28.dp)
         ) {
-            Icon(
-                imageVector = Icons.Outlined.RestartAlt,
-                contentDescription = null,
-                modifier = Modifier.size(96.dp),
-                tint = Color.Black
+            Column(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .offset(y = (-42).dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.RestartAlt,
+                    contentDescription = null,
+                    modifier = Modifier.size(96.dp),
+                    tint = Color.Black
+                )
+                Spacer(Modifier.height(38.dp))
+                Text(
+                    "Human Program has been reset back to its factory state.",
+                    color = Color.Black,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 24.sp,
+                    textAlign = TextAlign.Center
+                )
+            }
+            FactoryResetCapsuleButton(
+                "Continue",
+                primary = true,
+                onClick = onContinue,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 34.dp)
             )
-            Spacer(Modifier.height(38.dp))
-            Text(
-                "Human Program has been reset back to its factory state.",
-                color = Color.Black,
-                fontWeight = FontWeight.Bold,
-                fontSize = 24.sp,
-                textAlign = TextAlign.Center
-            )
-            Spacer(Modifier.height(34.dp))
-            FactoryResetCapsuleButton("Continue", primary = true, onClick = onContinue)
         }
     }
 }
@@ -4765,7 +5018,7 @@ internal fun AppLockScreen(
                     onSave = {
                         viewModel.completeRecoveryCredentialReset()?.let { result ->
                             onAppLockPinSet(result.credentialHash)
-                            onRecoveryPhraseSet(result.recoveryPhraseHash)
+                            result.recoveryPhraseHash?.let(onRecoveryPhraseSet)
                         }
                     }
                 )
@@ -4774,17 +5027,13 @@ internal fun AppLockScreen(
 
             if (showRecovery) {
                 Text("Recovery Phrase", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold, color = HpColors.ink)
-                Text("Enter your recovery phrase to set a new PIN or password.", color = HpColors.muted)
                 Spacer(Modifier.height(22.dp))
-                HpFormTextField("Recovery phrase", viewModel.recoveryPhraseInput, viewModel::updateRecoveryPhraseInput)
-                Spacer(Modifier.height(12.dp))
-                HpPrimaryButton("Continue", viewModel::unlockAppWithRecoveryPhrase)
-                Spacer(Modifier.height(8.dp))
-                HpSecondaryButton("Back") { showRecovery = false }
-                if (viewModel.appUnlockMessage.isNotBlank()) {
-                    Spacer(Modifier.height(12.dp))
-                    Text(viewModel.appUnlockMessage, color = HpColors.muted)
-                }
+                RecoveryPhraseEntryForm(
+                    value = viewModel.recoveryPhraseInput,
+                    onValueChange = viewModel::updateRecoveryPhraseInput,
+                    onContinue = viewModel::unlockAppWithRecoveryPhrase,
+                    message = viewModel.appUnlockMessage
+                )
                 return@Column
             }
         }
@@ -4822,7 +5071,8 @@ private fun AppLockCredentialUnlockScreen(
                             value = viewModel.appUnlockPinInput,
                             onValueChange = viewModel::updateAppUnlockPinInput,
                             onForgot = onForgot,
-                            onUnlock = viewModel::unlockApp
+                            onUnlock = viewModel::unlockApp,
+                            showForgotButton = viewModel.hasRecoveryPhrase
                         )
                         if (viewModel.biometricUnlockEnabled && viewModel.biometricUnlockAvailable) {
                             HpSecondaryButton("Use Biometric Unlock", onRequestBiometricUnlock)
@@ -4846,6 +5096,10 @@ internal fun WelcomeScreen(
     onRecoveryPhraseSet: (PinHash) -> Unit,
     onOnboardingComplete: () -> Unit
 ) {
+    var securitySetupAcknowledged by rememberSaveable {
+        mutableStateOf(viewModel.appLockEnabled && viewModel.generatedRecoveryPhrase.isNotBlank())
+    }
+
     HpList(topInset = true) {
         item {
             HpHeroPanel {
@@ -4863,20 +5117,26 @@ internal fun WelcomeScreen(
             }
         }
         item {
-            HpSectionHeader("Security Setup", null)
+            HpSectionHeader("Set a new password or pin", null)
             HpSoftPanel {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Create a PIN or password before entering the app. A recovery phrase will be generated right away.", color = HpColors.muted)
-                    SecurityCredentialResetFields(
-                        viewModel = viewModel,
-                        onSave = {
-                            viewModel.setupAppLockCredentialWithConfirmation()?.let { result ->
+                    if (securitySetupAcknowledged) {
+                        Text("PIN / password saved.", color = HpColors.muted)
+                    } else {
+                        SecurityCredentialSetupFlow(
+                            viewModel = viewModel,
+                            onSaved = { result ->
                                 onAppLockPinSet(result.credentialHash)
-                                onRecoveryPhraseSet(result.recoveryPhraseHash)
+                                result.recoveryPhraseHash?.let(onRecoveryPhraseSet)
+                            },
+                            onDone = {
+                                securitySetupAcknowledged = true
                             }
-                        }
-                    )
-                    if (viewModel.generatedRecoveryPhrase.isNotBlank()) Text(viewModel.generatedRecoveryPhrase, color = HpColors.accent)
+                        )
+                    }
+                    if (viewModel.appLockPinMessage.isNotBlank() && securitySetupAcknowledged) {
+                        Text(viewModel.appLockPinMessage, color = HpColors.muted)
+                    }
                 }
             }
         }

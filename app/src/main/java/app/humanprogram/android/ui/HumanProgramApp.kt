@@ -208,6 +208,7 @@ fun HumanProgramApp(
     var settingsInnerBackRequest by rememberSaveable { mutableIntStateOf(0) }
     var settingsArticleOpen by rememberSaveable { mutableStateOf(false) }
     var settingsArticleImageOpen by rememberSaveable { mutableStateOf(false) }
+    var settingsResetSuccessVisible by rememberSaveable { mutableStateOf(false) }
     var settingsArticleFontScale by rememberSaveable { mutableStateOf(1f) }
     var notificationCreateRequest by rememberSaveable { mutableIntStateOf(0) }
     var notificationCreateActive by rememberSaveable { mutableStateOf(false) }
@@ -1183,7 +1184,8 @@ fun HumanProgramApp(
         primaryContentDescription = primaryContentDescription,
         onPrimaryAction = primaryAction,
         routeActions = routeActions,
-        commandCapsuleVisible = !settingsArticleImageOpen,
+        commandCapsuleVisible = !settingsArticleImageOpen && !settingsResetSuccessVisible,
+        drawBehindSystemBars = settingsResetSuccessVisible,
         overflowExpanded = undoRedoMode,
         undoRedoMessage = undoRedoMessage,
         canEdit = supportsEditMode,
@@ -1514,7 +1516,9 @@ fun HumanProgramApp(
                 articleFontScale = settingsArticleFontScale,
                 onArticleOpenChange = { settingsArticleOpen = it },
                 onArticleImageOpenChange = { settingsArticleImageOpen = it },
+                onResetSuccessVisibleChange = { settingsResetSuccessVisible = it },
                 onResetContinueToToday = {
+                    settingsResetSuccessVisible = false
                     route = HpRoute.TODAY
                     settingsDetail = null
                     viewModel.goToToday()

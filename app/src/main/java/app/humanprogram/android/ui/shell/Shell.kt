@@ -143,6 +143,7 @@ internal fun HpAppFrame(
     onPrimaryAction: (() -> Unit)?,
     routeActions: List<HpCommandAction?> = emptyList(),
     commandCapsuleVisible: Boolean = true,
+    drawBehindSystemBars: Boolean = false,
     overflowExpanded: Boolean,
     undoRedoMessage: String?,
     canEdit: Boolean,
@@ -159,7 +160,7 @@ internal fun HpAppFrame(
         modifier = Modifier.fillMaxSize(),
         color = HpColors.canvas
     ) {
-        val frameModifier = if (route == HpRoute.PROGRAM) {
+        val frameModifier = if (route == HpRoute.PROGRAM || drawBehindSystemBars) {
             Modifier.fillMaxSize()
         } else {
             Modifier

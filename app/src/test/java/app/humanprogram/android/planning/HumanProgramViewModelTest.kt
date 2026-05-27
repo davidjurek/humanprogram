@@ -232,7 +232,7 @@ class HumanProgramViewModelTest {
     }
 
     @Test
-    fun appLockChangeRequiresCurrentCredentialAndRotatesRecoveryPhrase() {
+    fun appLockChangeRequiresCurrentCredentialAndPreservesRecoveryPhrase() {
         val viewModel = HumanProgramViewModel(secretEncryptor = FakeSecretEncryptor())
         viewModel.updateAppLockPinInput("1234")
         viewModel.updateAppLockPinConfirmInput("1234")
@@ -253,7 +253,8 @@ class HumanProgramViewModelTest {
         val newPhrase = viewModel.generatedRecoveryPhrase
 
         assertTrue(result != null)
-        assertTrue(newPhrase != oldPhrase)
+        assertEquals(null, result!!.recoveryPhraseHash)
+        assertEquals(oldPhrase, newPhrase)
 
         viewModel.lockAppNow()
         viewModel.updateAppUnlockPinInput("1234")
@@ -285,8 +286,9 @@ class HumanProgramViewModelTest {
     fun recoveryPhraseCanUnlockWhenPinIsForgotten() {
         val viewModel = HumanProgramViewModel(secretEncryptor = FakeSecretEncryptor())
         viewModel.updateAppLockPinInput("1234")
-        viewModel.setupAppLockPin()
-        val hash = viewModel.generateRecoveryPhrase()
+        viewModel.updateAppLockPinConfirmInput("1234")
+        val setupResult = viewModel.setupAppLockCredentialWithConfirmation()
+        val hash = setupResult!!.recoveryPhraseHash!!
         val phrase = viewModel.generatedRecoveryPhrase
 
         viewModel.loadStoredAppLockPin(
@@ -314,27 +316,23 @@ class HumanProgramViewModelTest {
         assertFalse(viewModel.appLocked)
         assertFalse(viewModel.recoveryCredentialResetRequired)
         assertTrue(resetResult != null)
-        assertTrue(newPhrase != phrase)
+        assertEquals(null, resetResult!!.recoveryPhraseHash)
+        assertEquals(phrase, newPhrase)
 
         viewModel.lockAppNow()
         viewModel.updateRecoveryPhraseInput(phrase)
-        viewModel.unlockAppWithRecoveryPhrase()
-
-        assertFalse(viewModel.recoveryCredentialResetRequired)
-        assertEquals("Recovery phrase rejected.", viewModel.appUnlockMessage)
-
-        viewModel.updateRecoveryPhraseInput(newPhrase)
         viewModel.unlockAppWithRecoveryPhrase()
 
         assertTrue(viewModel.recoveryCredentialResetRequired)
     }
 
     @Test
-    fun recoveryResetDoesNotChangePinWhenNewPhraseEncryptionFails() {
+    fun recoveryResetDoesNotNeedToCreateNewRecoveryPhrase() {
         val viewModel = HumanProgramViewModel(secretEncryptor = FakeSecretEncryptor())
         viewModel.updateAppLockPinInput("1234")
-        viewModel.setupAppLockPin()
-        val hash = viewModel.generateRecoveryPhrase()
+        viewModel.updateAppLockPinConfirmInput("1234")
+        val setupResult = viewModel.setupAppLockCredentialWithConfirmation()
+        val hash = setupResult!!.recoveryPhraseHash!!
         val phrase = viewModel.generatedRecoveryPhrase
 
         viewModel.loadStoredAppLockPin(
@@ -370,21 +368,22 @@ class HumanProgramViewModelTest {
 
         val resetResult = noEncryptorViewModel.completeRecoveryCredentialReset()
 
-        assertEquals(null, resetResult)
-        assertTrue(noEncryptorViewModel.appLocked)
-        assertTrue(noEncryptorViewModel.recoveryCredentialResetRequired)
-        assertEquals("Recovery phrase encryption is not available.", noEncryptorViewModel.recoveryPhraseMessage)
+        assertTrue(resetResult != null)
+        assertEquals(null, resetResult!!.recoveryPhraseHash)
+        assertFalse(noEncryptorViewModel.appLocked)
+        assertFalse(noEncryptorViewModel.recoveryCredentialResetRequired)
     }
 
     @Test
     fun recoveryPhraseRequiresEncryptionBeforeItCanBeSaved() {
         val viewModel = HumanProgramViewModel()
         viewModel.updateAppLockPinInput("1234")
-        viewModel.setupAppLockPin()
+        viewModel.updateAppLockPinConfirmInput("1234")
 
-        val hash = viewModel.generateRecoveryPhrase()
+        val result = viewModel.setupAppLockCredentialWithConfirmation()
 
-        assertEquals(null, hash)
+        assertEquals(null, result)
+        assertFalse(viewModel.appLockEnabled)
         assertEquals("", viewModel.generatedRecoveryPhrase)
         assertEquals(null, viewModel.recoveryPhraseEncryptedSecret)
         assertEquals("Recovery phrase encryption is not available.", viewModel.recoveryPhraseMessage)
@@ -395,9 +394,10 @@ class HumanProgramViewModelTest {
         val encryptor = FakeSecretEncryptor()
         val viewModel = HumanProgramViewModel(secretEncryptor = encryptor)
         viewModel.updateAppLockPinInput("1234")
-        viewModel.setupAppLockPin()
+        viewModel.updateAppLockPinConfirmInput("1234")
 
-        val hash = viewModel.generateRecoveryPhrase()
+        val setupResult = viewModel.setupAppLockCredentialWithConfirmation()
+        val hash = setupResult!!.recoveryPhraseHash!!
         val phrase = viewModel.generatedRecoveryPhrase
         val encrypted = viewModel.recoveryPhraseEncryptedSecret
 
@@ -424,35 +424,81 @@ class HumanProgramViewModelTest {
     }
 
     @Test
-    fun rotatingRecoveryPhraseReplacesOldPhrase() {
+    fun changingCredentialPreservesRecoveryPhrase() {
         val viewModel = HumanProgramViewModel(secretEncryptor = FakeSecretEncryptor())
         viewModel.updateAppLockPinInput("1234")
-        viewModel.setupAppLockPin()
-        viewModel.generateRecoveryPhrase()
+        viewModel.updateAppLockPinConfirmInput("1234")
+        viewModel.setupAppLockCredentialWithConfirmation()
         val oldPhrase = viewModel.generatedRecoveryPhrase
 
-        viewModel.generateRecoveryPhrase()
+        viewModel.updateAppLockCurrentCredentialInput("1234")
+        assertTrue(viewModel.verifyCurrentAppLockCredentialForChange())
+        viewModel.updateAppLockPinInput("5678")
+        viewModel.updateAppLockPinConfirmInput("5678")
+        val changeResult = viewModel.changeAppLockCredentialAfterPriorVerified()
         val newPhrase = viewModel.generatedRecoveryPhrase
 
-        assertTrue(newPhrase != oldPhrase)
+        assertTrue(changeResult != null)
+        assertEquals(null, changeResult!!.recoveryPhraseHash)
+        assertEquals(oldPhrase, newPhrase)
 
         viewModel.lockAppNow()
         viewModel.updateRecoveryPhraseInput(oldPhrase)
-        viewModel.unlockAppWithRecoveryPhrase()
-
-        assertFalse(viewModel.recoveryCredentialResetRequired)
-        assertEquals("Recovery phrase rejected.", viewModel.appUnlockMessage)
-
-        viewModel.updateRecoveryPhraseInput(newPhrase)
         viewModel.unlockAppWithRecoveryPhrase()
 
         assertTrue(viewModel.recoveryCredentialResetRequired)
     }
 
     @Test
+    fun resettingRecoveryPhraseCreatesNewRevealablePhrase() {
+        val viewModel = HumanProgramViewModel(secretEncryptor = FakeSecretEncryptor())
+        viewModel.updateAppLockPinInput("1234")
+        viewModel.updateAppLockPinConfirmInput("1234")
+        viewModel.setupAppLockCredentialWithConfirmation()
+        val oldPhrase = viewModel.generatedRecoveryPhrase
+
+        val newHash = viewModel.resetRecoveryPhrase()
+        val newPhrase = viewModel.generatedRecoveryPhrase
+
+        assertTrue(newHash != null)
+        assertEquals(4, newPhrase.split("-").size)
+        assertFalse(newPhrase == oldPhrase)
+        assertEquals(newPhrase, viewModel.revealRecoveryPhrase()!!.phrase)
+    }
+
+    @Test
+    fun recoveryPhraseResetCredentialCheckDoesNotUnlockSecuritySettings() {
+        val viewModel = HumanProgramViewModel(secretEncryptor = FakeSecretEncryptor())
+        viewModel.updateAppLockPinInput("1234")
+        viewModel.updateAppLockPinConfirmInput("1234")
+        viewModel.setupAppLockCredentialWithConfirmation()
+        viewModel.clearSecuritySettingsUnlock()
+
+        viewModel.updateSecuritySettingsUnlockInput("1234")
+        val accepted = viewModel.verifySecurityCredentialForRecoveryPhraseReset()
+
+        assertTrue(accepted)
+        assertFalse(viewModel.securitySettingsUnlocked)
+    }
+
+    @Test
+    fun revealingRecoveryPhraseRepairsMissingPhraseForLockedApp() {
+        val viewModel = HumanProgramViewModel(secretEncryptor = FakeSecretEncryptor())
+        viewModel.updateAppLockPinInput("1234")
+        viewModel.setupAppLockPin()
+
+        val revealResult = viewModel.revealRecoveryPhrase()
+
+        assertTrue(revealResult != null)
+        assertTrue(revealResult!!.recoveryPhraseHash != null)
+        assertEquals(4, revealResult.phrase.split("-").size)
+        assertEquals("", viewModel.recoveryPhraseMessage)
+    }
+
+    @Test
     fun legacyPlaintextRecoveryPhraseCanStillLoadAsFallback() {
         val viewModel = HumanProgramViewModel(secretEncryptor = FakeSecretEncryptor())
-        viewModel.loadStoredAppLockPin(
+        val repairedHash = viewModel.loadStoredAppLockPin(
             enabled = true,
             biometricEnabled = false,
             saltBase64 = "pin-salt",
@@ -461,13 +507,15 @@ class HumanProgramViewModelTest {
             recoveryPhrasePlainText = "anchor-bright-cedar-dawn"
         )
 
+        assertTrue(repairedHash != null)
         assertEquals("anchor-bright-cedar-dawn", viewModel.generatedRecoveryPhrase)
+        assertEquals("anchor-bright-cedar-dawn", viewModel.revealRecoveryPhrase()!!.phrase)
     }
 
     @Test
-    fun oldSixWordRecoveryPhraseIsClearedOnLoad() {
+    fun oldSixWordRecoveryPhraseIsRepairedOnLoadWhenLockExists() {
         val viewModel = HumanProgramViewModel(secretEncryptor = FakeSecretEncryptor())
-        viewModel.loadStoredAppLockPin(
+        val repairedHash = viewModel.loadStoredAppLockPin(
             enabled = true,
             biometricEnabled = false,
             saltBase64 = "pin-salt",
@@ -478,8 +526,11 @@ class HumanProgramViewModelTest {
             recoveryPhrasePlainText = "juniper-silver-olive-cedar-thrive-dawn"
         )
 
-        assertEquals("", viewModel.generatedRecoveryPhrase)
-        assertEquals("Old recovery phrase format was removed. Generate a new recovery phrase.", viewModel.recoveryPhraseMessage)
+        assertTrue(repairedHash != null)
+        assertEquals(4, viewModel.generatedRecoveryPhrase.split("-").size)
+        assertFalse(viewModel.generatedRecoveryPhrase == "juniper-silver-olive-cedar-thrive-dawn")
+        assertEquals(viewModel.generatedRecoveryPhrase, viewModel.revealRecoveryPhrase()!!.phrase)
+        assertEquals("", viewModel.recoveryPhraseMessage)
     }
 
     @Test

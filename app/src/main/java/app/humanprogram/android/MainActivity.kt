@@ -28,6 +28,7 @@ import app.humanprogram.android.core.export.HprgmAppState
 import app.humanprogram.android.core.notifications.AndroidReminderScheduler
 import app.humanprogram.android.core.notifications.NotificationSchedulePlanner
 import app.humanprogram.android.core.security.AndroidKeystoreSecretEncryptor
+import app.humanprogram.android.core.security.PinHash
 import app.humanprogram.android.core.storage.PlannerSnapshotStore
 import app.humanprogram.android.planning.HumanProgramViewModel
 import app.humanprogram.android.planning.HumanProgramViewModelFactory
@@ -285,45 +286,7 @@ class MainActivity : ComponentActivity() {
                     },
                     onRecoveryPhraseSet = { phraseHash ->
                         lifecycleScope.launch {
-                            val encryptedPhrase = plannerViewModel.recoveryPhraseEncryptedSecret
-                            if (encryptedPhrase != null) {
-                                appPreferencesRepository.setString(
-                                    AppPreferencesRepository.Keys.RecoveryPhraseEncryptionScheme,
-                                    encryptedPhrase.scheme
-                                )
-                                appPreferencesRepository.setString(
-                                    AppPreferencesRepository.Keys.RecoveryPhraseKeyAlias,
-                                    encryptedPhrase.keyAlias
-                                )
-                                appPreferencesRepository.setString(
-                                    AppPreferencesRepository.Keys.RecoveryPhraseNonceBase64,
-                                    encryptedPhrase.nonceBase64
-                                )
-                                appPreferencesRepository.setString(
-                                    AppPreferencesRepository.Keys.RecoveryPhraseCiphertextBase64,
-                                    encryptedPhrase.ciphertextBase64
-                                )
-                                appPreferencesRepository.setString(
-                                    AppPreferencesRepository.Keys.RecoveryPhraseFormat,
-                                    "four-words-dash-v1"
-                                )
-                            }
-                            appPreferencesRepository.setString(
-                                AppPreferencesRepository.Keys.RecoveryPhraseVerifierScheme,
-                                phraseHash.verifierScheme
-                            )
-                            appPreferencesRepository.setString(
-                                AppPreferencesRepository.Keys.RecoveryPhraseSaltBase64,
-                                phraseHash.saltBase64
-                            )
-                            appPreferencesRepository.setString(
-                                AppPreferencesRepository.Keys.RecoveryPhraseHashBase64,
-                                phraseHash.hashBase64
-                            )
-                            appPreferencesRepository.setString(
-                                AppPreferencesRepository.Keys.RecoveryPhrasePlainText,
-                                ""
-                            )
+                            persistRecoveryPhraseHash(phraseHash)
                         }
                     },
                     onAppLockTimeoutChanged = { minutes ->
@@ -537,7 +500,7 @@ class MainActivity : ComponentActivity() {
                 plannerViewModel.updateDateFormatPreference(preferences.dateFormat)
                 backlogViewPreference = preferences.backlogView
                 backlogSortPreference = preferences.backlogSort
-                plannerViewModel.loadStoredAppLockPin(
+                val repairedRecoveryPhraseHash = plannerViewModel.loadStoredAppLockPin(
                     enabled = preferences.appLockEnabled,
                     biometricEnabled = preferences.biometricUnlockEnabled,
                     saltBase64 = preferences.appLockPinSaltBase64,
@@ -554,6 +517,9 @@ class MainActivity : ComponentActivity() {
                     recoveryPhraseCiphertextBase64 = preferences.recoveryPhraseCiphertextBase64,
                     recoveryPhrasePlainText = preferences.recoveryPhrasePlainText
                 )
+                if (repairedRecoveryPhraseHash != null) {
+                    persistRecoveryPhraseHash(repairedRecoveryPhraseHash)
+                }
                 plannerViewModel.loadSelectedCalendarSources(
                     preferences.selectedCalendarIdsCsv
                         .split(",")
@@ -564,6 +530,48 @@ class MainActivity : ComponentActivity() {
                 refreshCalendarEvents()
             }
         }
+    }
+
+    private suspend fun persistRecoveryPhraseHash(phraseHash: PinHash) {
+        val encryptedPhrase = plannerViewModel.recoveryPhraseEncryptedSecret
+        if (encryptedPhrase != null) {
+            appPreferencesRepository.setString(
+                AppPreferencesRepository.Keys.RecoveryPhraseEncryptionScheme,
+                encryptedPhrase.scheme
+            )
+            appPreferencesRepository.setString(
+                AppPreferencesRepository.Keys.RecoveryPhraseKeyAlias,
+                encryptedPhrase.keyAlias
+            )
+            appPreferencesRepository.setString(
+                AppPreferencesRepository.Keys.RecoveryPhraseNonceBase64,
+                encryptedPhrase.nonceBase64
+            )
+            appPreferencesRepository.setString(
+                AppPreferencesRepository.Keys.RecoveryPhraseCiphertextBase64,
+                encryptedPhrase.ciphertextBase64
+            )
+            appPreferencesRepository.setString(
+                AppPreferencesRepository.Keys.RecoveryPhraseFormat,
+                "four-words-dash-v1"
+            )
+        }
+        appPreferencesRepository.setString(
+            AppPreferencesRepository.Keys.RecoveryPhraseVerifierScheme,
+            phraseHash.verifierScheme
+        )
+        appPreferencesRepository.setString(
+            AppPreferencesRepository.Keys.RecoveryPhraseSaltBase64,
+            phraseHash.saltBase64
+        )
+        appPreferencesRepository.setString(
+            AppPreferencesRepository.Keys.RecoveryPhraseHashBase64,
+            phraseHash.hashBase64
+        )
+        appPreferencesRepository.setString(
+            AppPreferencesRepository.Keys.RecoveryPhrasePlainText,
+            ""
+        )
     }
 
     private fun isBiometricAvailable(): Boolean {

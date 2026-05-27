@@ -78,6 +78,7 @@ testing/
 - Search with `rg` or `rg --files`.
 - For UI work, read `UI_DEVELOPMENT_GUIDE.md` first.
 - For UI positioning, do not guess, eyeball, or tune with arbitrary spacers when two screens or states must match. Shared visual positions must come from one shared layout path, shared wrapper, or measured rendered positions. If wrapper chrome differs, account for the actual wrapper structure instead of compensating by trial and error. Never claim a position is precise when any part of it is estimated.
+- When the owner asks to adjust a UI position, do not use manual guess adjustments. Calculate the exact rendered position or make the compared elements use the same shared layout/component so the end result is visibly the same position to the user. Account for all offsetting UI elements, including titles, wrappers, hidden controls, padding, insets, spacers, button placement, and different parent layouts.
 - Read and edit modes for the same screen must share identical UI positioning and styling unless the owner explicitly asks for a difference. This is not optional. Hiding edit-only controls in read mode must not move other content; reserve the same spacing, columns, row heights, padding, and alignment.
 - For read/edit UI, hiding something is not the same as removing it. Build one shared layout, keep all positioning identical, and make edit-only controls invisible, plain, or disabled in read mode without causing any reflow.
 - For dailyOS parity work, use the folded lessons in `ADD.md` and `UI_DEVELOPMENT_GUIDE.md`.
