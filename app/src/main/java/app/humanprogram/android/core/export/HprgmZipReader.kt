@@ -10,6 +10,7 @@ data class HprgmImportPreview(
     val planningJson: String? = null,
     val appStateJson: String? = null,
     val encryptedPayloadJson: String? = null,
+    val recoveryEncryptedPayloadJson: String? = null,
     val packageFiles: Map<String, String> = emptyMap()
 )
 
@@ -39,6 +40,7 @@ class HprgmZipReader {
         }
 
         val encryptedPayload = contents["encrypted_payload.json"]
+        val recoveryEncryptedPayload = contents["encrypted_recovery_payload.json"]
         if (manifest.contains("\"encrypted\":true")) {
             return HprgmImportPreview(
                 valid = encryptedPayload != null,
@@ -48,7 +50,8 @@ class HprgmZipReader {
                 } else {
                     "Encrypted package is missing encrypted_payload.json."
                 },
-                encryptedPayloadJson = encryptedPayload
+                encryptedPayloadJson = encryptedPayload,
+                recoveryEncryptedPayloadJson = recoveryEncryptedPayload
             )
         }
 

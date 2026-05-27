@@ -2631,7 +2631,7 @@ internal fun ImportScreen(
                 item {
                     HpSettingsContentPage(title = "Import Backup") {
                         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            HpFormTextField("Backup password", viewModel.hprgmExportPassword, viewModel::updateHprgmExportPassword)
+                            HpFormTextField("PIN / password / recovery phrase", viewModel.hprgmExportPassword, viewModel::updateHprgmExportPassword)
                             if (viewModel.hprgmMessage.isNotBlank()) Text(viewModel.hprgmMessage, color = HpColors.muted)
                         }
                     }
@@ -2821,6 +2821,11 @@ internal fun ExportScreen(
                             ExportBullet("Reminders, notification attachments, and calendar state")
                             ExportBullet("App settings, lock settings, and backup metadata")
                         }
+                        HpFormTextField(
+                            label = "PIN / password",
+                            value = viewModel.hprgmExportPassword,
+                            onValueChange = viewModel::updateHprgmExportPassword
+                        )
                         if (viewModel.hprgmMessage.isNotBlank()) Text(viewModel.hprgmMessage, color = HpColors.muted)
                     }
                 }
@@ -2828,8 +2833,11 @@ internal fun ExportScreen(
         }
         Button(
             onClick = {
-                viewModel.updateHprgmExportPassword("")
-                onExportHprgm()
+                if (viewModel.canExportHprgm) {
+                    onExportHprgm()
+                } else {
+                    viewModel.reportHprgmError("Set a PIN or password to export.")
+                }
             },
             modifier = Modifier
                 .align(Alignment.BottomCenter)

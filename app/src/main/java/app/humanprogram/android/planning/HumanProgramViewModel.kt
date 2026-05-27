@@ -306,6 +306,9 @@ class HumanProgramViewModel(
     var hprgmIncludeGameSave by mutableStateOf(false)
         private set
 
+    val canExportHprgm: Boolean
+        get() = appLockEnabled && appLockPinHash != null
+
     private var hprgmExportAppState: HprgmAppState = HprgmAppState()
     private var hprgmExportPrivateFiles: Map<String, String> = emptyMap()
 
@@ -2464,35 +2467,48 @@ class HumanProgramViewModel(
     }
 
     fun writeHprgmExport(outputStream: OutputStream) {
+        val exportCredential = hprgmExportPassword.trim()
+        val credentialHash = appLockPinHash
+        if (!appLockEnabled || credentialHash == null) {
+            hprgmMessage = "Set a PIN or password to export."
+            return
+        }
+        if (exportCredential.isBlank()) {
+            hprgmMessage = enterCredentialMessage()
+            return
+        }
+        if (!pinHashService.verify(exportCredential, credentialHash)) {
+            hprgmMessage = if (appLockCredentialType == SecurityCredentialType.PIN) {
+                "PIN rejected."
+            } else {
+                "Password rejected."
+            }
+            return
+        }
+
         val basePackage = hprgmExportBuilder.build(
             snapshot = snapshotForPersistence(),
             appState = hprgmExportAppState,
             privateFiles = hprgmExportPrivateFiles,
             includeGameData = hprgmIncludeGameSave
         )
-        val exportPackage = if (hprgmExportPassword.isNotBlank()) {
-            runCatching {
-                hprgmEncryptionService.encryptPackage(
-                    exportPackage = basePackage,
-                    password = hprgmExportPassword,
-                    includeGameData = hprgmIncludeGameSave
-                )
-            }.getOrElse {
-                hprgmMessage = it.message ?: "Export encryption failed."
-                return
-            }
-        } else {
-            basePackage
+        val exportPackage = runCatching {
+            hprgmEncryptionService.encryptPackage(
+                exportPackage = basePackage,
+                password = exportCredential,
+                recoveryPhrase = exportRecoveryPhrase(),
+                includeGameData = hprgmIncludeGameSave
+            )
+        }.getOrElse {
+            hprgmMessage = it.message ?: "Export encryption failed."
+            return
         }
         hprgmZipWriter.write(
             exportPackage = exportPackage,
             outputStream = outputStream
         )
-        hprgmMessage = if (hprgmExportPassword.isBlank()) {
-            ".hprgm export saved."
-        } else {
-            "Encrypted .hprgm export saved."
-        }
+        hprgmExportPassword = ""
+        hprgmMessage = "Encrypted .hprgm export saved."
     }
 
     fun previewHprgmImport(inputStream: InputStream) {
@@ -2503,12 +2519,13 @@ class HumanProgramViewModel(
                 pendingHprgmImportAppState = null
                 pendingHprgmImportPrivateFiles = emptyMap()
                 hasPendingHprgmImport = false
-                hprgmMessage = "Import preview needs the export password."
+                hprgmMessage = "Enter the backup PIN, password, or recovery phrase."
                 return
             }
             runCatching {
                 hprgmEncryptionService.decryptPackageFiles(
                     encryptedPayloadJson = preview.encryptedPayloadJson,
+                    recoveryEncryptedPayloadJson = preview.recoveryEncryptedPayloadJson,
                     password = hprgmExportPassword
                 )
             }.getOrElse {
@@ -2556,6 +2573,12 @@ class HumanProgramViewModel(
             hasPendingHprgmImport = false
             "Import preview failed: ${preview.message}"
         }
+    }
+
+    private fun exportRecoveryPhrase(): String? {
+        generatedRecoveryPhrase.takeIf { it.isFourWordRecoveryPhrase() }?.let { return it }
+        decryptRecoveryPhrase()?.takeIf { it.isFourWordRecoveryPhrase() }?.let { return it }
+        return revealRecoveryPhrase()?.phrase?.takeIf { it.isFourWordRecoveryPhrase() }
     }
 
     fun applyPendingHprgmImport(): HprgmImportApplyResult? {

@@ -20,34 +20,83 @@ class HprgmEncryptionService(
     fun encryptPackage(
         exportPackage: HprgmExportPackage,
         password: String,
+        recoveryPhrase: String?,
         includeGameData: Boolean
     ): HprgmExportPackage {
-        require(password.length >= MIN_PASSWORD_LENGTH) {
-            "Export password must be at least $MIN_PASSWORD_LENGTH characters."
-        }
+        require(password.isNotBlank()) { "Enter your PIN or password to export." }
 
         val payload = encrypt(
             plainText = exportPackage.files.toCanonicalJson(),
             password = password
         )
+        val recoveryPayload = recoveryPhrase
+            ?.takeIf { it.isNotBlank() }
+            ?.let { phrase ->
+                encrypt(
+                    plainText = exportPackage.files.toCanonicalJson(),
+                    password = phrase.trim().lowercase()
+                )
+            }
         val manifest = """
             {"format":"hprgm","schemaVersion":1,"encrypted":true,"includesGameData":$includeGameData}
         """.trimIndent()
 
         return HprgmExportPackage(
-            files = mapOf(
-                "manifest.json" to manifest,
-                "encrypted_payload.json" to payload.toJson()
-            )
+            files = buildMap {
+                put("manifest.json", manifest)
+                put("encrypted_payload.json", payload.toJson())
+                if (recoveryPayload != null) {
+                    put("encrypted_recovery_payload.json", recoveryPayload.toJson())
+                }
+            }
         )
+    }
+
+    fun encryptPackage(
+        exportPackage: HprgmExportPackage,
+        password: String,
+        includeGameData: Boolean
+    ): HprgmExportPackage {
+        return encryptPackage(
+            exportPackage = exportPackage,
+            password = password,
+            recoveryPhrase = null,
+            includeGameData = includeGameData
+        )
+    }
+
+    fun decryptPackageFiles(
+        encryptedPayloadJson: String,
+        recoveryEncryptedPayloadJson: String?,
+        password: String
+    ): Map<String, String> {
+        require(password.isNotBlank()) { "Enter the backup PIN, password, or recovery phrase." }
+
+        val normalizedPassword = password.trim()
+        val attempts = listOfNotNull(
+            encryptedPayloadJson to normalizedPassword,
+            recoveryEncryptedPayloadJson?.let { it to normalizedPassword.lowercase() }
+        )
+        var lastError: Throwable? = null
+        attempts.forEach { (payloadJson, credential) ->
+            runCatching {
+                return decryptPackageFiles(
+                    encryptedPayloadJson = payloadJson,
+                    password = credential
+                )
+            }.onFailure {
+                lastError = it
+            }
+        }
+        throw lastError ?: IllegalArgumentException("Import password was not accepted.")
     }
 
     fun decryptPackageFiles(
         encryptedPayloadJson: String,
         password: String
     ): Map<String, String> {
-        require(password.length >= MIN_PASSWORD_LENGTH) {
-            "Import password must be at least $MIN_PASSWORD_LENGTH characters."
+        require(password.isNotBlank()) {
+            "Enter the backup PIN, password, or recovery phrase."
         }
 
         val payload = encryptedPayloadJson.parseJsonStringMap()
@@ -213,7 +262,6 @@ class HprgmEncryptionService(
     }
 
     companion object {
-        const val MIN_PASSWORD_LENGTH = 8
         private const val SALT_SIZE_BYTES = 16
         private const val IV_SIZE_BYTES = 12
         private const val KEY_SIZE_BITS = 256

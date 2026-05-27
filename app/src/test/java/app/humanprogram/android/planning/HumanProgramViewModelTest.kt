@@ -5,6 +5,8 @@ import app.humanprogram.android.core.notifications.NotificationScheduleRecurrenc
 import app.humanprogram.android.core.security.EncryptedSecret
 import app.humanprogram.android.core.security.SecretEncryptor
 import app.humanprogram.android.core.security.SecurityCredentialType
+import app.humanprogram.android.core.export.HprgmEncryptionService
+import app.humanprogram.android.core.export.HprgmZipReader
 import app.humanprogram.android.planning.model.DailyTaskSourceType
 import app.humanprogram.android.planning.model.NotificationReminder
 import app.humanprogram.android.planning.model.ReminderRecurrence
@@ -13,6 +15,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -528,6 +532,48 @@ class HumanProgramViewModelTest {
 
         assertTrue(accepted)
         assertFalse(viewModel.securitySettingsUnlocked)
+    }
+
+    @Test
+    fun hprgmExportRequiresPinOrPassword() {
+        val viewModel = HumanProgramViewModel(secretEncryptor = FakeSecretEncryptor())
+
+        viewModel.writeHprgmExport(ByteArrayOutputStream())
+
+        assertEquals("Set a PIN or password to export.", viewModel.hprgmMessage)
+    }
+
+    @Test
+    fun hprgmExportIsEncryptedWithPinAndRecoveryPhrase() {
+        val exporter = HumanProgramViewModel(secretEncryptor = FakeSecretEncryptor())
+        exporter.updateAppLockPinInput("1234")
+        exporter.updateAppLockPinConfirmInput("1234")
+        exporter.setupAppLockCredentialWithConfirmation()
+        val recoveryPhrase = exporter.generatedRecoveryPhrase
+        exporter.updateNewTaskTitle("Private task")
+        exporter.addManualTask()
+        exporter.updateHprgmExportPassword("1234")
+        val bytes = ByteArrayOutputStream()
+
+        exporter.writeHprgmExport(bytes)
+
+        val exportedText = bytes.toByteArray().toString(Charsets.UTF_8)
+        assertFalse(exportedText.contains("Private task"))
+        assertEquals("Encrypted .hprgm export saved.", exporter.hprgmMessage)
+
+        val preview = HprgmZipReader().preview(ByteArrayInputStream(bytes.toByteArray()))
+        val pinFiles = HprgmEncryptionService().decryptPackageFiles(
+            encryptedPayloadJson = preview.encryptedPayloadJson!!,
+            recoveryEncryptedPayloadJson = preview.recoveryEncryptedPayloadJson,
+            password = "1234"
+        )
+        val recoveryFiles = HprgmEncryptionService().decryptPackageFiles(
+            encryptedPayloadJson = preview.encryptedPayloadJson,
+            recoveryEncryptedPayloadJson = preview.recoveryEncryptedPayloadJson,
+            password = recoveryPhrase
+        )
+        assertTrue(pinFiles.getValue("planning.json").contains("Private task"))
+        assertTrue(recoveryFiles.getValue("planning.json").contains("Private task"))
     }
 
     @Test

@@ -48,4 +48,27 @@ class HprgmEncryptionServiceTest {
         assertTrue(files.getValue("planning.json").contains("\"todayTasks\""))
         assertEquals("{\"format\":\"hprgm\"}", files.getValue("manifest.json"))
     }
+
+    @Test
+    fun encryptedPackageCanAlsoBeDecryptedWithRecoveryPhrase() {
+        val encrypted = service.encryptPackage(
+            exportPackage = HprgmExportPackage(
+                files = mapOf(
+                    "manifest.json" to "{\"format\":\"hprgm\"}",
+                    "planning.json" to "{\"todayTasks\":[],\"backlogItems\":[],\"exerciseRoutine\":{}}"
+                )
+            ),
+            password = "1234",
+            recoveryPhrase = "anchor-bright-cedar-dawn",
+            includeGameData = false
+        )
+
+        val files = service.decryptPackageFiles(
+            encryptedPayloadJson = encrypted.files.getValue("encrypted_payload.json"),
+            recoveryEncryptedPayloadJson = encrypted.files.getValue("encrypted_recovery_payload.json"),
+            password = "anchor-bright-cedar-dawn"
+        )
+
+        assertTrue(files.getValue("planning.json").contains("\"todayTasks\""))
+    }
 }
